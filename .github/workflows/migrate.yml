@@ -1,0 +1,72 @@
+name: Migrate (zserver)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  migrate:
+    # Verifies that `zserver migrate` applies every server/migrations/*.up.sql
+    # against a fresh Postgres and stays idempotent on a second run. This
+    # exercises the same code path CI uses for the Go server, but for the Zig
+    # rewrite that depends on zfinal/zcli via zig_ws/zfinal.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Zig
+        # The project targets Zig 0.17.0-dev.813+2153f8143. zigup uses the
+        # `zigup` shorthand `0.17.0-dev.813+2153f8143` if the upstream index has
+        # it; otherwise it falls back to `latest`, which is still a 0.17-dev
+        # nightly and compatible with the source. Tighten this once a stable
+        # 0.17 release ships.
+        run: |
+          set -euo pipefail
+          if ! command -v zigup > /dev/null 2>&1; then
+            echo "==> installing zigup"
+            curl -L --retry 5 --retry-delay 2 -o /tmp/zigup \
+              https://github.com/marlonrichert/zigup/releases/latest/download/zigup-x86_64-linux
+            install -m 0755 /tmp/zigup /usr/local/bin/zigup
+          fi
+          if ! zigup 0.17.0-dev.813+2153f8143 2>/dev/null; then
+            echo "==> exact pin unavailable; falling back to latest 0.17-dev"
+            zigup latest
+          fi
+
+      - name: Show Zig version
+        run: zig version
+
+      - name: Build
+        # libpq headers are required by build.zig (pq C shim).
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpq-dev
+          cd zserver
+          zig build
+
+      - name: Run migrations
+        working-directory: zserver
+        run: ./scripts/db-migrate.sh
+
+      - name: Re-run migrations (idempotency check)
+        working-directory: zserver
+        run: ./scripts/db-migrate.sh

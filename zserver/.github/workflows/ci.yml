@@ -1,0 +1,415 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'zserver/**'
+      - 'zserver/Makefile'
+      - 'zserver/scripts/**'
+      - 'docker-compose.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'zserver/**'
+      - 'zserver/Makefile'
+      - 'zserver/scripts/**'
+      - 'docker-compose.yml'
+  # Allow operators to re-run the PR-body changelog workflow with a
+  # custom limit (e.g. when an external review tool pushes the body
+  # close to GitHub's 65536-char hard cap). The default keeps the
+  # historical behaviour so existing ad-hoc runs are unchanged.
+  workflow_dispatch:
+    inputs:
+      pr_body_limit:
+        description: 'Override PR body size limit (chars) used by the changelog append step.'
+        type: string
+        default: '60000'
+        required: false
+
+# Reuse CI concurrency group so PRs cancel in-progress duplicates.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Workflow-level default for the PR body size limit. Job-level `env:`
+# below overrides this when `workflow_dispatch` is used so the
+# `pr_body_limit` input wins; for `push` / `pull_request` runs the
+# repo variable (when defined) is preferred, falling back to the
+# historical 60000-char hard cap.
+env:
+  PR_BODY_LIMIT: ${{ vars.PR_BODY_LIMIT || '60000' }}
+
+# Minimal token scopes for `actions/github-script@v7` posting/updating
+# PR comments via the GitHub REST API, and the default GITHUB_TOKEN.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ci:
+    # Exercises the Makefile targets end-to-end: `make db-up` brings up a
+    # Postgres container via docker compose, `make db-migrate` applies the
+    # SQL migrations (and is verified idempotent by re-running it), then
+    # `make check` runs `zig build && zig build test`. Mirrors the
+    # dev-machine workflow so we catch regressions in the Makefile and
+    # shell scripts before they break onboarding.
+    runs-on: ubuntu-latest
+    services:
+      # pgvector service container — same image as the Go backend CI and
+      # the zserver migrate workflow. Exposes the configured DATABASE_URL
+      # (postgres://multica:multica@localhost:5432/multica?sslmode=disable)
+      # so `make db-migrate` against the local-compose stack and the
+      # service container here use identical credentials.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # zigup installs into ~/.local/bin; prepend it to PATH.
+      PATH: ${{ env.PATH }}:${{ github.workspace }}/.zigup/bin
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      # PR body size guard. The workflow_dispatch `pr_body_limit` input
+      # wins when present; otherwise we fall back to the repo variable
+      # and finally to the historical 60000-char hard cap. `inputs.pr_body_limit`
+      # resolves to an empty string on push / pull_request runs, which
+      # is treated as falsy by the `||` chain.
+      PR_BODY_LIMIT: ${{ inputs.pr_body_limit || vars.PR_BODY_LIMIT || '60000' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Zig 0.17.0-dev.813
+        # Pinned to match the local development toolchain.
+        run: |
+          mkdir -p .zigup/bin
+          curl -fsSL https://raw.githubusercontent.com/marlonrichie/zigup/master/install.sh \
+            | bash -s -- --prefix "${GITHUB_WORKSPACE}/.zigup"
+          "${GITHUB_WORKSPACE}/.zigup/bin/zigup" install 0.17.0-dev.813+2153f8143
+          "${GITHUB_WORKSPACE}/.zigup/bin/zigup" default 0.17.0-dev.813+2153f8143
+          zig version
+
+      - name: Cache libpq + zig build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/zig
+            zserver/.zig-cache
+            /usr/local/lib/libpq*
+          key: zig-ci-${{ hashFiles('zserver/build.zig', 'zserver/build.zig.zon', 'zserver/src/**/*.zig', 'zserver/Makefile') }}
+          restore-keys: |
+            zig-ci-
+
+      - name: Install libpq headers (Postgres client lib)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev
+
+      - name: Run make ci (timed, with idempotent re-migrate)
+        # `make ci` is db-up (best-effort) -> db-migrate -> check. The
+        # db-up target prints a "docker not available, skipping" message
+        # and keeps going if docker is missing, so the no-DB fallback
+        # path is still verified. We time each step and append status
+        # markers (used by scripts/ci-report.sh) so the PR comment can
+        # render a tidy table. zig build, zig build test, and make
+        # db-migrate outputs are captured into build.log / test.log /
+        # migrate.log so the report can render them as collapsible
+        # code blocks.
+        working-directory: zserver
+        run: |
+          set -o pipefail
+          rm -f ci-timings.log build.log test.log migrate.log
+
+          {
+            echo "==> make ci: starting at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "==> -- db-up --"
+            if { /usr/bin/time -v make db-up; } >> ci-timings.log 2>&1; then
+              echo "dbup=ok" >> ci-timings.log
+            else
+              echo "dbup=fail" >> ci-timings.log
+            fi
+
+            echo "==> -- db-migrate --"
+            # db-migrate output goes to migrate.log (last 20 lines are
+            # rendered by the report) in addition to the timings log.
+            if { /usr/bin/time -v make db-migrate; } >> migrate.log 2>&1; then
+              cat migrate.log >> ci-timings.log
+              echo "migrate=ok" >> ci-timings.log
+            else
+              cat migrate.log >> ci-timings.log
+              echo "migrate=fail" >> ci-timings.log
+            fi
+
+            echo "==> -- db-migrate (re-run, idempotency) --"
+            # Append the idempotent re-run output to migrate.log so the
+            # report can show the user that no new APPLY lines were
+            # produced.
+            if { /usr/bin/time -v make db-migrate; } >> migrate.log 2>&1; then
+              cat migrate.log >> ci-timings.log
+              echo "remigrate=ok" >> ci-timings.log
+            else
+              cat migrate.log >> ci-timings.log
+              echo "remigrate=fail" >> ci-timings.log
+            fi
+
+            echo "==> -- check (zig build && zig build test) --"
+            # zig build output goes to build.log and zig build test
+            # output goes to test.log so the report can show them as
+            # collapsible blocks. The build log is also included in the
+            # timings log so time -v captures the elapsed time and
+            # resident set size correctly.
+            if { /usr/bin/time -v bash -c 'zig build 2> build.log'; } >> ci-timings.log 2>&1; then
+              BUILD_RC=0
+            else
+              BUILD_RC=$?
+            fi
+            if [ $BUILD_RC -eq 0 ] && { /usr/bin/time -v bash -c 'zig build test 2> test.log'; } >> ci-timings.log 2>&1; then
+              echo "build=ok" >> ci-timings.log
+            else
+              echo "build=fail" >> ci-timings.log
+            fi
+            echo "==> make ci: done at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } || true
+
+          # Always generate the report, even on failure. The script
+          # degrades gracefully when one or more logs are missing so a
+          # partially-rendered report is still useful for debugging.
+          BUILD_LOG="$PWD/build.log" \
+          TEST_LOG="$PWD/test.log" \
+          MIGRATE_LOG="$PWD/migrate.log" \
+          PR_NUMBER="${{ github.event.pull_request.number }}" \
+          COMMIT_SHA="${{ github.sha }}" \
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          bash scripts/ci-report.sh
+          cat ci-report.md
+          echo "REPORT_END"
+          # Surface the timings + captured logs in the workflow log too.
+          echo "---- ci-timings.log ----"
+          cat ci-timings.log
+          echo "---- build.log ----"
+          cat build.log 2>/dev/null || echo "(no build.log)"
+          echo "---- test.log ----"
+          cat test.log 2>/dev/null || echo "(no test.log)"
+          echo "---- migrate.log ----"
+          cat migrate.log 2>/dev/null || echo "(no migrate.log)"
+
+      - name: Post PR comment / write job summary
+        # When this is a PR, post the rendered Markdown as a single comment
+        # on the PR (updating the previous bot comment when one exists).
+        # Otherwise (push to main, workflow_dispatch, etc.) the script
+        # writes the report to the Actions job summary via core.summary,
+        # which is the durable record. The `if: always()` ensures the
+        # comment is still posted when a downstream step failed, so a
+        # red ❌ in the table is visible directly on the PR.
+        #
+        # Changelog wiring: on every run we resolve the commit short SHA
+        # and subject via `github.rest.repos.getCommit`. The result is
+        # rendered as a one-line `Changelog: <short-sha> <subject>`
+        # header at the top of the comment body (so reviewers can see
+        # which commit produced the report) and, on PR events, is
+        # appended to the PR body as a `* <short-sha> <subject>` bullet
+        # under a `<!-- zserver-changelog: <short-sha> -->` marker.
+        # The marker keeps the append idempotent — re-runs (or pushes
+        # to the same head SHA) never duplicate the line. The
+        # marker is also stable enough that we can find / strip it
+        # later if we need to roll a changelog section back.
+        #
+        # We always set process.env.PR_NUMBER / process.env.COMMIT_SHA
+        # from the github context so any child tooling spawned from
+        # this step (or downstream steps that read these env vars) sees
+        # a consistent value: the real PR number / SHA on PR runs and
+        # the run id / SHA fallback otherwise.
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          CI_REPORT: ${{ github.workspace }}/zserver/ci-report.md
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = process.env.CI_REPORT;
+            if (!reportPath || !fs.existsSync(reportPath)) {
+              core.info('ci-report.md missing; nothing to post.');
+              return;
+            }
+            const body = fs.readFileSync(reportPath, 'utf8');
+
+            // Validate PR_BODY_LIMIT up-front so a typo (e.g. an empty
+            // string set explicitly, or `1e3` which `parseInt` rejects)
+            // can't silently slip past the limit and cause GitHub to
+            // reject the PR-body update. When the env var is absent or
+            // the empty string we fall back to the historical 60000-char
+            // hard cap so existing ad-hoc runs are unaffected. When it
+            // IS set but is not a positive integer, hard-fail the step
+            // and skip the rest of the script (no comment, no summary).
+            const limitRaw = process.env.PR_BODY_LIMIT || '';
+            if (limitRaw !== '') {
+              const parsed = Number.parseInt(limitRaw, 10);
+              if (!Number.isFinite(parsed) || parsed <= 0 || String(parsed) !== limitRaw.trim()) {
+                core.setFailed(
+                  'PR_BODY_LIMIT is not a positive integer: ' + process.env.PR_BODY_LIMIT
+                );
+                return;
+              }
+            }
+
+            // Expose PR_NUMBER + COMMIT_SHA so any tool downstream of
+            // this step (or scripts/ci-report.sh on subsequent runs)
+            // sees stable values derived from the github context.
+            process.env.PR_NUMBER = String(
+              context.payload.pull_request?.number ?? context.runId
+            );
+            process.env.COMMIT_SHA = context.sha;
+
+            // Resolve the commit short SHA + subject for the changelog
+            // header. We swallow API errors (network blips, missing
+            // token scope on forks, etc.) and fall back to `context.sha`
+            // with a generic subject so the rest of the step still
+            // completes.
+            const { owner, repo } = context.repo;
+            let shortSha = context.sha.substring(0, 7);
+            let subject = '(no subject)';
+            try {
+              const { data: commit } = await github.rest.repos.getCommit({
+                owner,
+                repo,
+                ref: context.sha,
+              });
+              if (commit && commit.sha) {
+                shortSha = String(commit.sha).substring(0, 7);
+              }
+              if (commit && commit.commit && typeof commit.commit.message === 'string') {
+                // Commit messages are usually multi-line; we want the
+                // first line only so the changelog line stays terse.
+                const firstLine = commit.commit.message.split('\n', 1)[0];
+                subject = firstLine.trim() || '(no subject)';
+              }
+            } catch (err) {
+              core.warning(
+                `Failed to resolve commit metadata for ${context.sha}: ${err}. ` +
+                  'Falling back to context.sha + placeholder subject.'
+              );
+            }
+            const changelogLine = `Changelog: ${shortSha} ${subject}`;
+
+            // Stable marker so we can find and update an existing bot
+            // comment on re-runs instead of spamming the PR with new
+            // comments every push.
+            const MARKER = '<!-- zserver-ci -->';
+            const taggedBody = `${MARKER}\n${changelogLine}\n\n${body}`;
+
+            if (context.eventName === 'pull_request' && context.payload.pull_request) {
+              const prNumber = context.payload.pull_request.number;
+
+              // PR-body changelog append: only when running on a PR
+              // (so push-to-main / workflow_dispatch don't disturb the
+              // canonical description) and only when the current short
+              // SHA isn't already in the body. We use the existing
+              // `body` field as the dup-detection source so a
+              // round-tripped re-run never duplicates a bullet.
+              try {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: prNumber,
+                });
+                const currentBody = typeof pr.body === 'string' ? pr.body : '';
+                const bullet = `* ${shortSha} ${subject}`;
+                const dupMarker = `<!-- zserver-changelog: ${shortSha} -->`;
+                if (!currentBody.includes(shortSha) && !currentBody.includes(dupMarker)) {
+                  const sep = currentBody.length === 0
+                    ? ''
+                    : (currentBody.endsWith('\n') ? '\n' : '\n\n');
+                  const append = `${sep}${bullet}\n${dupMarker}\n`;
+                  // GitHub rejects PR bodies over 65536 chars; we cap at
+                  // the configurable PR_BODY_LIMIT (default 60000) so
+                  // we always stay comfortably under the hard limit
+                  // and so we skip the append (instead of truncating
+                  // the description) when a PR body has already grown
+                  // huge. The limit is resolved from the job env so a
+                  // `workflow_dispatch` run with the `pr_body_limit`
+                  // input (or a repo variable override) can bump it
+                  // without editing this script. Validation happens at
+                  // the top of the script: an invalid PR_BODY_LIMIT
+                  // causes the step to fail and no comment is posted.
+                  // Comment-posting below is untouched.
+                  const LIMIT = Number.parseInt(process.env.PR_BODY_LIMIT || '60000', 10);
+                  const projected = (currentBody.length + append.length);
+                  if (projected > LIMIT) {
+                    core.warning(
+                      `PR body would exceed ${LIMIT} chars ` +
+                      `(currently ${currentBody.length}, append ${append.length}); ` +
+                      `skipping changelog append.`
+                    );
+                  } else {
+                    await github.rest.pulls.update({
+                      owner,
+                      repo,
+                      pull_number: prNumber,
+                      body: currentBody + append,
+                    });
+                    core.info(
+                      `Appended changelog bullet for ${shortSha} to PR #${prNumber} body.`
+                    );
+                  }
+                } else {
+                  core.info(
+                    `Changelog bullet for ${shortSha} already present on PR #${prNumber}; skipping.`
+                  );
+                }
+              } catch (err) {
+                core.warning(
+                  `Failed to append changelog to PR #${prNumber} body: ${err}.`
+                );
+              }
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: prNumber,
+                per_page: 100,
+              });
+              const existing = comments.find((c) =>
+                typeof c.body === 'string' && c.body.includes(MARKER)
+              );
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existing.id,
+                  body: taggedBody,
+                });
+                core.info(
+                  `Updated existing bot comment ${existing.id} on PR #${prNumber}.`
+                );
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body: taggedBody,
+                });
+                core.info(`Posted new bot comment on PR #${prNumber}.`);
+              }
+            } else {
+              // No PR — render the report into the job summary so it
+              // is still durable in the Actions UI. The summary gets
+              // the same `Changelog:` header so the run is still
+              // identifiable from the Actions UI alone.
+              const summaryBody = `## ${changelogLine}\n\n${body}`;
+              await core.summary
+                .addRaw(
+                  `## zserver CI report (no PR; logged to job summary)\n\n${summaryBody}`,
+                  true
+                )
+                .write();
+              core.info('Wrote ci-report.md to $GITHUB_STEP_SUMMARY.');
+            }

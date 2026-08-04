@@ -1,0 +1,16 @@
+{
+  "extends": "@1person/tsconfig/react-library.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "paths": {}
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
