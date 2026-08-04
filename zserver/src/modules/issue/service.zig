@@ -193,7 +193,8 @@ pub fn listIssues(ctx: *zfinal.Context) !void {
             offset,
         );
         defer allocator.free(items);
-        try response.ok(ctx, items);
+        const total = try model.countIssuesWithFilters(allocator, workspace_id, state_filter, project_filter, assignee_filter);
+        try response.ok(ctx, .{ .issues = items, .total = total });
         return;
     }
 
@@ -206,11 +207,13 @@ pub fn listIssues(ctx: *zfinal.Context) !void {
     var it = model.mem_issues.?.iterator();
     var skipped: u32 = 0;
     var emitted: u32 = 0;
+    var total: u32 = 0;
     while (it.next()) |e| {
         const entry = e.value_ptr.*;
         if (state_filter) |s| if (s.len > 0 and !std.mem.eql(u8, entry.state, s)) continue;
         if (project_filter) |p| if (p.len > 0 and !std.mem.eql(u8, entry.project_id, p)) continue;
         if (assignee_filter) |a| if (a.len > 0 and !std.mem.eql(u8, entry.assignee_id, a)) continue;
+        total += 1;
         if (skipped < offset) {
             skipped += 1;
             continue;
@@ -219,7 +222,7 @@ pub fn listIssues(ctx: *zfinal.Context) !void {
         emitted += 1;
         try list.append(allocator, model.issueResponseFromEntry(entry));
     }
-    try response.ok(ctx, list.items);
+    try response.ok(ctx, .{ .issues = list.items, .total = total });
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -247,7 +250,8 @@ pub fn searchIssues(ctx: *zfinal.Context) !void {
     if (deps.hasPool()) {
         const items = try model.searchIssuesByText(allocator, workspace_id, q, limit);
         defer allocator.free(items);
-        try response.ok(ctx, items);
+        const total = try model.countSearchIssues(workspace_id, q);
+        try response.ok(ctx, .{ .issues = items, .total = total });
         return;
     }
 
@@ -261,15 +265,17 @@ pub fn searchIssues(ctx: *zfinal.Context) !void {
     defer list.deinit(allocator);
     var it = model.mem_issues.?.iterator();
     var emitted: u32 = 0;
+    var total: u32 = 0;
     while (it.next()) |e| {
-        if (emitted >= limit) break;
         const entry = e.value_ptr.*;
         if (!containsIgnoreCase(entry.title, q) and
             !containsIgnoreCase(entry.description, q)) continue;
+        total += 1;
+        if (emitted >= limit) break;
         emitted += 1;
         try list.append(allocator, model.issueResponseFromEntry(entry));
     }
-    try response.ok(ctx, list.items);
+    try response.ok(ctx, .{ .issues = list.items, .total = total });
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -515,7 +521,7 @@ pub fn listChildrenByParents(ctx: *zfinal.Context) !void {
             const ids = [_][]const u8{single_parent};
             const items = try model.listChildrenByParents(allocator, workspace_id, &ids);
             defer allocator.free(items);
-            try response.ok(ctx, items);
+            try response.ok(ctx, .{ .issues = items });
             return;
         }
         try response.err(ctx, .bad_request, "parent_id is required", 40046);
@@ -533,7 +539,7 @@ pub fn listChildrenByParents(ctx: *zfinal.Context) !void {
     var list: std.ArrayList(model.IssueResponse) = .empty;
     defer list.deinit(allocator);
     for (children) |c| try list.append(allocator, model.issueResponseFromEntry(c));
-    try response.ok(ctx, list.items);
+    try response.ok(ctx, .{ .issues = list.items });
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -956,59 +962,190 @@ pub fn rerun(ctx: *zfinal.Context) !void {
     try response.ok(ctx, .{ .data = reset });
 }
 
+/// `GET /api/issues/child-progress` — per-parent progress across the
+/// whole workspace. Mirrors the Go `ChildIssueProgress` handler:
+/// response is `{progress: [{parent_issue_id, total, done}]}`.
 pub fn childProgress(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
-    const issue_id = try response.parseStringId(ctx, "id");
-    const children = try model.memListChildren(allocator, issue_id);
-    defer allocator.free(children);
-    var total: u32 = 0;
-    var open: u32 = 0;
-    var in_progress: u32 = 0;
-    var done: u32 = 0;
-    for (children) |child| {
-        total += 1;
-        if (std.mem.eql(u8, child.state, "open")) open += 1
-        else if (std.mem.eql(u8, child.state, "in_progress")) in_progress += 1
-        else if (std.mem.eql(u8, child.state, "done") or std.mem.eql(u8, child.state, "closed")) done += 1;
+    const workspace_id = try requireWorkspaceId(ctx);
+
+    if (deps.hasPool()) {
+        const db = model.borrowDb() orelse {
+            try response.ok(ctx, .{ .progress = &[_]model.ChildProgressEntry{} });
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT parent_issue_id::text, COUNT(*)::bigint AS total, " ++
+                "COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done " ++
+                "FROM issue WHERE workspace_id = $1::uuid AND parent_issue_id IS NOT NULL " ++
+                "GROUP BY parent_issue_id",
+            &[_]zfinal.SqlParam{.{ .text = workspace_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.ChildProgressEntry) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            const total = std.fmt.parseInt(i64, row.getText(1) orelse "0", 10) catch 0;
+            const done = std.fmt.parseInt(i64, row.getText(2) orelse "0", 10) catch 0;
+            try list.append(allocator, .{
+                .parent_issue_id = row.getText(0) orelse "",
+                .total = total,
+                .done = done,
+            });
+        }
+        try response.ok(ctx, .{ .progress = list.items });
+        return;
     }
-    try response.ok(ctx, .{
-        .issue_id = issue_id,
-        .total = total,
-        .open = open,
-        .in_progress = in_progress,
-        .done = done,
-    });
+
+    // No-DB fallback: group the in-memory issues by parent.
+    try model.memInit();
+    try model.mem_mutex.lock(zfinal.io_instance.io);
+    defer model.mem_mutex.unlock(zfinal.io_instance.io);
+    var per_parent = std.StringHashMap(model.ChildProgressEntry).init(model.memAlloc());
+    defer per_parent.deinit();
+    var it = model.mem_issues.?.iterator();
+    while (it.next()) |e| {
+        const parent = e.value_ptr.*.parent_id;
+        if (parent.len == 0) continue;
+        const gop = per_parent.getOrPut(parent) catch continue;
+        if (!gop.found_existing) {
+            gop.value_ptr.* = .{ .parent_issue_id = parent, .total = 0, .done = 0 };
+        }
+        gop.value_ptr.*.total += 1;
+        if (std.mem.eql(u8, e.value_ptr.*.state, "done") or
+            std.mem.eql(u8, e.value_ptr.*.state, "cancelled")) gop.value_ptr.*.done += 1;
+    }
+    var list: std.ArrayList(model.ChildProgressEntry) = .empty;
+    defer list.deinit(model.memAlloc());
+    var pit = per_parent.iterator();
+    while (pit.next()) |kv| try list.append(model.memAlloc(), kv.value_ptr.*);
+    try response.ok(ctx, .{ .progress = list.items });
+}
+
+/// Per-lane accumulator used while grouping. Keeps issues in an
+/// `ArrayList` (slices can't be appended) and only materializes the
+/// wire shape at the end.
+const GroupAccum = struct {
+    id: []const u8,
+    assignee_type: ?[]const u8,
+    assignee_id: ?[]const u8,
+    issues: std.ArrayList(model.IssueResponse),
+    total: i64,
+};
+
+/// Shared swimlane grouping: bucket `IssueResponse` rows by
+/// `(assignee_type, assignee_id)`, emitting the Go-compatible group
+/// shape (`id = "assignee:<type>:<uuid>"` or `"assignee:unassigned"`).
+/// Rows whose `assignee_type`/`assignee_id` slices are empty are
+/// grouped under the unassigned lane.
+fn groupIssuesByAssignee(
+    allocator: std.mem.Allocator,
+    items: []model.IssueResponse,
+) !model.GroupedIssuesResponse {
+    var accs: std.ArrayList(GroupAccum) = .empty;
+    defer {
+        for (accs.items) |*a| a.issues.deinit(allocator);
+        accs.deinit(allocator);
+    }
+    var index = std.StringHashMap(usize).init(allocator);
+    defer index.deinit();
+
+    for (items) |item| {
+        const has_assignee = item.assignee_type != null and item.assignee_id != null and
+            item.assignee_type.?.len > 0 and item.assignee_id.?.len > 0;
+        const key = if (has_assignee)
+            try std.fmt.allocPrint(allocator, "{s}:{s}", .{ item.assignee_type.?, item.assignee_id.? })
+        else
+            try allocator.dupe(u8, "unassigned");
+        defer allocator.free(key);
+
+        const gop = try index.getOrPut(key);
+        if (!gop.found_existing) {
+            const id = if (has_assignee)
+                try std.fmt.allocPrint(allocator, "assignee:{s}:{s}", .{ item.assignee_type.?, item.assignee_id.? })
+            else
+                try allocator.dupe(u8, "assignee:unassigned");
+            const acc = GroupAccum{
+                .id = id,
+                .assignee_type = if (has_assignee) try allocator.dupe(u8, item.assignee_type.?) else null,
+                .assignee_id = if (has_assignee) try allocator.dupe(u8, item.assignee_id.?) else null,
+                .issues = .empty,
+                .total = 0,
+            };
+            try accs.append(allocator, acc);
+            gop.value_ptr.* = accs.items.len - 1;
+        }
+        const a = &accs.items[gop.value_ptr.*];
+        try a.issues.append(allocator, item);
+        a.total += 1;
+    }
+
+    var groups: std.ArrayList(model.IssueAssigneeGroup) = .empty;
+    defer groups.deinit(allocator);
+    for (accs.items) |*a| {
+        try groups.append(allocator, .{
+            .id = a.id,
+            .assignee_type = a.assignee_type,
+            .assignee_id = a.assignee_id,
+            .issues = try a.issues.toOwnedSlice(allocator),
+            .total = a.total,
+        });
+    }
+    return .{ .groups = try groups.toOwnedSlice(allocator) };
 }
 
 pub fn groupedIssues(ctx: *zfinal.Context) !void {
-    const it = model.mem_issues orelse {
-        try response.ok(ctx, .{ .groups = &[_]struct { state: []const u8, count: u32 }{} });
+    const allocator = ctx.allocator;
+    const workspace_id = try requireWorkspaceId(ctx);
+
+    if (deps.hasPool()) {
+        // Pull the workspace's issues (bounded) and group them in
+        // memory — the lane aggregation is the same as the no-DB path.
+        const items = try model.listIssuesWithFilters(allocator, workspace_id, null, null, null, 10000, 0);
+        defer {
+            for (items) |item| model.freeIssueResponse(allocator, item);
+            allocator.free(items);
+        }
+        const resp = try groupIssuesByAssignee(allocator, items);
+        try response.ok(ctx, resp);
         return;
-    };
-    var counts = std.StringHashMap(u32).init(model.memAlloc());
-    defer counts.deinit();
-    var issue_it = it.iterator();
-    while (issue_it.next()) |kv| {
-        const state = if (kv.value_ptr.*.state.len > 0) kv.value_ptr.*.state else "open";
-        const gop = counts.getOrPut(state) catch continue;
-        if (!gop.found_existing) gop.value_ptr.* = 0;
-        gop.value_ptr.* += 1;
     }
-    var groups: std.ArrayList(struct { state: []const u8, count: u32 }) = .empty;
-    defer groups.deinit(model.memAlloc());
-    var cit = counts.iterator();
-    while (cit.next()) |kv| {
-        groups.append(model.memAlloc(), .{ .state = kv.key_ptr.*, .count = kv.value_ptr.* }) catch continue;
+
+    try model.memInit();
+    try model.mem_mutex.lock(zfinal.io_instance.io);
+    defer model.mem_mutex.unlock(zfinal.io_instance.io);
+
+    var items: std.ArrayList(model.IssueResponse) = .empty;
+    defer items.deinit(allocator);
+    var it = model.mem_issues.?.iterator();
+    while (it.next()) |e| {
+        try items.append(allocator, model.issueResponseFromEntry(e.value_ptr.*));
     }
-    try response.ok(ctx, .{ .groups = groups.items });
+    const resp = try groupIssuesByAssignee(allocator, items.items);
+    try response.ok(ctx, resp);
 }
 
 pub fn listChildren(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
     const issue_id = try response.parseStringId(ctx, "id");
+
+    if (deps.hasPool()) {
+        const workspace_id = try requireWorkspaceId(ctx);
+        const ids = [_][]const u8{issue_id};
+        const items = try model.listChildrenByParents(allocator, workspace_id, &ids);
+        defer allocator.free(items);
+        try response.ok(ctx, .{ .issues = items });
+        return;
+    }
+
     const children = try model.memListChildren(allocator, issue_id);
     defer allocator.free(children);
-    try response.ok(ctx, .{ .data = children });
+    var list: std.ArrayList(model.IssueResponse) = .empty;
+    defer list.deinit(allocator);
+    for (children) |c| try list.append(allocator, model.issueResponseFromEntry(c));
+    try response.ok(ctx, .{ .issues = list.items });
 }
 
 pub fn listTimeline(ctx: *zfinal.Context) !void {

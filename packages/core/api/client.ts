@@ -372,6 +372,22 @@ export class ApiClient {
     return res;
   }
 
+  // zserver wraps some responses as `{"data": ...}` (its `response.ok`
+  // envelope), while the Go server returns the resource at the top level.
+  // Unwrap so both backends produce the same shape for callers. Only a
+  // *single-key* `data` object is unwrapped — the Go server never returns a
+  // top-level `data` key, so this is a no-op for Go responses, and any
+  // future `{data, ...}` hybrid stays untouched for the schemas to handle.
+  private unwrapData(body: unknown): unknown {
+    if (body !== null && typeof body === "object" && !Array.isArray(body)) {
+      const rec = body as Record<string, unknown>;
+      if (Object.keys(rec).length === 1 && "data" in rec) {
+        return rec.data;
+      }
+    }
+    return body;
+  }
+
   private async fetch<T>(path: string, init?: RequestInit): Promise<T> {
     const res = await this.fetchRaw(path, {
       ...init,
@@ -381,7 +397,7 @@ export class ApiClient {
     if (res.status === 204) {
       return undefined as T;
     }
-    return res.json() as Promise<T>;
+    return this.unwrapData(await res.json()) as T;
   }
 
   // Auth

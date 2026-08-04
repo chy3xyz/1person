@@ -136,7 +136,7 @@ ISSUE2_ID=$(jget_path "${create2_body}" data.id)
 
 # ─── 2. listIssues (GET /api/issues) ─────────────────────────────────
 list_body=$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues")
-LIST_COUNT=$(echo "${list_body}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data', [])))" 2>/dev/null || echo 0)
+LIST_COUNT=$(echo "${list_body}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data', {}).get('issues', [])))" 2>/dev/null || echo 0)
 if [[ "${LIST_COUNT}" -ge 2 ]]; then pass "02 listIssues (n=${LIST_COUNT})"; else fail "02 listIssues: ${list_body}"; fi
 
 # ─── 3. searchIssues (GET /api/issues/search) ────────────────────────
@@ -154,7 +154,7 @@ bu_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H 
 BU_N=$(jget_path "${bu_body}" data.updated)
 if [[ "${BU_N}" == "2" ]]; then pass "04 batchUpdate (n=2)"; else fail "04 batchUpdate: ${bu_body}"; fi
 
-# ─── 5. childProgress (GET /api/issues/:id/child-progress) ───────────
+# ─── 5. childProgress (GET /api/issues/child-progress) ───────────────
 # Create a child via quickCreate first
 qc_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
     -d "{\"title\":\"child of first\"}" \
@@ -162,7 +162,7 @@ qc_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H 
 # quickCreate wraps the new Issue in `.{.data = child}` then
 # `response.ok` wraps again, so the shape is `{"data":{"data":{...}}}`.
 CHILD_ID=$(jget_path "${qc_body}" data.data.id)
-cp_status=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}/child-progress")
+cp_status=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/child-progress")
 if [[ "${cp_status}" == "200" ]]; then pass "05 childProgress (200)"; else fail "05 childProgress (${cp_status})"; fi
 
 # ─── 6. groupedIssues (GET /api/issues/grouped) ──────────────────────

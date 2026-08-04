@@ -52,6 +52,7 @@ function unwrap(body) {
   if (Array.isArray(body)) return { items: body };
   if (body.data && Array.isArray(body.data)) return { items: body.data };
   if (body.issues) return { items: body.issues };
+  if (body.data?.issues) return { items: body.data.issues };
   if (body.nodes) return { items: body.nodes };
   if (body.labels) return { items: body.labels };
   if (body.resources) return { items: body.resources };

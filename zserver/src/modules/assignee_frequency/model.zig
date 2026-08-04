@@ -7,11 +7,11 @@
 
 const std = @import("std");
 
-/// Single row of the `assignee_frequency` response. The legacy
-/// handler emitted zero rows; the shape is preserved so future code
-/// can populate it without an API change.
+/// Single row of the `assignee_frequency` response. Mirrors the Go
+/// `AssigneeFrequencyEntry` (`frequency` is the count of times the
+/// current user assigned work to that target).
 pub const FrequencyEntry = struct {
     assignee_type: []const u8,
     assignee_id: []const u8,
-    count: i32,
+    frequency: i64,
 };

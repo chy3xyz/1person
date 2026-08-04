@@ -514,6 +514,30 @@ pub const GetMetadataResponse = struct {
     metadata: std.json.Value,
 };
 
+/// One row of the `GET /api/issues/child-progress` response. Mirrors
+/// the Go `ChildIssueProgress` handler's per-parent aggregate.
+pub const ChildProgressEntry = struct {
+    parent_issue_id: []const u8,
+    total: i64,
+    done: i64,
+};
+
+/// One swimlane of `GET /api/issues/grouped?group_by=assignee`.
+/// Mirrors the Go `IssueAssigneeGroupResponse` (id is
+/// `assignee:<type>:<uuid>` or `assignee:unassigned`).
+pub const IssueAssigneeGroup = struct {
+    id: []const u8,
+    assignee_type: ?[]const u8,
+    assignee_id: ?[]const u8,
+    issues: []IssueResponse,
+    total: i64,
+};
+
+/// Response body for `GET /api/issues/grouped`.
+pub const GroupedIssuesResponse = struct {
+    groups: []IssueAssigneeGroup,
+};
+
 /// Response shape returned to clients. Mirrors the canonical
 /// `Issue` interface in `packages/core/types/issue.ts`. The DB
 /// column names are translated to the simpler API names here
@@ -699,7 +723,7 @@ fn issueResponseFromRowDuped(allocator: std.mem.Allocator, res: *zfinal.ResultSe
 /// Free every heap-allocated string field inside an IssueResponse that
 /// was produced by `issueResponseFromRowDuped`.  Safe to call with
 /// zero-length strings (they are "" not null).
-fn freeIssueResponse(allocator: std.mem.Allocator, resp: IssueResponse) void {
+pub fn freeIssueResponse(allocator: std.mem.Allocator, resp: IssueResponse) void {
     allocator.free(resp.id);
     allocator.free(resp.title);
     if (resp.description) |d| allocator.free(d);
@@ -1143,25 +1167,21 @@ pub fn dbRerunIssue(workspace_id: []const u8, issue_id: []const u8) ?IssueRespon
 /// empty filter set still produces a valid query (no `WHERE`
 /// clauses, just `workspace_id`). Returns the slice of `IssueResponse`
 /// rows ready to be rendered.
-pub fn listIssuesWithFilters(
+/// Shared WHERE-clause builder for the issue list/count queries.
+/// Appends filter params to `params` starting at `$1` (workspace_id)
+/// and returns an owned `where` string the caller must free.
+fn buildIssueFilterClause(
     allocator: std.mem.Allocator,
+    params: *std.ArrayList(SqlParam),
     workspace_id: []const u8,
     state_filter: ?[]const u8,
     project_filter: ?[]const u8,
     assignee_filter: ?[]const u8,
-    limit: u32,
-    offset: u32,
-) ![]IssueResponse {
-    const db = borrowDb() orelse return &[_]IssueResponse{};
-    defer deps.releaseBack(db);
-
-    var params: std.ArrayList(SqlParam) = .empty;
-    defer params.deinit(allocator);
-    try params.append(allocator, .{ .text = try allocator.dupe(u8, workspace_id) });
-
+) ![]u8 {
     var where: std.ArrayList(u8) = .empty;
     defer where.deinit(allocator);
     try where.appendSlice(allocator, "workspace_id = $1::uuid");
+    try params.append(allocator, .{ .text = try allocator.dupe(u8, workspace_id) });
 
     var idx: usize = 1;
     if (state_filter) |s| {
@@ -1188,11 +1208,60 @@ pub fn listIssuesWithFilters(
             try where.appendSlice(allocator, clause);
         }
     }
+    return try where.toOwnedSlice(allocator);
+}
+
+/// Count of issues matching the same filters as `listIssuesWithFilters`
+/// (ignoring limit/offset). Powers the `total` field of the list
+/// response so the frontend pagination can render correctly.
+pub fn countIssuesWithFilters(
+    allocator: std.mem.Allocator,
+    workspace_id: []const u8,
+    state_filter: ?[]const u8,
+    project_filter: ?[]const u8,
+    assignee_filter: ?[]const u8,
+) !i64 {
+    const db = borrowDb() orelse return 0;
+    defer deps.releaseBack(db);
+
+    var params: std.ArrayList(SqlParam) = .empty;
+    defer params.deinit(allocator);
+    const where = try buildIssueFilterClause(allocator, &params, workspace_id, state_filter, project_filter, assignee_filter);
+    defer allocator.free(where);
+
+    const query = try std.fmt.allocPrintSentinel(allocator, "SELECT count(*) FROM issue WHERE {s}", .{where}, 0);
+    defer allocator.free(query);
+
+    var rs = try db.queryParams(query, params.items);
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return 0;
+    const cnt = rs.rows.items[0].getText(0) orelse "0";
+    return std.fmt.parseInt(i64, cnt, 10) catch 0;
+}
+
+pub fn listIssuesWithFilters(
+    allocator: std.mem.Allocator,
+    workspace_id: []const u8,
+    state_filter: ?[]const u8,
+    project_filter: ?[]const u8,
+    assignee_filter: ?[]const u8,
+    limit: u32,
+    offset: u32,
+) ![]IssueResponse {
+    const db = borrowDb() orelse return &[_]IssueResponse{};
+    defer deps.releaseBack(db);
+
+    var params: std.ArrayList(SqlParam) = .empty;
+    defer params.deinit(allocator);
+    const where = try buildIssueFilterClause(allocator, &params, workspace_id, state_filter, project_filter, assignee_filter);
+    defer allocator.free(where);
 
     // Build ORDER BY + LIMIT + OFFSET separately, appended after WHERE.
     const order_by = " ORDER BY created_at DESC";
 
-    // limit / offset are always last params.
+    // limit / offset are always last params. `buildIssueFilterClause`
+    // already appended the filter params, so continue numbering from there.
+    var idx: usize = params.items.len;
     idx += 1;
     const limit_str = try std.fmt.allocPrint(allocator, "{d}", .{limit});
     defer allocator.free(limit_str);
@@ -1210,7 +1279,7 @@ pub fn listIssuesWithFilters(
         "SELECT id, title, description, project_id::text, parent_issue_id::text, " ++
             "assignee_id::text, status, created_at, updated_at " ++
             "FROM issue WHERE {s}{s}{s}{s}",
-        .{where.items, order_by, limit_clause, offset_clause},
+        .{where, order_by, limit_clause, offset_clause},
         0,
     );
     defer allocator.free(query);
@@ -1268,6 +1337,31 @@ pub fn searchIssuesByText(
         try list.append(allocator, resp);
     }
     return try list.toOwnedSlice(allocator);
+}
+
+/// Count of issues matching the same ILIKE search as
+/// `searchIssuesByText`. Powers the `total` field of the search
+/// response.
+pub fn countSearchIssues(
+    workspace_id: []const u8,
+    query: []const u8,
+) !i64 {
+    const db = borrowDb() orelse return 0;
+    defer deps.releaseBack(db);
+    if (query.len == 0) return 0;
+
+    var rs = try db.queryParams(
+        "SELECT count(*) FROM issue WHERE workspace_id = $1::uuid AND " ++
+            "(title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')",
+        &[_]SqlParam{
+            .{ .text = workspace_id },
+            .{ .text = query },
+        },
+    );
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return 0;
+    const cnt = rs.rows.items[0].getText(0) orelse "0";
+    return std.fmt.parseInt(i64, cnt, 10) catch 0;
 }
 
 /// `SELECT id, title, description, project_id::text, parent_issue_id::text,

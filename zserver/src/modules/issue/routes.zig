@@ -27,7 +27,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.post("/", handler.createIssue);
     try api.post("/batch-update", handler.batchUpdate);
     try api.post("/batch-delete", handler.batchDelete);
-    try api.get("/:id/child-progress", handler.childProgress);
+    // Workspace-wide child progress (no :id — mirrors Go's route).
+    try api.get("/child-progress", handler.childProgress);
     try api.get("/grouped", handler.groupedIssues);
     try api.get("/children", handler.listChildrenByParents);
 

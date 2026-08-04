@@ -126,6 +126,25 @@ pub const CancelTasksResponse = struct {
     cancelled: i32,
 };
 
+/// One row of `GET /api/agents/:id/tasks`. Mirrors the subset of the
+/// frontend `AgentTask` interface that `agent_task_queue` actually
+/// stores (the Go handler joins in runtime/chat/autopilot metadata,
+/// which zserver does not resolve yet — `runtime_id` is left empty).
+pub const TaskResponse = struct {
+    id: []const u8,
+    agent_id: []const u8,
+    runtime_id: []const u8 = "",
+    issue_id: []const u8,
+    status: []const u8,
+    priority: i32,
+    dispatched_at: ?[]const u8 = null,
+    started_at: ?[]const u8 = null,
+    completed_at: ?[]const u8 = null,
+    result: ?[]const u8 = null,
+    @"error": ?[]const u8 = null,
+    created_at: []const u8,
+};
+
 /// Response body for `GET/PUT /api/agents/:id/env`.
 pub const AgentEnvResponse = struct {
     agent_id: []const u8,

@@ -722,7 +722,46 @@ pub fn cancelTasks(ctx: *zfinal.Context) !void {
 }
 
 pub fn listTasks(ctx: *zfinal.Context) !void {
-    try ctx.renderJson(&[_]struct {}{});
+    const allocator = ctx.allocator;
+    const agent_id = ctx.getPathParam("id") orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "agent_id is required" });
+        return;
+    };
+
+    if (model.borrowDb()) |db| {
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT id::text, agent_id::text, issue_id::text, status, priority, " ++
+                "dispatched_at, started_at, completed_at, result, error, created_at " ++
+                "FROM agent_task_queue WHERE agent_id = $1::uuid ORDER BY created_at DESC",
+            &[_]SqlParam{.{ .text = agent_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.TaskResponse) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            const priority = std.fmt.parseInt(i32, row.getText(4) orelse "0", 10) catch 0;
+            try list.append(allocator, .{
+                .id = row.getText(0) orelse "",
+                .agent_id = row.getText(1) orelse "",
+                .issue_id = row.getText(2) orelse "",
+                .status = row.getText(3) orelse "",
+                .priority = priority,
+                .dispatched_at = row.getText(5),
+                .started_at = row.getText(6),
+                .completed_at = row.getText(7),
+                .result = row.getText(8),
+                .@"error" = row.getText(9),
+                .created_at = row.getText(10) orelse "",
+            });
+        }
+        try ctx.renderJson(list.items);
+        return;
+    }
+    // No-DB fallback: there is no task queue to read.
+    try ctx.renderJson(&[_]model.TaskResponse{});
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@
 
 const std = @import("std");
 const zfinal = @import("zfinal");
+const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
 const model = @import("model.zig");
@@ -89,6 +90,14 @@ fn asyncMemInit() !void {
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
     return ctx.attributes.get("workspace_id");
+}
+
+fn parseInt64(text: ?[]const u8) i64 {
+    return std.fmt.parseInt(i64, text orelse "0", 10) catch 0;
+}
+
+fn parseInt32(text: ?[]const u8) i32 {
+    return std.fmt.parseInt(i32, text orelse "0", 10) catch 0;
 }
 
 fn getUserId(ctx: *zfinal.Context) ?[]const u8 {
@@ -479,79 +488,179 @@ pub fn archiveAgentsAndDeleteRuntime(ctx: *zfinal.Context) !void {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// usage / activity stubs
+// usage / activity
 // ──────────────────────────────────────────────────────────────────────
 
-fn usageStub(ctx: *zfinal.Context) !void {
-    const allocator = ctx.allocator;
-    var list: std.ArrayList(model.RuntimeUsageResponse) = .empty;
-    defer list.deinit(allocator);
-    try ctx.renderJson(list.items);
+/// Shared header validation for the usage endpoints: returns
+/// `workspace_id` + `runtime_id` (both required), or writes a 400 and
+/// returns `null`.
+fn usageParams(ctx: *zfinal.Context) ?struct { workspace_id: []const u8, runtime_id: []const u8 } {
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        ctx.renderJson(.{ .@"error" = "workspace_id is required" }) catch {};
+        return null;
+    };
+    const runtime_id = ctx.getPathParam("runtimeId") orelse {
+        ctx.res_status = .bad_request;
+        ctx.renderJson(.{ .@"error" = "runtime_id is required" }) catch {};
+        return null;
+    };
+    return .{ .workspace_id = workspace_id, .runtime_id = runtime_id };
 }
 
 pub fn getRuntimeUsage(ctx: *zfinal.Context) !void {
-    _ = getWorkspaceId(ctx) orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+    const allocator = ctx.allocator;
+    const p = usageParams(ctx) orelse return;
+
+    if (deps.hasPool()) {
+        const db = deps.acquire() catch {
+            try ctx.renderJson(&[_]model.RuntimeUsageResponse{});
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT DATE(bucket_hour AT TIME ZONE 'UTC'), provider, model, " ++
+                "SUM(input_tokens)::bigint, SUM(output_tokens)::bigint, " ++
+                "SUM(cache_read_tokens)::bigint, SUM(cache_write_tokens)::bigint " ++
+                "FROM task_usage_hourly WHERE runtime_id = $1::uuid " ++
+                "AND bucket_hour >= now() - interval '90 days' " ++
+                "GROUP BY 1, 2, 3 ORDER BY 1 DESC, 2, 3",
+            &[_]SqlParam{.{ .text = p.runtime_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.RuntimeUsageResponse) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .runtime_id = p.runtime_id,
+                .date = row.getText(0) orelse "",
+                .provider = row.getText(1) orelse "",
+                .model = row.getText(2) orelse "",
+                .input_tokens = parseInt64(row.getText(3)),
+                .output_tokens = parseInt64(row.getText(4)),
+                .cache_read_tokens = parseInt64(row.getText(5)),
+                .cache_write_tokens = parseInt64(row.getText(6)),
+            });
+        }
+        try ctx.renderJson(list.items);
         return;
-    };
-    _ = ctx.getPathParam("runtimeId") orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "runtime_id is required" });
-        return;
-    };
-    return usageStub(ctx);
+    }
+    try ctx.renderJson(&[_]model.RuntimeUsageResponse{});
 }
 
 pub fn getRuntimeUsageByAgent(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
-    _ = getWorkspaceId(ctx) orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+    const p = usageParams(ctx) orelse return;
+
+    if (deps.hasPool()) {
+        const db = deps.acquire() catch {
+            try ctx.renderJson(&[_]model.RuntimeUsageByAgentResponse{});
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT atq.agent_id::text, tu.model, " ++
+                "SUM(tu.input_tokens)::bigint, SUM(tu.output_tokens)::bigint, " ++
+                "SUM(tu.cache_read_tokens)::bigint, SUM(tu.cache_write_tokens)::bigint, " ++
+                "COUNT(DISTINCT tu.task_id)::int " ++
+                "FROM task_usage tu JOIN agent_task_queue atq ON atq.id = tu.task_id " ++
+                "WHERE atq.runtime_id = $1::uuid AND tu.created_at >= now() - interval '90 days' " ++
+                "GROUP BY atq.agent_id, tu.model ORDER BY atq.agent_id, tu.model",
+            &[_]SqlParam{.{ .text = p.runtime_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.RuntimeUsageByAgentResponse) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .agent_id = row.getText(0) orelse "",
+                .model = row.getText(1) orelse "",
+                .input_tokens = parseInt64(row.getText(2)),
+                .output_tokens = parseInt64(row.getText(3)),
+                .cache_read_tokens = parseInt64(row.getText(4)),
+                .cache_write_tokens = parseInt64(row.getText(5)),
+                .task_count = parseInt32(row.getText(6)),
+            });
+        }
+        try ctx.renderJson(list.items);
         return;
-    };
-    _ = ctx.getPathParam("runtimeId") orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "runtime_id is required" });
-        return;
-    };
-    var list: std.ArrayList(model.RuntimeUsageByAgentResponse) = .empty;
-    defer list.deinit(allocator);
-    try ctx.renderJson(list.items);
+    }
+    try ctx.renderJson(&[_]model.RuntimeUsageByAgentResponse{});
 }
 
 pub fn getRuntimeUsageByHour(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
-    _ = getWorkspaceId(ctx) orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+    const p = usageParams(ctx) orelse return;
+
+    if (deps.hasPool()) {
+        const db = deps.acquire() catch {
+            try ctx.renderJson(&[_]model.RuntimeUsageByHourResponse{});
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT EXTRACT(HOUR FROM tu.created_at AT TIME ZONE 'UTC')::int, tu.model, " ++
+                "SUM(tu.input_tokens)::bigint, SUM(tu.output_tokens)::bigint, " ++
+                "SUM(tu.cache_read_tokens)::bigint, SUM(tu.cache_write_tokens)::bigint, " ++
+                "COUNT(DISTINCT tu.task_id)::int " ++
+                "FROM task_usage tu JOIN agent_task_queue atq ON atq.id = tu.task_id " ++
+                "WHERE atq.runtime_id = $1::uuid AND tu.created_at >= now() - interval '90 days' " ++
+                "GROUP BY 1, tu.model ORDER BY 1, tu.model",
+            &[_]SqlParam{.{ .text = p.runtime_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.RuntimeUsageByHourResponse) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .hour = parseInt32(row.getText(0)),
+                .model = row.getText(1) orelse "",
+                .input_tokens = parseInt64(row.getText(2)),
+                .output_tokens = parseInt64(row.getText(3)),
+                .cache_read_tokens = parseInt64(row.getText(4)),
+                .cache_write_tokens = parseInt64(row.getText(5)),
+                .task_count = parseInt32(row.getText(6)),
+            });
+        }
+        try ctx.renderJson(list.items);
         return;
-    };
-    _ = ctx.getPathParam("runtimeId") orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "runtime_id is required" });
-        return;
-    };
-    var list: std.ArrayList(model.RuntimeUsageByHourResponse) = .empty;
-    defer list.deinit(allocator);
-    try ctx.renderJson(list.items);
+    }
+    try ctx.renderJson(&[_]model.RuntimeUsageByHourResponse{});
 }
 
 pub fn getRuntimeTaskActivity(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
-    _ = getWorkspaceId(ctx) orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+    const p = usageParams(ctx) orelse return;
+
+    if (deps.hasPool()) {
+        const db = deps.acquire() catch {
+            try ctx.renderJson(&[_]model.HourlyActivity{});
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT EXTRACT(HOUR FROM started_at AT TIME ZONE 'UTC')::int, COUNT(*)::int " ++
+                "FROM agent_task_queue WHERE runtime_id = $1::uuid AND started_at IS NOT NULL " ++
+                "GROUP BY 1 ORDER BY 1",
+            &[_]SqlParam{.{ .text = p.runtime_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.HourlyActivity) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .hour = parseInt32(row.getText(0)),
+                .count = parseInt32(row.getText(1)),
+            });
+        }
+        try ctx.renderJson(list.items);
         return;
-    };
-    _ = ctx.getPathParam("runtimeId") orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "runtime_id is required" });
-        return;
-    };
-    var list: std.ArrayList(model.HourlyActivity) = .empty;
-    defer list.deinit(allocator);
-    try ctx.renderJson(list.items);
+    }
+    try ctx.renderJson(&[_]model.HourlyActivity{});
 }
 
 // ──────────────────────────────────────────────────────────────────────
