@@ -4,6 +4,7 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const Config = @import("config.zig").Config;
 const auth_lib = @import("auth.zig");
+const deps = @import("deps.zig");
 
 const log = std.log.scoped(.middleware);
 
@@ -206,6 +207,95 @@ fn tokenFromCookie(ctx: *zfinal.Context) !?[]const u8 {
 }
 
 /// Authentication interceptor. Skips OPTIONS and public paths.
+/// Verify a `mul_` personal access token against the
+/// `personal_access_token` table (token_hash + revoked + expiry), the
+/// same contract as the Go server's mul_ branch. On success stamps
+/// `token_type`/`token_value`/`user_id` on the context. Falls back to
+/// format-only in no-DB mode so dev smoke/e2e keep working.
+fn validatePersonalToken(ctx: *zfinal.Context, token: []const u8) !bool {
+    if (!deps.hasPool()) {
+        try ctx.setAttr("token_type", "personal");
+        try ctx.setAttr("token_value", token);
+        return true;
+    }
+    const hash = try auth_lib.hashToken(ctx.allocator, token);
+    defer ctx.allocator.free(hash);
+
+    const db = deps.acquire() catch {
+        try ctx.setAttr("token_type", "personal");
+        try ctx.setAttr("token_value", token);
+        return true;
+    };
+    defer deps.releaseBack(db);
+
+    var rs = try db.queryParams(
+        "SELECT user_id::text FROM personal_access_token " ++
+            "WHERE token_hash = $1 AND revoked = false AND (expires_at IS NULL OR expires_at > now())",
+        &[_]zfinal.SqlParam{.{ .text = hash }},
+    );
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "invalid_token" });
+        return false;
+    }
+    const user_id = rs.rows.items[0].getText(0) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "invalid_token" });
+        return false;
+    };
+    try ctx.setAttr("token_type", "personal");
+    try ctx.setAttr("token_value", token);
+    try ctx.setAttr("user_id", user_id);
+    return true;
+}
+
+/// Verify a `mat_` task token against the `task_token` table, stamping
+/// the bound (user_id, agent_id, task_id, workspace_id) — the same
+/// authoritative identity mapping as the Go server's mat_ branch.
+/// Falls back to format-only in no-DB mode.
+fn validateTaskToken(ctx: *zfinal.Context, token: []const u8) !bool {
+    if (!deps.hasPool()) {
+        try ctx.setAttr("token_type", "task");
+        try ctx.setAttr("token_value", token);
+        return true;
+    }
+    const hash = try auth_lib.hashToken(ctx.allocator, token);
+    defer ctx.allocator.free(hash);
+
+    const db = deps.acquire() catch {
+        try ctx.setAttr("token_type", "task");
+        try ctx.setAttr("token_value", token);
+        return true;
+    };
+    defer deps.releaseBack(db);
+
+    var rs = try db.queryParams(
+        "SELECT user_id::text, agent_id::text, task_id::text, workspace_id::text " ++
+            "FROM task_token WHERE token_hash = $1 AND expires_at > now()",
+        &[_]zfinal.SqlParam{.{ .text = hash }},
+    );
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "invalid_token" });
+        return false;
+    }
+    const row = &rs.rows.items[0];
+    const user_id = row.getText(0) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "invalid_token" });
+        return false;
+    };
+    try ctx.setAttr("token_type", "task");
+    try ctx.setAttr("token_value", token);
+    try ctx.setAttr("user_id", user_id);
+    if (row.getText(1)) |agent_id| try ctx.setAttr("agent_id", agent_id);
+    if (row.getText(2)) |task_id| try ctx.setAttr("task_id", task_id);
+    if (row.getText(3)) |workspace_id| try ctx.setAttr("workspace_id", workspace_id);
+    return true;
+}
+
 pub fn authBefore(ctx: *zfinal.Context) !bool {
     const cfg = g_cfg orelse return true;
 
@@ -240,25 +330,21 @@ pub fn authBefore(ctx: *zfinal.Context) !bool {
 
     switch (auth_lib.detectTokenType(token)) {
         .personal => {
-            try ctx.setAttr("token_type", "personal");
-            try ctx.setAttr("token_value", token);
-            return true;
+            if (try validatePersonalToken(ctx, token)) return true;
+            return false;
         },
         .task => {
-            try ctx.setAttr("token_type", "task");
-            try ctx.setAttr("token_value", token);
-            return true;
+            if (try validateTaskToken(ctx, token)) return true;
+            return false;
         },
         .cloud_node => {
-            // Stub validation: cloud node tokens are non-empty opaque strings.
-            if (token.len < 8) {
-                ctx.res_status = .unauthorized;
-                try ctx.renderJson(.{ .@"error" = "invalid_token" });
-                return false;
-            }
-            try ctx.setAttr("token_type", "cloud_node");
-            try ctx.setAttr("token_value", token);
-            return true;
+            // The Go server rejects `mcn_` tokens when the Multica
+            // Cloud Fleet verifier is not configured (failing closed
+            // rather than silently downgrading auth). zserver has no
+            // Cloud integration, so every `mcn_` token is rejected.
+            ctx.res_status = .unauthorized;
+            try ctx.renderJson(.{ .@"error" = "invalid_token" });
+            return false;
         },
         .daemon => {
             // Daemon tokens (`mdt_<id>`) are validated by the

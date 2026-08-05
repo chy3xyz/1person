@@ -146,9 +146,69 @@ pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
 }
 
 pub fn daemonWebSocket(ctx: *zfinal.Context) !void {
-    // Minimal placeholder: accept the connection with an empty body.
-    ctx.res_status = .ok;
-    try ctx.renderText("");
+    const allocator = ctx.allocator;
+
+    const upgrade = ctx.getHeader("upgrade") orelse "";
+    if (!std.ascii.eqlIgnoreCase(upgrade, "websocket")) {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "missing_websocket_upgrade" });
+        return;
+    }
+    const sec_key = ctx.getHeader("sec-websocket-key") orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "missing_sec_websocket_key" });
+        return;
+    };
+
+    // Daemon authentication: `Bearer mdt_<daemon_id>`. The global
+    // AuthInterceptor only marks `mdt_` tokens; the daemon id is
+    // resolved here (mirrors the Go daemonws handshake, which derives
+    // the identity from the daemon token before upgrading).
+    const token = @import("../../auth.zig").tokenFromRequest(ctx) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "missing_token" });
+        return;
+    };
+    const daemon_id = @import("../../auth.zig").daemonIdFromToken(token) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "invalid_token" });
+        return;
+    };
+    const daemon_id_copy = try allocator.dupe(u8, daemon_id);
+    defer allocator.free(daemon_id_copy);
+
+    var ws = try ctx.req.respondWebSocket(.{ .key = sec_key });
+
+    const greeting = try std.fmt.allocPrint(allocator, "{{\"type\":\"daemon:connected\",\"daemon_id\":\"{s}\"}}", .{daemon_id});
+    defer allocator.free(greeting);
+    ws.writeMessage(greeting, .text) catch return;
+
+    // Frame loop: answer `daemon:heartbeat` with `daemon:heartbeat_ack`
+    // and treat any text frame as liveness. Mirrors the subset of the
+    // Go daemonws protocol that zserver supports (task push is not
+    // wired yet — daemons poll claim via HTTP instead).
+    while (true) {
+        const msg = ws.readSmallMessage() catch break;
+        switch (msg.opcode) {
+            .text, .binary => {
+                const text = allocator.dupe(u8, msg.data) catch continue;
+                defer allocator.free(text);
+                // {"type":"daemon:heartbeat", ...} → ack
+                if (std.mem.indexOf(u8, text, "daemon:heartbeat") != null) {
+                    const ack = "{\"type\":\"daemon:heartbeat_ack\"}";
+                    ws.writeMessage(ack, .text) catch break;
+                }
+                // Keep the daemon's in-memory last_seen_at fresh.
+                try mem_mutex.lock(zfinal.io_instance.io);
+                if (mem_daemons) |*m| {
+                    if (m.getPtr(daemon_id_copy)) |entry| entry.last_seen_at = nowMillis();
+                }
+                mem_mutex.unlock(zfinal.io_instance.io);
+            },
+            .ping => ws.writeMessage(msg.data, .pong) catch break,
+            else => break,
+        }
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────

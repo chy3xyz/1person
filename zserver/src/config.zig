@@ -33,6 +33,10 @@ pub const Config = struct {
     dev_verification_code: ?[]const u8,
     stripe_webhook_secret: ?[]const u8,
     github_webhook_secret: ?[]const u8,
+    google_client_id: ?[]const u8,
+    google_client_secret: ?[]const u8,
+    resend_api_key: ?[]const u8,
+    resend_from_email: []const u8,
     github_app_slug: ?[]const u8,
     /// Shared secret used by `RequireServiceOrWorkspaceRole` to bypass
     /// the workspace-role check. Empty string disables the bypass; set
@@ -133,6 +137,10 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
 
     const stripe_webhook_secret = try getEnvOwnedOptional(allocator, environ, "STRIPE_WEBHOOK_SECRET");
     const github_webhook_secret = try getEnvOwnedOptional(allocator, environ, "GITHUB_WEBHOOK_SECRET");
+    const google_client_id = try getEnvOwnedOptional(allocator, environ, "GOOGLE_CLIENT_ID");
+    const google_client_secret = try getEnvOwnedOptional(allocator, environ, "GOOGLE_CLIENT_SECRET");
+    const resend_api_key = try getEnvOwnedOptional(allocator, environ, "RESEND_API_KEY");
+    const resend_from_email = try getEnvOwnedDefault(allocator, environ, "RESEND_FROM_EMAIL", "noreply@1person.app");
     const github_app_slug = try getEnvOwnedOptional(allocator, environ, "GITHUB_APP_SLUG");
 
     // `MULTICA_SERVICE_TOKEN` enables the service-account bypass in
@@ -161,6 +169,10 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
         .dev_verification_code = dev_verification_code,
         .stripe_webhook_secret = stripe_webhook_secret,
         .github_webhook_secret = github_webhook_secret,
+        .google_client_id = google_client_id,
+        .google_client_secret = google_client_secret,
+        .resend_api_key = resend_api_key,
+        .resend_from_email = resend_from_email,
         .github_app_slug = github_app_slug,
         .service_token = service_token,
         .app = app,

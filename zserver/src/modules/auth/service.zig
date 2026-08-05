@@ -56,6 +56,12 @@ pub fn sendCode(ctx: *zfinal.Context) !void {
     const email_lower = try util.dupeLower(ctx.allocator, email_raw);
     defer ctx.allocator.free(email_lower);
 
+    const cfg = g_cfg orelse {
+        ctx.res_status = .internal_server_error;
+        try ctx.renderJson(.{ .@"error" = "auth not configured" });
+        return;
+    };
+
     // Existing users are always allowed to log in; new users must
     // pass signup gating.
     const existing = model.userExistsByEmail(email_lower);
@@ -89,11 +95,61 @@ pub fn sendCode(ctx: *zfinal.Context) !void {
         });
     }
 
-    // TODO: send email via SMTP / SES.
-    log.info("login code for {s}: {s}", .{ email_lower, code_str });
+    // Send the code by email when a delivery backend is configured
+    // (Resend API; SMTP is not wired up yet in zserver). Without one we
+    // fall back to the dev-mode print — matching the Go server's
+    // unconfigured behaviour so local smoke/e2e keep working.
+    if (cfg.resend_api_key != null) {
+        sendVerificationEmail(ctx.allocator, cfg, email_lower, code_str) catch |err| {
+            log.err("failed to send verification email to {s}: {}", .{ email_lower, err });
+            ctx.res_status = .internal_server_error;
+            try ctx.renderJson(.{ .@"error" = "failed to send verification code" });
+            return;
+        };
+    } else {
+        log.info("login code for {s}: {s}", .{ email_lower, code_str });
+    }
 
     ctx.res_status = .ok;
     try ctx.renderJson(.{ .sent = true });
+}
+
+/// Send a verification code via the Resend HTTP API. Returns
+/// `error.EmailSendFailed` on transport or non-2xx responses; the
+/// caller decides whether to fail the request.
+fn sendVerificationEmail(
+    allocator: std.mem.Allocator,
+    cfg: *const Config,
+    to: []const u8,
+    code: []const u8,
+) !void {
+    const api_key = cfg.resend_api_key orelse return;
+    const body = try std.fmt.allocPrint(
+        allocator,
+        "{{\"from\":\"{s}\",\"to\":[\"{s}\"],\"subject\":\"Your 1person verification code\"," ++
+            "\"html\":\"<p style=\\\"font-size:28px;letter-spacing:4px;\\\">{s}</p>" ++
+            "<p>This code expires in 10 minutes. If you didn't request it, you can safely ignore this email.</p>\"}}",
+        .{ cfg.resend_from_email, to, code },
+    );
+    defer allocator.free(body);
+
+    const bearer = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_key});
+    defer allocator.free(bearer);
+
+    const uri = std.Uri.parse("https://api.resend.com/emails") catch return error.EmailSendFailed;
+    var client = std.http.Client{ .allocator = allocator, .io = zfinal.io_instance.io };
+    defer client.deinit();
+    var req = try client.request(.POST, uri, .{
+        .headers = .{
+            .content_type = .{ .override = "application/json" },
+            .authorization = .{ .override = bearer },
+        },
+    });
+    defer req.deinit();
+    try req.sendBodyComplete(body);
+    var redirect_buf: [4096]u8 = undefined;
+    var response = try req.receiveHead(&redirect_buf);
+    if (response.head.status.class() != .success) return error.EmailSendFailed;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -220,9 +276,117 @@ pub fn logout(ctx: *zfinal.Context) !void {
 }
 
 const GoogleAuthRequest = struct {
-    credential: []const u8,
-    email: ?[]const u8 = null,
+    code: []const u8 = "",
+    redirect_uri: ?[]const u8 = null,
 };
+
+/// Percent-encode a value for use in an `application/x-www-form-urlencoded`
+/// body (RFC 3986 unreserved chars pass through; everything else becomes
+/// `%XX`).
+fn formUrlEncode(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+    for (value) |c| {
+        if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c == '~') {
+            try out.append(allocator, c);
+        } else {
+            const hex = try std.fmt.allocPrint(allocator, "%{X:0>2}", .{c});
+            defer allocator.free(hex);
+            try out.appendSlice(allocator, hex);
+        }
+    }
+    return try out.toOwnedSlice(allocator);
+}
+
+/// POST the authorization `code` to Google's token endpoint and return
+/// the raw JSON body (`{access_token, id_token, ...}`) on success.
+/// Returns `null` on any transport/non-2xx failure.
+fn exchangeGoogleCode(
+    allocator: std.mem.Allocator,
+    code: []const u8,
+    client_id: []const u8,
+    client_secret: []const u8,
+    redirect_uri: ?[]const u8,
+) !?[]u8 {
+    const uri = std.Uri.parse("https://oauth2.googleapis.com/token") catch return null;
+    var client = std.http.Client{ .allocator = allocator, .io = zfinal.io_instance.io };
+    defer client.deinit();
+    var req = try client.request(.POST, uri, .{
+        .headers = .{ .content_type = .{ .override = "application/x-www-form-urlencoded" } },
+    });
+    defer req.deinit();
+
+    // Build the form body: code, client_id, client_secret, redirect_uri,
+    // grant_type=authorization_code.
+    var form = std.ArrayList(u8).empty;
+    defer form.deinit(allocator);
+    try form.appendSlice(allocator, "code=");
+    const code_enc = try formUrlEncode(allocator, code);
+    defer allocator.free(code_enc);
+    try form.appendSlice(allocator, code_enc);
+    try form.appendSlice(allocator, "&client_id=");
+    const cid_enc = try formUrlEncode(allocator, client_id);
+    defer allocator.free(cid_enc);
+    try form.appendSlice(allocator, cid_enc);
+    try form.appendSlice(allocator, "&client_secret=");
+    const cs_enc = try formUrlEncode(allocator, client_secret);
+    defer allocator.free(cs_enc);
+    try form.appendSlice(allocator, cs_enc);
+    if (redirect_uri) |ru| {
+        if (ru.len > 0) {
+            try form.appendSlice(allocator, "&redirect_uri=");
+            const ru_enc = try formUrlEncode(allocator, ru);
+            defer allocator.free(ru_enc);
+            try form.appendSlice(allocator, ru_enc);
+        }
+    }
+    try form.appendSlice(allocator, "&grant_type=authorization_code");
+
+    try req.sendBodyComplete(form.items);
+    var redirect_buf: [4096]u8 = undefined;
+    var response = try req.receiveHead(&redirect_buf);
+    if (response.head.status.class() != .success) return null;
+
+    var body: std.ArrayList(u8) = .empty;
+    defer body.deinit(allocator);
+    var transfer_buf: [4096]u8 = undefined;
+    const rdr = response.reader(&transfer_buf);
+    while (true) {
+        const n = rdr.readSliceShort(&transfer_buf) catch break;
+        if (n == 0) break;
+        try body.appendSlice(allocator, transfer_buf[0..n]);
+    }
+    return try body.toOwnedSlice(allocator);
+}
+
+/// Fetch Google userinfo (`{email, name, picture}`) with the access
+/// token. Returns the raw JSON body on success, `null` otherwise.
+fn fetchGoogleUserInfo(allocator: std.mem.Allocator, access_token: []const u8) !?[]u8 {
+    const uri = std.Uri.parse("https://www.googleapis.com/oauth2/v2/userinfo") catch return null;
+    var client = std.http.Client{ .allocator = allocator, .io = zfinal.io_instance.io };
+    defer client.deinit();
+    const bearer = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
+    defer allocator.free(bearer);
+    var req = try client.request(.GET, uri, .{
+        .headers = .{ .authorization = .{ .override = bearer } },
+    });
+    defer req.deinit();
+    try req.sendBodiless();
+    var redirect_buf: [4096]u8 = undefined;
+    var response = try req.receiveHead(&redirect_buf);
+    if (response.head.status.class() != .success) return null;
+
+    var body: std.ArrayList(u8) = .empty;
+    defer body.deinit(allocator);
+    var transfer_buf: [4096]u8 = undefined;
+    const rdr = response.reader(&transfer_buf);
+    while (true) {
+        const n = rdr.readSliceShort(&transfer_buf) catch break;
+        if (n == 0) break;
+        try body.appendSlice(allocator, transfer_buf[0..n]);
+    }
+    return try body.toOwnedSlice(allocator);
+}
 
 pub fn googleAuth(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
@@ -236,14 +400,77 @@ pub fn googleAuth(ctx: *zfinal.Context) !void {
     defer parsed.deinit();
     const req = parsed.value;
 
-    if (req.credential.len == 0) {
+    if (req.code.len == 0) {
         ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "credential is required" });
+        try ctx.renderJson(.{ .@"error" = "code is required" });
         return;
     }
 
-    const email = req.email orelse "google-user@example.com";
-    const email_lower = try std.ascii.allocLowerString(allocator, std.mem.trim(u8, email, &std.ascii.whitespace));
+    const client_id = cfg.google_client_id orelse {
+        ctx.res_status = .service_unavailable;
+        try ctx.renderJson(.{ .@"error" = "Google login is not configured" });
+        return;
+    };
+    const client_secret = cfg.google_client_secret orelse {
+        ctx.res_status = .service_unavailable;
+        try ctx.renderJson(.{ .@"error" = "Google login is not configured" });
+        return;
+    };
+
+    // 1. Exchange the authorization code for an access token. This is
+    // the security boundary: the code was minted by Google for this
+    // client_id, so a successful exchange proves the client is real.
+    const token_body = (try exchangeGoogleCode(allocator, req.code, client_id, client_secret, req.redirect_uri)) orelse {
+        ctx.res_status = .bad_gateway;
+        try ctx.renderJson(.{ .@"error" = "failed to exchange code with Google" });
+        return;
+    };
+    defer allocator.free(token_body);
+
+    const access_token = blk: {
+        var it = std.json.parseFromSliceLeaky(std.json.Value, allocator, token_body, .{}) catch {
+            ctx.res_status = .bad_gateway;
+            try ctx.renderJson(.{ .@"error" = "failed to parse Google token response" });
+            return;
+        };
+        break :blk it.object.get("access_token") orelse {
+            ctx.res_status = .bad_gateway;
+            try ctx.renderJson(.{ .@"error" = "failed to parse Google token response" });
+            return;
+        };
+    };
+    if (access_token != .string or access_token.string.len == 0) {
+        ctx.res_status = .bad_gateway;
+        try ctx.renderJson(.{ .@"error" = "failed to parse Google token response" });
+        return;
+    }
+
+    // 2. Fetch the verified user profile from Google.
+    const userinfo_body = (try fetchGoogleUserInfo(allocator, access_token.string)) orelse {
+        ctx.res_status = .bad_gateway;
+        try ctx.renderJson(.{ .@"error" = "failed to fetch user info from Google" });
+        return;
+    };
+    defer allocator.free(userinfo_body);
+
+    const g_user = std.json.parseFromSliceLeaky(std.json.Value, allocator, userinfo_body, .{}) catch {
+        ctx.res_status = .bad_gateway;
+        try ctx.renderJson(.{ .@"error" = "failed to parse Google user info" });
+        return;
+    };
+    const email_val = g_user.object.get("email") orelse {
+        ctx.res_status = .bad_gateway;
+        try ctx.renderJson(.{ .@"error" = "failed to parse Google user info" });
+        return;
+    };
+    if (email_val != .string or email_val.string.len == 0) {
+        ctx.res_status = .bad_gateway;
+        try ctx.renderJson(.{ .@"error" = "failed to parse Google user info" });
+        return;
+    }
+
+    // 3. Log the user in with the verified email.
+    const email_lower = try std.ascii.allocLowerString(allocator, std.mem.trim(u8, email_val.string, &std.ascii.whitespace));
     defer allocator.free(email_lower);
 
     const user_id = try fallbackUserId(allocator, email_lower);
