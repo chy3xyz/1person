@@ -1658,48 +1658,14 @@ pub fn deleteLarkInstallation(ctx: *zfinal.Context) !void {
 }
 
 pub fn beginLarkInstall(ctx: *zfinal.Context) !void {
-    const allocator = ctx.allocator;
-    const workspace_id = model.getWorkspaceId(ctx) orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
-        return;
-    };
-    if (!(try model.requireWorkspaceRoleAttr(ctx, "admin"))) return;
-
-    if (model.borrowDb()) |db_handle| {
-        defer deps.releaseBack(db_handle);
-        const session_id = try model.generateId(allocator, "lark-install");
-        const now = try model.rfc3339(allocator, std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds());
-        defer allocator.free(now);
-        const params = [_]SqlParam{
-            .{ .text = workspace_id },
-            .{ .text = session_id },
-            .{ .text = now },
-        };
-        _ = try db_handle.queryParams(
-            "INSERT INTO lark_install_session (workspace_id, id, status, created_at, updated_at) " ++
-                "VALUES ($1::uuid, $2::uuid, 'pending', $3::timestamptz, $3::timestamptz)",
-            &params,
-        );
-        try ctx.renderJson(.{ .session_id = session_id, .url = "" });
-    } else {
-        try model.memInit();
-        try model.mem_mutex.lock(zfinal.io_instance.io);
-        defer model.mem_mutex.unlock(zfinal.io_instance.io);
-
-        const now = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-        const session_id = try model.generateId(allocator, "lark-install");
-        const entry = model.LarkInstallSession{
-            .id = try model.memDup(session_id),
-            .workspace_id = try model.memDup(workspace_id),
-            .status = try model.memDup("pending"),
-            .created_at = try model.memFmtNumber(now),
-            .updated_at = try model.memFmtNumber(now),
-        };
-        try model.mem_lark_sessions.?.put(entry.id, entry);
-        allocator.free(session_id);
-        try ctx.renderJson(.{ .session_id = entry.id, .url = "" });
-    }
+    // The Go server returns 503 when the Lark integration is not wired
+    // (no MULTICA_LARK_SECRET_KEY / RegistrationService); the UI hides
+    // the bind button in that case. zserver has no external Lark
+    // registration service yet, so this endpoint always reports
+    // "not configured" instead of fabricating an empty install URL.
+    _ = ctx.getPathParam("id");
+    ctx.res_status = .service_unavailable;
+    try ctx.renderJson(.{ .@"error" = "lark install not configured" });
 }
 
 pub fn getLarkInstallStatus(ctx: *zfinal.Context) !void {

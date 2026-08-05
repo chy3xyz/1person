@@ -1041,10 +1041,117 @@ pub fn setSigningSecret(ctx: *zfinal.Context) !void {
 }
 
 pub fn listRuns(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
+    const autopilot_id = ctx.getPathParam("id") orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "autopilot_id is required" });
+        return;
+    };
+
+    if (deps.hasPool()) {
+        const db = deps.acquire() catch {
+            try ctx.renderJson(.{ .runs = &[_]model.AutopilotRunResponse{}, .total = 0 });
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT r.id::text, r.autopilot_id::text, r.trigger_id::text, r.source, r.status, " ++
+                "r.issue_id::text, r.task_id::text, r.triggered_at, r.completed_at, " ++
+                "r.failure_reason, r.trigger_payload, r.result, r.created_at " ++
+                "FROM autopilot_run r JOIN autopilot a ON a.id = r.autopilot_id " ++
+                "WHERE a.workspace_id = $1::uuid AND r.autopilot_id = $2::uuid " ++
+                "ORDER BY r.triggered_at DESC",
+            &[_]SqlParam{ .{ .text = workspace_id }, .{ .text = autopilot_id } },
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.AutopilotRunResponse) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .id = row.getText(0) orelse "",
+                .autopilot_id = row.getText(1) orelse "",
+                .trigger_id = row.getText(2),
+                .source = row.getText(3) orelse "",
+                .status = row.getText(4) orelse "",
+                .issue_id = row.getText(5),
+                .task_id = row.getText(6),
+                .triggered_at = row.getText(7) orelse "",
+                .completed_at = row.getText(8),
+                .failure_reason = row.getText(9),
+                .trigger_payload = try model.jsonValueOrNull(allocator, row.getText(10)),
+                .result = try model.jsonValueOrNull(allocator, row.getText(11)),
+                .created_at = row.getText(12) orelse "",
+            });
+        }
+        try ctx.renderJson(.{ .runs = list.items, .total = list.items.len });
+        return;
+    }
     try ctx.renderJson(.{ .runs = &[_]model.AutopilotRunResponse{}, .total = 0 });
 }
 
 pub fn getRun(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
+    const autopilot_id = ctx.getPathParam("id") orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "autopilot_id is required" });
+        return;
+    };
+    const run_id = ctx.getPathParam("runId") orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "run_id is required" });
+        return;
+    };
+
+    if (deps.hasPool()) {
+        const db = deps.acquire() catch {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "run not found" });
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT r.id::text, r.autopilot_id::text, r.trigger_id::text, r.source, r.status, " ++
+                "r.issue_id::text, r.task_id::text, r.triggered_at, r.completed_at, " ++
+                "r.failure_reason, r.trigger_payload, r.result, r.created_at " ++
+                "FROM autopilot_run r JOIN autopilot a ON a.id = r.autopilot_id " ++
+                "WHERE a.workspace_id = $1::uuid AND r.autopilot_id = $2::uuid AND r.id = $3::uuid",
+            &[_]SqlParam{ .{ .text = workspace_id }, .{ .text = autopilot_id }, .{ .text = run_id } },
+        );
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "run not found" });
+            return;
+        }
+        const row = &rs.rows.items[0];
+        try ctx.renderJson(model.AutopilotRunResponse{
+            .id = row.getText(0) orelse "",
+            .autopilot_id = row.getText(1) orelse "",
+            .trigger_id = row.getText(2),
+            .source = row.getText(3) orelse "",
+            .status = row.getText(4) orelse "",
+            .issue_id = row.getText(5),
+            .task_id = row.getText(6),
+            .triggered_at = row.getText(7) orelse "",
+            .completed_at = row.getText(8),
+            .failure_reason = row.getText(9),
+            .trigger_payload = try model.jsonValueOrNull(allocator, row.getText(10)),
+            .result = try model.jsonValueOrNull(allocator, row.getText(11)),
+            .created_at = row.getText(12) orelse "",
+        });
+        return;
+    }
     ctx.res_status = .not_found;
     try ctx.renderJson(.{ .@"error" = "run not found" });
 }

@@ -30,6 +30,16 @@ pub fn memAlloc() std.mem.Allocator {
     return std.heap.page_allocator;
 }
 
+/// Parse an optional JSON text column into a `std.json.Value`.
+/// Returns `null` for missing/empty/invalid text. The parsed value
+/// is allocated with `allocator` (caller-owned; the caller's arena
+/// or page allocator handles reclamation).
+pub fn jsonValueOrNull(allocator: std.mem.Allocator, text: ?[]const u8) !?std.json.Value {
+    const t = text orelse return null;
+    if (t.len == 0) return null;
+    return std.json.parseFromSliceLeaky(std.json.Value, allocator, t, .{}) catch null;
+}
+
 /// Allocate a copy of `text` using the in-memory allocator.
 pub fn memDup(text: []const u8) ![]const u8 {
     return try memAlloc().dupe(u8, text);
