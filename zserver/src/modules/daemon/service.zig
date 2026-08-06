@@ -716,5 +716,6 @@ pub fn pinTaskSession(ctx: *zfinal.Context) !void {
             };
         }
     }
-    ctx.res_status = .no_content;
+    try response.okNoContent(ctx);
+return;
 }

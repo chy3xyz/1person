@@ -546,7 +546,8 @@ pub fn deleteAutopilot(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "autopilot not found" });
             return;
         }
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -580,7 +581,8 @@ pub fn deleteAutopilot(ctx: *zfinal.Context) !void {
                 triggers.deinit(model.memAlloc());
             }
         }
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }
 
@@ -931,7 +933,8 @@ pub fn deleteTrigger(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "trigger not found" });
             return;
         }
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -956,7 +959,7 @@ pub fn deleteTrigger(ctx: *zfinal.Context) !void {
                     model.memAlloc().free(t.event_filters);
                     model.memAlloc().free(t.created_at);
                     model.memAlloc().free(t.updated_at);
-                    ctx.res_status = .no_content;
+                    try response.okNoContent(ctx);
                     return;
                 }
             }

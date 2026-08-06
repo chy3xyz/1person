@@ -14,6 +14,7 @@
 //! `zfinal/ruoyi-gen`-style layout).
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
@@ -439,7 +440,8 @@ pub fn declineInvitation(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "failed_to_decline_invitation" });
             return;
         };
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -461,6 +463,7 @@ pub fn declineInvitation(ctx: *zfinal.Context) !void {
         }
         inv.status = try memDup("declined");
         inv.updated_at = try memFmtNumber(std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds());
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }

@@ -11,6 +11,7 @@
 //! thin delegate. SQL helpers and data structs live in `model.zig`.
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
@@ -774,7 +775,8 @@ pub fn deleteComment(ctx: *zfinal.Context) !void {
                 .{ .text = workspace_id },
             },
         );
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -796,7 +798,8 @@ pub fn deleteComment(ctx: *zfinal.Context) !void {
             return;
         }
         _ = mem_comments.?.fetchRemove(comment_id);
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }
 
@@ -1089,7 +1092,8 @@ pub fn removeReaction(ctx: *zfinal.Context) !void {
         }
 
         try model.deleteReaction(comment_id, user_id, emoji);
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -1109,6 +1113,7 @@ pub fn removeReaction(ctx: *zfinal.Context) !void {
         const key = try std.fmt.allocPrint(allocator, "{s}:{s}:{s}", .{ comment_id, user_id, emoji });
         defer allocator.free(key);
         _ = mem_reactions.?.fetchRemove(key);
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }

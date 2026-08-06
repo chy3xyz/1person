@@ -17,6 +17,7 @@
 //! to avoid re-implementing the WebSocket ring buffer here.
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
@@ -462,7 +463,8 @@ pub fn deleteChatSession(ctx: *zfinal.Context) !void {
                 .{ .text = user_id },
             },
         );
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+        return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -482,7 +484,8 @@ pub fn deleteChatSession(ctx: *zfinal.Context) !void {
         }
         _ = mem_sessions.?.fetchRemove(session_id);
         _ = mem_messages.?.fetchRemove(session_id);
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }
 
@@ -981,7 +984,8 @@ pub fn markChatSessionRead(ctx: *zfinal.Context) !void {
                 .{ .text = user_id },
             },
         );
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+        return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -1001,7 +1005,7 @@ pub fn markChatSessionRead(ctx: *zfinal.Context) !void {
         }
         entry_ptr.has_unread = false;
         entry_ptr.updated_at = try nowString();
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
     }
 }
 

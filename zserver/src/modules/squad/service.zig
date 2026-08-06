@@ -8,6 +8,7 @@
 //! `model.zig`.
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
@@ -522,7 +523,8 @@ pub fn deleteSquad(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "squad not found" });
             return;
         }
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -546,7 +548,8 @@ pub fn deleteSquad(ctx: *zfinal.Context) !void {
         entry.archived_at = try nowString();
         entry.archived_by = try memDup(user_id);
         entry.updated_at = try nowString();
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }
 
@@ -815,7 +818,8 @@ pub fn removeMember(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "squad member not found" });
             return;
         }
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -857,7 +861,8 @@ pub fn removeMember(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "squad member not found" });
             return;
         }
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }
 

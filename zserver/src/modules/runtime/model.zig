@@ -256,11 +256,11 @@ pub fn runtimeResponseFromRowDuped(allocator: std.mem.Allocator, rs: *zfinal.Res
         .status = dupeText(allocator, r.getText(6)),
         .device_info = dupeText(allocator, r.getText(7)),
         .metadata = .{ .object = std.json.ObjectMap.empty },
-        .owner_id = dupeOpt(allocator, r.getText(10)),
-        .visibility = dupeText(allocator, r.getText(13)),
+        .owner_id = dupeOpt(allocator, r.getText(12)),
+        .visibility = dupeText(allocator, r.getText(14)),
         .last_seen_at = dupeOpt(allocator, r.getText(9)),
-        .created_at = dupeText(allocator, r.getText(11)),
-        .updated_at = dupeText(allocator, r.getText(12)),
+        .created_at = dupeText(allocator, r.getText(10)),
+        .updated_at = dupeText(allocator, r.getText(11)),
     };
 }
 
@@ -287,11 +287,11 @@ pub fn runtimeResponseFromRow(rs: *zfinal.ResultSet, row: usize) AgentRuntimeRes
         .status = r.getText(6) orelse "",
         .device_info = r.getText(7) orelse "",
         .metadata = .{ .object = std.json.ObjectMap.empty },
-        .owner_id = r.getText(10),
-        .visibility = r.getText(13) orelse "private",
+        .owner_id = r.getText(12),
+        .visibility = r.getText(14) orelse "private",
         .last_seen_at = r.getText(9),
-        .created_at = r.getText(11) orelse "",
-        .updated_at = r.getText(12) orelse "",
+        .created_at = r.getText(10) orelse "",
+        .updated_at = r.getText(11) orelse "",
     };
 }
 

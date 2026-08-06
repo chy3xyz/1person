@@ -14,6 +14,7 @@
 //! `../attachment/service.zig` path.
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
@@ -1097,7 +1098,8 @@ pub fn deleteAttachment(ctx: *zfinal.Context) !void {
             "DELETE FROM attachment WHERE id = $1::uuid AND workspace_id = $2::uuid",
             &[_]SqlParam{ .{ .text = attachment_id }, .{ .text = workspace_id } },
         );
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     } else {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
@@ -1120,7 +1122,8 @@ pub fn deleteAttachment(ctx: *zfinal.Context) !void {
             return;
         }
         _ = mem_attachments.?.fetchRemove(attachment_id);
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
+    return;
     }
 }
 

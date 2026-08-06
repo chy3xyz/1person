@@ -6,6 +6,7 @@
 //! SQL and data shapes live in `model.zig`.
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
@@ -232,7 +233,7 @@ pub fn deletePin(ctx: *zfinal.Context) !void {
 
     if (deps.hasPool()) {
         model.dbDeletePin(workspace_id, user_id, item_type, item_id);
-        ctx.res_status = .no_content;
+        try response.okNoContent(ctx);
         return;
     }
 
@@ -250,7 +251,8 @@ pub fn deletePin(ctx: *zfinal.Context) !void {
             break;
         }
     }
-    ctx.res_status = .no_content;
+    try response.okNoContent(ctx);
+return;
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -291,5 +293,6 @@ pub fn reorderPins(ctx: *zfinal.Context) !void {
             }
         }
     }
-    ctx.res_status = .no_content;
+    try response.okNoContent(ctx);
+return;
 }

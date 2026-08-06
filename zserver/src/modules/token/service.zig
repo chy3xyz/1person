@@ -7,6 +7,7 @@
 //! `model.zig`.
 
 const std = @import("std");
+const response = @import("../../common/response.zig");
 const zfinal = @import("zfinal");
 const auth = @import("../../auth.zig");
 const Config = @import("../../config.zig").Config;
@@ -510,15 +511,16 @@ pub fn revokeToken(ctx: *zfinal.Context) !void {
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
         const entry = mem_tokens.?.getPtr(id) orelse {
-            ctx.res_status = .no_content;
+            try response.okNoContent(ctx);
             return;
         };
         if (!std.mem.eql(u8, entry.user_id, u.id)) {
-            ctx.res_status = .no_content;
+            try response.okNoContent(ctx);
             return;
         }
         entry.revoked = true;
     }
 
-    ctx.res_status = .no_content;
+    try response.okNoContent(ctx);
+return;
 }
