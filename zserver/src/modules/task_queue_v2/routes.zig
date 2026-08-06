@@ -7,8 +7,8 @@ const zfinal = @import("zfinal");
 const handler = @import("handler.zig");
 const workspace_mw = @import("../../middleware/workspace.zig");
 
-pub fn register(app: *zfinal.ZFinal) !void {
-    var api = zfinal.RouteGroup.init(app, "/api/task-queue");
+fn registerOn(app: *zfinal.ZFinal, prefix: []const u8) !void {
+    var api = zfinal.RouteGroup.init(app, prefix);
     defer api.deinit();
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
@@ -18,7 +18,6 @@ pub fn register(app: *zfinal.ZFinal) !void {
     // Enqueue (create) a new task.
     try api.post("", handler.enqueue);
     try api.post("/", handler.enqueue);
-
     // Transition a task to running.
     try api.post("/:id/start", handler.start);
 
@@ -37,4 +36,10 @@ pub fn register(app: *zfinal.ZFinal) !void {
 
     // Get queue stats (pending/running/done/failed counts).
     try api.get("/stats", handler.queueStats);
+}
+
+pub fn register(app: *zfinal.ZFinal) !void {
+    // Frontend contract uses /api/task-queue-v2, older callers/e2e use /api/task-queue.
+    try registerOn(app, "/api/task-queue");
+    try registerOn(app, "/api/task-queue-v2");
 }

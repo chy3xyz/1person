@@ -126,6 +126,22 @@ pub const CancelTasksResponse = struct {
     cancelled: i32,
 };
 
+/// One per-agent daily bucket of the workspace activity sparkline.
+/// Mirrors the Go `AgentActivityBucket`.
+pub const AgentActivityBucket = struct {
+    agent_id: []const u8,
+    bucket_at: []const u8,
+    task_count: i32,
+    failed_count: i32,
+};
+
+/// Trailing-30-day total run count per agent (Agents-list RUNS column).
+/// Mirrors the Go `AgentRunCount`.
+pub const AgentRunCount = struct {
+    agent_id: []const u8,
+    run_count: i32,
+};
+
 /// One row of `GET /api/agents/:id/tasks`. Mirrors the subset of the
 /// frontend `AgentTask` interface that `agent_task_queue` actually
 /// stores (the Go handler joins in runtime/chat/autopilot metadata,

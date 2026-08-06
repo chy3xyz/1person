@@ -24,6 +24,10 @@ pub fn createAgent(ctx: *zfinal.Context) !void {
     try service.createAgent(ctx);
 }
 
+pub fn createAgentFromTemplate(ctx: *zfinal.Context) !void {
+    try service.createAgentFromTemplate(ctx);
+}
+
 pub fn updateAgent(ctx: *zfinal.Context) !void {
     try service.updateAgent(ctx);
 }
@@ -42,6 +46,18 @@ pub fn cancelTasks(ctx: *zfinal.Context) !void {
 
 pub fn listTasks(ctx: *zfinal.Context) !void {
     try service.listTasks(ctx);
+}
+
+pub fn getAgentTaskSnapshot(ctx: *zfinal.Context) !void {
+    try service.getAgentTaskSnapshot(ctx);
+}
+
+pub fn getAgentActivity30d(ctx: *zfinal.Context) !void {
+    try service.getAgentActivity30d(ctx);
+}
+
+pub fn getAgentRunCounts(ctx: *zfinal.Context) !void {
+    try service.getAgentRunCounts(ctx);
 }
 
 pub fn getEnv(ctx: *zfinal.Context) !void {

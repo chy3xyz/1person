@@ -8,8 +8,8 @@ const zfinal = @import("zfinal");
 const handler = @import("handler.zig");
 const workspace_mw = @import("../../middleware/workspace.zig");
 
-pub fn register(app: *zfinal.ZFinal) !void {
-    var api = zfinal.RouteGroup.init(app, "/api/analytics");
+fn registerOn(app: *zfinal.ZFinal, prefix: []const u8) !void {
+    var api = zfinal.RouteGroup.init(app, prefix);
     defer api.deinit();
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
@@ -18,4 +18,10 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.post("/reports", handler.generateReport);
     try api.get("/reports", handler.listReports);
     try api.get("/reports/:id", handler.getReport);
+}
+
+pub fn register(app: *zfinal.ZFinal) !void {
+    // Frontend contract uses /api/analytics-v2, older callers/e2e use /api/analytics.
+    try registerOn(app, "/api/analytics");
+    try registerOn(app, "/api/analytics-v2");
 }

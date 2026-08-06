@@ -16,6 +16,7 @@ pub fn register(app: *zfinal.ZFinal) !void {
 
     try api.get("/nodes", handler.listCloudNodes);
     try api.post("/nodes", handler.createCloudNode);
+    try api.delete("/nodes", handler.deleteCloudNode);
     try api.post("/nodes/:id/start", handler.startCloudNode);
     try api.post("/nodes/:id/stop", handler.stopCloudNode);
     try api.post("/nodes/:id/reboot", handler.rebootCloudNode);

@@ -14,6 +14,13 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
     // Chain configs
+    // Frontend contract: /api/blockchain/chains maps to config CRUD.
+    try api.get("/chains", handler.listConfigs);
+    try api.post("/chains", handler.createConfig);
+    try api.get("/chains/:id", handler.getConfig);
+    try api.delete("/chains/:id", handler.deleteConfig);
+    try api.post("/wallets/:wallet_id/transactions", handler.sendTransaction);
+
     try api.get("/configs", handler.listConfigs);
     try api.post("/configs", handler.createConfig);
     try api.get("/configs/:id", handler.getConfig);

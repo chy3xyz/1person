@@ -17,6 +17,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.post("/import", handler.importSkill);
 
     try api.get("/:id", handler.getSkill);
+    // Frontend/Go contract uses PUT for updates; keep PATCH for back-compat.
+    try api.put("/:id", handler.updateSkill);
     try api.patch("/:id", handler.updateSkill);
     try api.delete("/:id", handler.deleteSkill);
 

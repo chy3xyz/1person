@@ -23,6 +23,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     // Multi-tenancy V2: tree / children at the top level (before :id group
     // so literal segments are not captured as :id).
     try app.get("/api/workspaces/tree", handler.getWorkspaceTree);
+    // Frontend contract also calls /api/workspaces/:id/tree.
+    try app.get("/api/workspaces/:id/tree", handler.getWorkspaceTree);
     try app.post("/api/workspaces/children", handler.createChildWorkspace);
 
     var specific = zfinal.RouteGroup.init(app, "/api/workspaces/:id");

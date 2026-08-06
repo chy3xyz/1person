@@ -4,8 +4,8 @@ const zfinal = @import("zfinal");
 const workspace_mw = @import("../../middleware/workspace.zig");
 const handler = @import("handler.zig");
 
-pub fn register(app: *zfinal.ZFinal) !void {
-    var api = zfinal.RouteGroup.init(app, "/api/commissions");
+fn registerOn(app: *zfinal.ZFinal, prefix: []const u8) !void {
+    var api = zfinal.RouteGroup.init(app, prefix);
     defer api.deinit();
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
@@ -23,4 +23,10 @@ pub fn register(app: *zfinal.ZFinal) !void {
     // Records
     try api.get("/records", handler.listRecords);
     try api.get("/records/:id", handler.getRecord);
+}
+
+pub fn register(app: *zfinal.ZFinal) !void {
+    // Frontend contract uses /api/commission, older callers/e2e use /api/commissions.
+    try registerOn(app, "/api/commissions");
+    try registerOn(app, "/api/commission");
 }

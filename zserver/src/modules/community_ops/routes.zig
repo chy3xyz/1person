@@ -4,8 +4,8 @@ const zfinal = @import("zfinal");
 const workspace_mw = @import("../../middleware/workspace.zig");
 const handler = @import("handler.zig");
 
-pub fn register(app: *zfinal.ZFinal) !void {
-    var api = zfinal.RouteGroup.init(app, "/api/community");
+fn registerOn(app: *zfinal.ZFinal, prefix: []const u8) !void {
+    var api = zfinal.RouteGroup.init(app, prefix);
     defer api.deinit();
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
@@ -25,4 +25,10 @@ pub fn register(app: *zfinal.ZFinal) !void {
 
     // Daily digest
     try api.get("/groups/:id/digest", handler.getDailyDigest);
+}
+
+pub fn register(app: *zfinal.ZFinal) !void {
+    // Frontend contract uses /api/community-ops, older callers/e2e use /api/community.
+    try registerOn(app, "/api/community");
+    try registerOn(app, "/api/community-ops");
 }

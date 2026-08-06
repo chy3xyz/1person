@@ -17,6 +17,11 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.delete("/rules/:id", handler.deleteRule);
 
     // Audit execution
+    // Frontend contract paths.
+    try api.get("/audit-rules", handler.listRules);
+    try api.post("/audit/run", handler.runAudit);
+    try api.get("/audit-logs", handler.listAuditLogs);
+
     try api.post("/run", handler.runAudit);
 
     // Audit log listing

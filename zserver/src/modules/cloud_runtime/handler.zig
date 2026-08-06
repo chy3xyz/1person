@@ -11,6 +11,10 @@ pub fn createCloudNode(ctx: *zfinal.Context) !void {
     try service.createCloudNode(ctx);
 }
 
+pub fn deleteCloudNode(ctx: *zfinal.Context) !void {
+    try service.deleteCloudNode(ctx);
+}
+
 pub fn startCloudNode(ctx: *zfinal.Context) !void {
     try service.startCloudNode(ctx);
 }

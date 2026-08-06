@@ -10,6 +10,9 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
     try api.post("/create", handler.createWallet);
+    // Frontend contract: GET /api/wallet returns the caller's wallet.
+    try api.get("", handler.getWallet);
+    try api.get("/", handler.getWallet);
     try api.get("/me", handler.getWallet);
     try api.post("/deposit", handler.deposit);
     try api.post("/withdraw", handler.withdraw);

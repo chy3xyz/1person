@@ -121,6 +121,47 @@ pub fn createCloudNode(ctx: *zfinal.Context) !void {
     try ctx.renderJson(model.cloudNodeResponseFromEntry(entry));
 }
 
+/// `DELETE /api/cloud-runtime/nodes` — remove a node by
+/// `{instance_id}` in the body (frontend contract). 204 on success,
+/// 404 when the node is not owned by this workspace.
+///
+/// NOTE: zfinal's `parseJsonBody` does not preserve the request body
+/// for DELETE (the same limitation noted on issue `removeSubscriber`),
+/// so we read the raw body here and fall back to `?instance_id=`.
+pub fn deleteCloudNode(ctx: *zfinal.Context) !void {
+    const workspace_id = try requireWorkspaceId(ctx);
+
+    var instance_id: []const u8 = "";
+    if (response.queryParam(ctx, "instance_id")) |q| instance_id = q;
+    if (instance_id.len == 0) {
+        if (ctx.getBodyText()) |raw| {
+            defer ctx.allocator.free(raw);
+            const parsed = std.json.parseFromSliceLeaky(struct { instance_id: []const u8 = "" }, ctx.allocator, raw, .{}) catch null;
+            if (parsed) |p| {
+                if (p.instance_id.len > 0) instance_id = p.instance_id;
+            }
+        } else |_| {}
+    }
+    if (instance_id.len == 0) {
+        try response.err(ctx, .bad_request, "instance_id is required", 40021);
+        return;
+    }
+
+    try memInit();
+    try mem_mutex.lock(zfinal.io_instance.io);
+    defer mem_mutex.unlock(zfinal.io_instance.io);
+    const node = mem_cloud_nodes.?.get(instance_id) orelse {
+        try response.err(ctx, .not_found, "node not found", 40401);
+        return;
+    };
+    if (!std.mem.eql(u8, node.workspace_id, workspace_id)) {
+        try response.err(ctx, .not_found, "node not found", 40401);
+        return;
+    }
+    _ = mem_cloud_nodes.?.fetchRemove(instance_id);
+    try response.okNoContent(ctx);
+}
+
 pub fn startCloudNode(ctx: *zfinal.Context) !void {
     const node_id = ctx.getPathParam("id") orelse {
         try response.err(ctx, .bad_request, "node_id is required", 40021);

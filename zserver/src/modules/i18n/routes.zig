@@ -16,4 +16,6 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.get("/locales", handler.listLocales);
     try api.get("/translations", handler.getTranslations);
     try api.post("/translations", handler.setTranslation);
+    // Frontend contract uses PUT for translation updates.
+    try api.put("/translations", handler.setTranslation);
 }

@@ -16,6 +16,14 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.get("/", handler.listTasks);
 
     // Actions — use flat paths with query param to avoid :id/trailing routing issues
+    // Frontend contract paths.
+    try api.get("/tasks", handler.listTasks);
+    try api.post("/tasks", handler.scheduleTask);
+    try api.get("/tasks/:id", handler.getTask);
+    try api.post("/tasks/:id/execute", handler.executeNow);
+    try api.post("/tasks/:id/cancel", handler.cancelTask);
+    try api.post("/tasks/:id/retry", handler.retryTask);
+
     try api.post("/execute", handler.executeNow);
     try api.post("/cancel", handler.cancelTask);
     try api.post("/retry", handler.retryTask);

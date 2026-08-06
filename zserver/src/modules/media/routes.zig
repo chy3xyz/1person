@@ -13,6 +13,9 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.post("", handler.upload);
     try api.get("/", handler.list);
     try api.post("/", handler.upload);
+    // Frontend contract uses /api/media/assets.
+    try api.get("/assets", handler.list);
+    try api.post("/assets", handler.upload);
     try api.get("/:id", handler.get);
     try api.delete("/:id", handler.deleteAsset);
 }

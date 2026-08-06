@@ -49,6 +49,18 @@ fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
     };
 }
 
+/// Resolve a task id from either `:id` path param (frontend contract)
+/// or `?id=` query (legacy e2e).
+fn taskIdFromPathOrQuery(ctx: *zfinal.Context) ![]const u8 {
+    if (ctx.getPathParam("id")) |id| {
+        if (id.len > 0) return id;
+    }
+    if (response.queryParam(ctx, "id")) |q| return q;
+    ctx.res_status = .bad_request;
+    try ctx.renderJson(.{ .@"error" = "id is required" });
+    return error.MissingTaskId;
+}
+
 fn dupDependsOn(deps: []const []const u8) ![]const []const u8 {
     if (deps.len == 0) return &[_][]const u8{};
     const out = try memAlloc().alloc([]const u8, deps.len);
@@ -152,7 +164,7 @@ pub fn listTasks(ctx: *zfinal.Context) !void {
 
 pub fn executeNow(ctx: *zfinal.Context) !void {
     _ = try requireWorkspaceId(ctx);
-    const id = try response.requireQuery(ctx, "id");
+    const id = try taskIdFromPathOrQuery(ctx);
 
     // Optional ?fail=1 to simulate failure
     const should_fail = if (response.queryParam(ctx, "fail")) |v|
@@ -195,7 +207,7 @@ pub fn executeNow(ctx: *zfinal.Context) !void {
 
 pub fn cancelTask(ctx: *zfinal.Context) !void {
     _ = try requireWorkspaceId(ctx);
-    const id = try response.requireQuery(ctx, "id");
+    const id = try taskIdFromPathOrQuery(ctx);
 
     try memInit();
 
@@ -225,7 +237,7 @@ pub fn cancelTask(ctx: *zfinal.Context) !void {
 
 pub fn retryTask(ctx: *zfinal.Context) !void {
     _ = try requireWorkspaceId(ctx);
-    const id = try response.requireQuery(ctx, "id");
+    const id = try taskIdFromPathOrQuery(ctx);
 
     try memInit();
 

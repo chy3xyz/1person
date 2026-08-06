@@ -339,7 +339,7 @@ pub fn sendTransaction(ctx: *zfinal.Context) !void {
     defer parsed.deinit();
     const req = parsed.value;
 
-    const wallet_id = std.mem.trim(u8, req.wallet_id, &std.ascii.whitespace);
+    const wallet_id = ctx.getPathParam("wallet_id") orelse std.mem.trim(u8, req.wallet_id, &std.ascii.whitespace);
     const method = std.mem.trim(u8, req.method, &std.ascii.whitespace);
 
     if (wallet_id.len == 0 or method.len == 0) {

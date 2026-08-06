@@ -15,6 +15,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.get("/", handler.listPipelineConfigs);
     try api.post("/", handler.createPipelineConfig);
     try api.get("/:id", handler.getPipelineConfig);
+    // Frontend/Go contract uses PUT for updates; keep PATCH for back-compat.
+    try api.put("/:id", handler.updatePipelineConfig);
     try api.patch("/:id", handler.updatePipelineConfig);
     try api.delete("/:id", handler.deletePipelineConfig);
 

@@ -234,8 +234,80 @@ pub fn createAgent(ctx: *zfinal.Context) !void {
 
     const parsed = try ctx.parseJsonBody(model.CreateAgentRequest);
     defer parsed.deinit();
+    try createAgentCore(ctx, allocator, workspace_id, user_id, parsed.value);
+}
+
+/// `POST /api/agents/from-template` — create an agent from a template,
+/// with optional per-request overrides. Mirrors the Go
+/// `CreateAgentFromTemplate` (skills merging is not wired yet; the
+/// template's config supplies defaults for unset fields).
+pub fn createAgentFromTemplate(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
+    const user_id = getUserId(ctx) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "unauthorized" });
+        return;
+    };
+
+    const FromTemplateRequest = struct {
+        template_slug: []const u8 = "",
+        name: []const u8 = "",
+        runtime_id: []const u8 = "",
+        model: ?[]const u8 = null,
+        visibility: ?[]const u8 = null,
+        max_concurrent_tasks: ?i32 = null,
+        description: ?[]const u8 = null,
+        instructions: ?[]const u8 = null,
+        avatar_url: ?[]const u8 = null,
+    };
+    const parsed = try ctx.parseJsonBody(FromTemplateRequest);
+    defer parsed.deinit();
     const req = parsed.value;
 
+    if (req.template_slug.len == 0) {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "template_slug is required" });
+        return;
+    }
+
+    // Look up the template seed to fill defaults.
+    const template_model = @import("../agent_template/model.zig");
+    const tpl = for (template_model.seed_templates) |t| {
+        if (std.mem.eql(u8, t.slug, req.template_slug)) break t;
+    } else {
+        ctx.res_status = .not_found;
+        try ctx.renderJson(.{ .@"error" = "template not found" });
+        return;
+    };
+
+    const create_req = model.CreateAgentRequest{
+        .name = if (req.name.len > 0) req.name else tpl.name,
+        .description = req.description orelse tpl.description,
+        .instructions = req.instructions,
+        .avatar_url = req.avatar_url,
+        .runtime_id = req.runtime_id,
+        .visibility = req.visibility,
+        .max_concurrent_tasks = req.max_concurrent_tasks,
+        .model = req.model,
+        .template = req.template_slug,
+    };
+    try createAgentCore(ctx, allocator, workspace_id, user_id, create_req);
+}
+
+/// Shared create-agent logic (validation + DB/in-memory insert +
+/// response). Used by `createAgent` and `createAgentFromTemplate`.
+fn createAgentCore(
+    ctx: *zfinal.Context,
+    allocator: std.mem.Allocator,
+    workspace_id: []const u8,
+    user_id: []const u8,
+    req: model.CreateAgentRequest,
+) !void {
     const name = std.mem.trim(u8, req.name, &std.ascii.whitespace);
     if (name.len == 0) {
         ctx.res_status = .bad_request;
@@ -762,6 +834,134 @@ pub fn listTasks(ctx: *zfinal.Context) !void {
     }
     // No-DB fallback: there is no task queue to read.
     try ctx.renderJson(&[_]model.TaskResponse{});
+}
+
+/// `GET /api/agent-task-snapshot` — workspace-wide active + latest
+/// outcome tasks per agent (frontend presence derivation). Mirrors the
+/// Go `ListWorkspaceAgentTaskSnapshot`.
+pub fn getAgentTaskSnapshot(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
+
+    if (model.borrowDb()) |db| {
+        defer deps.releaseBack(db);
+        // Active tasks + each agent's latest outcome task (completed /
+        // failed; cancelled excluded) — same query as the Go server.
+        var rs = try db.queryParams(
+            "SELECT atq.id::text, atq.agent_id::text, atq.issue_id::text, atq.status, atq.priority, " ++
+                "atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at " ++
+                "FROM agent_task_queue atq JOIN agent a ON a.id = atq.agent_id " ++
+                "WHERE a.workspace_id = $1::uuid AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory') " ++
+                "UNION ALL " ++
+                "SELECT t.id::text, t.agent_id::text, t.issue_id::text, t.status, t.priority, " ++
+                "t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at " ++
+                "FROM (SELECT DISTINCT ON (atq.agent_id) atq.* FROM agent_task_queue atq " ++
+                "JOIN agent a ON a.id = atq.agent_id WHERE a.workspace_id = $1::uuid " ++
+                "AND atq.status IN ('completed', 'failed') ORDER BY atq.agent_id, atq.created_at DESC) t",
+            &[_]SqlParam{ .{ .text = workspace_id }, .{ .text = workspace_id } },
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.TaskResponse) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            const priority = std.fmt.parseInt(i32, row.getText(4) orelse "0", 10) catch 0;
+            try list.append(allocator, .{
+                .id = row.getText(0) orelse "",
+                .agent_id = row.getText(1) orelse "",
+                .issue_id = row.getText(2) orelse "",
+                .status = row.getText(3) orelse "",
+                .priority = priority,
+                .dispatched_at = row.getText(5),
+                .started_at = row.getText(6),
+                .completed_at = row.getText(7),
+                .result = row.getText(8),
+                .@"error" = row.getText(9),
+                .created_at = row.getText(10) orelse "",
+            });
+        }
+        try ctx.renderJson(list.items);
+        return;
+    }
+    try ctx.renderJson(&[_]model.TaskResponse{});
+}
+
+/// `GET /api/agent-activity-30d` — per-agent daily buckets over the
+/// trailing 30 days. Mirrors the Go `GetWorkspaceAgentActivity30d`.
+pub fn getAgentActivity30d(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
+
+    if (model.borrowDb()) |db| {
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT atq.agent_id::text, DATE_TRUNC('day', atq.completed_at)::timestamptz, " ++
+                "COUNT(*)::int, COUNT(*) FILTER (WHERE atq.status = 'failed')::int " ++
+                "FROM agent_task_queue atq JOIN agent a ON a.id = atq.agent_id " ++
+                "WHERE a.workspace_id = $1::uuid AND atq.completed_at IS NOT NULL " ++
+                "AND atq.completed_at > now() - INTERVAL '30 days' " ++
+                "GROUP BY atq.agent_id, 2 ORDER BY atq.agent_id, 2",
+            &[_]SqlParam{.{ .text = workspace_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.AgentActivityBucket) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .agent_id = row.getText(0) orelse "",
+                .bucket_at = row.getText(1) orelse "",
+                .task_count = std.fmt.parseInt(i32, row.getText(2) orelse "0", 10) catch 0,
+                .failed_count = std.fmt.parseInt(i32, row.getText(3) orelse "0", 10) catch 0,
+            });
+        }
+        try ctx.renderJson(list.items);
+        return;
+    }
+    try ctx.renderJson(&[_]model.AgentActivityBucket{});
+}
+
+/// `GET /api/agent-run-counts` — trailing-30-day run totals per agent.
+/// Mirrors the Go `GetWorkspaceAgentRunCounts`.
+pub fn getAgentRunCounts(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
+
+    if (model.borrowDb()) |db| {
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT atq.agent_id::text, COUNT(*)::int " ++
+                "FROM agent_task_queue atq JOIN agent a ON a.id = atq.agent_id " ++
+                "WHERE a.workspace_id = $1::uuid AND atq.created_at > now() - INTERVAL '30 days' " ++
+                "GROUP BY atq.agent_id",
+            &[_]SqlParam{.{ .text = workspace_id }},
+        );
+        defer rs.deinit();
+        var list: std.ArrayList(model.AgentRunCount) = .empty;
+        defer list.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
+            try list.append(allocator, .{
+                .agent_id = row.getText(0) orelse "",
+                .run_count = std.fmt.parseInt(i32, row.getText(1) orelse "0", 10) catch 0,
+            });
+        }
+        try ctx.renderJson(list.items);
+        return;
+    }
+    try ctx.renderJson(&[_]model.AgentRunCount{});
 }
 
 // ──────────────────────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.post("/", handler.createProject);
 
     try api.get("/:id", handler.getProject);
+    // Frontend/Go contract uses PUT for updates; keep PATCH for back-compat.
+    try api.put("/:id", handler.updateProject);
     try api.patch("/:id", handler.updateProject);
     try api.delete("/:id", handler.deleteProject);
 

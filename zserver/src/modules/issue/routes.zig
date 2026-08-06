@@ -33,6 +33,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.get("/children", handler.listChildrenByParents);
 
     try api.get("/:id", handler.getIssue);
+    // Frontend/Go contract uses PUT for updates; keep PATCH for back-compat.
+    try api.put("/:id", handler.updateIssue);
     try api.patch("/:id", handler.updateIssue);
     try api.delete("/:id", handler.deleteIssue);
 

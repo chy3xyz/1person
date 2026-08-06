@@ -4,8 +4,11 @@ const zfinal = @import("zfinal");
 const workspace_mw = @import("../../middleware/workspace.zig");
 const handler = @import("handler.zig");
 
-pub fn register(app: *zfinal.ZFinal) !void {
-    var api = zfinal.RouteGroup.init(app, "/api/notifications");
+/// Register the notification routes on both prefixes: the frontend
+/// contract uses `/api/notification/*` (singular), while older zserver
+/// callers / e2e use `/api/notifications` (plural). Both stay active.
+fn registerOn(app: *zfinal.ZFinal, prefix: []const u8) !void {
+    var api = zfinal.RouteGroup.init(app, prefix);
     defer api.deinit();
     try api.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
@@ -24,4 +27,9 @@ pub fn register(app: *zfinal.ZFinal) !void {
 
     // Channels
     try api.get("/channels", handler.listChannels);
+}
+
+pub fn register(app: *zfinal.ZFinal) !void {
+    try registerOn(app, "/api/notifications");
+    try registerOn(app, "/api/notification");
 }
