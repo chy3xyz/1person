@@ -17,11 +17,14 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  GetAutopilotResponse,
   InboxItem,
   Issue,
   ChatMessage,
   ChatMessagesPage,
   ChatSession,
+  ListAutopilotRunsResponse,
+  ListAutopilotsResponse,
   ListIssuesResponse,
   ListProjectsResponse,
   ListWebhookDeliveriesResponse,
@@ -503,6 +506,131 @@ export const EMPTY_CHAT_MESSAGES_PAGE: ChatMessagesPage = {
   limit: 0,
   has_more: false,
   next_cursor: null,
+};
+
+// ---------------------------------------------------------------------------
+// Autopilot schemas. `listAutopilots` / `getAutopilot` / `listAutopilotRuns` /
+// `getAutopilotRun` feed the autopilots pages. Status / execution-mode /
+// assignee-type / run-status / run-source stay lenient (`z.string()`) so a
+// new backend value renders as a generic label rather than knocking a whole
+// record into the fallback. `trigger_payload` / `result` are opaque.
+// ---------------------------------------------------------------------------
+export const AutopilotSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  project_id: z.string().nullable().optional(),
+  assignee_type: z.string(),
+  assignee_id: z.string(),
+  status: z.string(),
+  execution_mode: z.string(),
+  issue_title_template: z.string().nullable(),
+  created_by_type: z.string(),
+  created_by_id: z.string(),
+  last_run_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_AUTOPILOT: Autopilot = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: null,
+  assignee_type: "agent",
+  assignee_id: "",
+  status: "paused",
+  execution_mode: "run_only",
+  issue_title_template: null,
+  created_by_type: "",
+  created_by_id: "",
+  last_run_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListAutopilotsResponseSchema = z.object({
+  autopilots: z.array(AutopilotSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_AUTOPILOTS_RESPONSE: ListAutopilotsResponse = {
+  autopilots: [],
+  total: 0,
+};
+
+const AutopilotTriggerSchema = z.object({
+  id: z.string(),
+  autopilot_id: z.string(),
+  kind: z.string(),
+  enabled: z.boolean(),
+  cron_expression: z.string().nullable(),
+  timezone: z.string().nullable(),
+  next_run_at: z.string().nullable(),
+  webhook_token: z.string().nullable(),
+  webhook_path: z.string().nullable().optional(),
+  webhook_url: z.string().nullable().optional(),
+  label: z.string().nullable(),
+  event_filters: z
+    .array(z.object({ event: z.string(), actions: z.array(z.string()).optional() }))
+    .nullable()
+    .optional(),
+  last_fired_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const GetAutopilotResponseSchema = z.object({
+  autopilot: AutopilotSchema,
+  triggers: z.array(AutopilotTriggerSchema).default([]),
+}).loose();
+
+export const EMPTY_GET_AUTOPILOT_RESPONSE: GetAutopilotResponse = {
+  autopilot: EMPTY_AUTOPILOT,
+  triggers: [],
+};
+
+export const AutopilotRunSchema = z.object({
+  id: z.string(),
+  autopilot_id: z.string(),
+  trigger_id: z.string().nullable(),
+  source: z.string(),
+  status: z.string(),
+  issue_id: z.string().nullable(),
+  task_id: z.string().nullable(),
+  triggered_at: z.string(),
+  completed_at: z.string().nullable(),
+  failure_reason: z.string().nullable(),
+  trigger_payload: z.unknown(),
+  result: z.unknown(),
+  created_at: z.string(),
+}).loose();
+
+export const EMPTY_AUTOPILOT_RUN: AutopilotRun = {
+  id: "",
+  autopilot_id: "",
+  trigger_id: null,
+  source: "manual",
+  status: "completed",
+  issue_id: null,
+  task_id: null,
+  triggered_at: "",
+  completed_at: null,
+  failure_reason: null,
+  trigger_payload: null,
+  result: null,
+  created_at: "",
+};
+
+export const ListAutopilotRunsResponseSchema = z.object({
+  runs: z.array(AutopilotRunSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE: ListAutopilotRunsResponse = {
+  runs: [],
+  total: 0,
 };
 
 const IssueAssigneeGroupSchema = z.object({
