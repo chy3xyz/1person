@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Bot, Users } from "lucide-react";
 import { cn } from "@1person/ui/lib/utils";
-import { 1PersonIcon } from "./app-icon";
+import { AppIcon } from "./app-icon";
 
 interface ActorAvatarProps {
   name: string;
@@ -54,7 +54,7 @@ function ActorAvatar({
           onError={() => setImgError(true)}
         />
       ) : isSystem ? (
-        <1PersonIcon noSpin style={{ width: size * 0.55, height: size * 0.55 }} />
+        <AppIcon noSpin style={{ width: size * 0.55, height: size * 0.55 }} />
       ) : isAgent ? (
         <Bot style={{ width: size * 0.55, height: size * 0.55 }} />
       ) : isSquad ? (

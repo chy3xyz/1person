@@ -18,14 +18,14 @@ export function ArchitectureDiagram() {
       <div className="hidden md:grid md:grid-cols-[1.7fr_auto_1fr] md:gap-4 md:items-stretch">
         <YourSide />
         <Connector horizontal />
-        <1PersonSide />
+        <PlatformSide />
       </div>
 
       {/* Mobile: stacked */}
       <div className="md:hidden space-y-4">
         <YourSide />
         <Connector horizontal={false} />
-        <1PersonSide />
+        <PlatformSide />
       </div>
     </div>
   );
@@ -79,7 +79,7 @@ function YourSide() {
   );
 }
 
-function 1PersonSide() {
+function PlatformSide() {
   return (
     <div className="rounded-lg border border-border/70 bg-muted/25 p-6 flex flex-col">
       <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-5">

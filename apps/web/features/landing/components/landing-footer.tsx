@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { 1PersonIcon } from "@1person/ui/components/common/1person-icon";
+import { AppIcon } from "@1person/ui/components/common/app-icon";
 import { cn } from "@1person/ui/lib/utils";
 import { useAuthStore } from "@1person/core/auth";
 import { captureDownloadIntent } from "@1person/core/analytics";
@@ -21,7 +21,7 @@ export function LandingFooter() {
           {/* Left — newsletter / CTA */}
           <div className="lg:w-[340px] lg:shrink-0">
             <Link href="#product" className="flex items-center gap-3">
-              <1PersonIcon className="size-5 text-white" noSpin />
+              <AppIcon className="size-5 text-white" noSpin />
               <span className="text-[18px] font-semibold tracking-[0.04em] lowercase">
                 1person
               </span>
@@ -120,7 +120,7 @@ export function LandingFooter() {
         {/* Giant logo */}
         <div className="relative overflow-hidden pb-4">
           <div className="flex items-end gap-6 sm:gap-8">
-            <1PersonIcon
+            <AppIcon
               className="size-[clamp(4rem,12vw,10rem)] shrink-0 text-white"
               noSpin
             />

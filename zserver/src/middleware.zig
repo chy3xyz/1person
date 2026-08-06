@@ -169,8 +169,18 @@ pub fn logAfter(ctx: *zfinal.Context) !void {
     const target = ctx.attributes.get("req_target") orelse "";
     const status = @intFromEnum(ctx.res_status);
 
-    log.info("{s} {s} status={d} duration_us={d} user_id={s} req_id={s}", .{
-        method, target, status, duration_us, user_id, req_id,
+    // Resolve the real client IP honouring MULTICA_TRUSTED_PROXIES
+    // (zfinal v0.22.1+ fixed allow-list matching). Off by default so
+    // proxy headers cannot spoof the logged address.
+    var ip_buf: [64]u8 = undefined;
+    const cfg = g_cfg;
+    const client_ip = zfinal.IpExt.resolveClientIp(ctx, &ip_buf, .{
+        .trust_proxy_headers = if (cfg) |c| c.trusted_proxies.len > 0 else false,
+        .trusted_proxies = if (cfg) |c| c.trusted_proxies else &.{},
+    }) catch "unknown";
+
+    log.info("{s} {s} status={d} duration_us={d} bytes={d} ip={s} user_id={s} req_id={s}", .{
+        method, target, status, duration_us, ctx.response_bytes, client_ip, user_id, req_id,
     });
 }
 

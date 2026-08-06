@@ -1,6 +1,6 @@
 import { LoginPage } from "@1person/views/auth";
 import { DragStrip } from "@1person/views/platform";
-import { 1PersonIcon } from "@1person/ui/components/common/1person-icon";
+import { AppIcon } from "@1person/ui/components/common/app-icon";
 
 function requireRuntimeAppUrl(): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -26,7 +26,7 @@ export function DesktopLoginPage() {
     <div className="flex h-screen flex-col">
       <DragStrip />
       <LoginPage
-        logo={<1PersonIcon bordered size="lg" />}
+        logo={<AppIcon bordered size="lg" />}
         onSuccess={() => {
           // Auth store update triggers AppContent re-render → shows DesktopShell.
           // Initial workspace navigation happens in routes.tsx via IndexRedirect.

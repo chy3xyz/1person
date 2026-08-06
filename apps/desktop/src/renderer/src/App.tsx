@@ -9,7 +9,7 @@ import { api } from "@1person/core/api";
 import { useHasOnboarded } from "@1person/core/paths";
 import { setCurrentWorkspace } from "@1person/core/platform";
 import { ThemeProvider } from "@1person/ui/components/common/theme-provider";
-import { 1PersonIcon } from "@1person/ui/components/common/1person-icon";
+import { AppIcon } from "@1person/ui/components/common/app-icon";
 import { Toaster } from "@1person/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
@@ -239,7 +239,7 @@ function AppContent() {
   if (isLoading || bootstrapping) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <1PersonIcon className="size-6 animate-pulse" />
+        <AppIcon className="size-6 animate-pulse" />
       </div>
     );
   }

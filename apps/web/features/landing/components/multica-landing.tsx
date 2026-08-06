@@ -8,7 +8,7 @@ import { OpenSourceSection } from "./open-source-section";
 import { FAQSection } from "./faq-section";
 import { LandingFooter } from "./landing-footer";
 
-export function 1PersonLanding() {
+export function LandingPage() {
   return (
     <>
       <div className="relative">

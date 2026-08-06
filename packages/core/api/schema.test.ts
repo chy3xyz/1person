@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { EMPTY_ISSUE } from "./schemas";
 import { ApiClient } from "./client";
 import { parseWithFallback } from "./schema";
 
@@ -91,6 +92,159 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("getIssue", () => {
+    it("falls back to an empty issue when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.getIssue("issue-1");
+      expect(issue.id).toBe("");
+      expect(issue.title).toBe("");
+    });
+
+    it("falls back when the body is not an object", async () => {
+      // `res.json()` requires valid JSON — use an array, which parses but
+      // fails the object schema.
+      stubFetchJson([1, 2]);
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.getIssue("issue-1");
+      expect(issue).toEqual(EMPTY_ISSUE);
+    });
+
+    it("accepts a new server status value rather than crashing on enum drift", async () => {
+      // Server adds `archived` as a status. IssueSchema keeps status as
+      // `z.string()` (lenient) so the row still renders; downstream UI's
+      // default-branch handles unknown values.
+      stubFetchJson({
+        id: "issue-1",
+        workspace_id: "ws-1",
+        number: 1,
+        identifier: "MUL-1",
+        title: "Title",
+        description: null,
+        status: "archived",
+        priority: "high",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "u-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 1,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.getIssue("issue-1");
+      expect(issue.id).toBe("issue-1");
+      expect(issue.status).toBe("archived");
+    });
+
+    it("preserves unknown fields the schema didn't list", async () => {
+      // Forward-compat: a new server field passes through via `.loose()`.
+      stubFetchJson({
+        id: "issue-1",
+        workspace_id: "ws-1",
+        number: 1,
+        identifier: "MUL-1",
+        title: "Title",
+        description: null,
+        status: "todo",
+        priority: "none",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "u-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 1,
+        start_date: null,
+        due_date: null,
+        metadata: {},
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+        future_field: { nested: "value" },
+      });
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.getIssue("issue-1");
+      expect((issue as unknown as Record<string, unknown>).future_field).toEqual({ nested: "value" });
+    });
+  });
+
+  describe("listInbox", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const items = await client.listInbox();
+      expect(items).toEqual([]);
+    });
+
+    it("falls back when the body is not an array", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+      const items = await client.listInbox();
+      expect(items).toEqual([]);
+    });
+
+    it("accepts a new server notification type rather than over-dropping the row", async () => {
+      // Server adds `triage` as an inbox type (and `urgent` severity).
+      // InboxItemSchema keeps type/severity lenient so the row still renders.
+      stubFetchJson([
+        {
+          id: "i-1",
+          workspace_id: "ws-1",
+          recipient_type: "member",
+          recipient_id: "u-1",
+          actor_type: "member",
+          actor_id: "u-1",
+          type: "triage",
+          severity: "urgent",
+          issue_id: "iss-1",
+          title: "Needs triage",
+          body: null,
+          issue_status: "in_review",
+          read: false,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          details: { key: "value" },
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const items = await client.listInbox();
+      expect(items).toHaveLength(1);
+      expect(items[0]?.type).toBe("triage");
+    });
+
+    it("accepts an unknown issue_status rather than crashing the badge", async () => {
+      stubFetchJson([
+        {
+          id: "i-2",
+          workspace_id: "ws-1",
+          recipient_type: "member",
+          recipient_id: "u-1",
+          actor_type: null,
+          actor_id: null,
+          type: "status_changed",
+          severity: "attention",
+          issue_id: "iss-2",
+          title: "Status changed",
+          body: null,
+          issue_status: "archived",
+          read: false,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          details: null,
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const items = await client.listInbox();
+      expect(items).toHaveLength(1);
+      expect(items[0]?.issue_status).toBe("archived");
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
@@ -106,6 +260,138 @@ describe("ApiClient schema fallback", () => {
       expect(config.allow_signup).toBe(true);
       expect(config.daemon_server_url).toBeUndefined();
       expect(config.daemon_app_url).toBeUndefined();
+    });
+  });
+
+  describe("searchIssues", () => {
+    it("falls back to an empty result when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res).toEqual({ issues: [], total: 0 });
+    });
+
+    it("accepts a new server match_source rather than over-dropping the row", async () => {
+      stubFetchJson({
+        issues: [
+          {
+            id: "i-1",
+            workspace_id: "ws-1",
+            number: 1,
+            identifier: "MUL-1",
+            title: "Bug",
+            description: null,
+            status: "todo",
+            priority: "none",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "u-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 1,
+            start_date: null,
+            due_date: null,
+            metadata: {},
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            match_source: "attachments",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchIssues({ q: "bug" });
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.match_source).toBe("attachments");
+    });
+  });
+
+  describe("searchProjects", () => {
+    it("falls back to an empty result when the body is not an object", async () => {
+      stubFetchJson([1, 2]);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchProjects({ q: "web" });
+      expect(res).toEqual({ projects: [], total: 0 });
+    });
+
+    it("accepts an unknown project status rather than crashing the badge", async () => {
+      stubFetchJson({
+        projects: [
+          {
+            id: "p-1",
+            workspace_id: "ws-1",
+            title: "Web",
+            description: null,
+            icon: null,
+            status: "frozen",
+            priority: "none",
+            lead_type: null,
+            lead_id: null,
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            issue_count: 3,
+            done_count: 1,
+            resource_count: 0,
+            match_source: "title",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.searchProjects({ q: "web" });
+      expect(res.projects).toHaveLength(1);
+      expect(res.projects[0]?.status).toBe("frozen");
+    });
+  });
+
+  describe("listAgents", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const agents = await client.listAgents();
+      expect(agents).toEqual([]);
+    });
+
+    it("accepts a new agent status rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "a-1",
+          workspace_id: "ws-1",
+          runtime_id: "r-1",
+          name: "Helper",
+          description: "",
+          instructions: "",
+          avatar_url: null,
+          runtime_mode: "cloud",
+          runtime_config: {},
+          custom_args: [],
+          visibility: "workspace",
+          status: "restarting",
+          max_concurrent_tasks: 1,
+          model: "claude",
+          owner_id: null,
+          skills: [],
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          archived_at: null,
+          archived_by: null,
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const agents = await client.listAgents();
+      expect(agents).toHaveLength(1);
+      expect(agents[0]?.status).toBe("restarting");
+    });
+  });
+
+  describe("getAgent", () => {
+    it("falls back to an empty agent when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const agent = await client.getAgent("a-1");
+      expect(agent.id).toBe("");
+      expect(agent.name).toBe("");
     });
   });
 

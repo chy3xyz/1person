@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
 
-interface 1PersonIconProps extends React.ComponentProps<"span"> {
+interface AppIconProps extends React.ComponentProps<"span"> {
   /**
    * If true, play a one-time entrance spin animation.
    */
@@ -38,7 +38,7 @@ export function AppIcon({
   bordered = false,
   size = "sm",
   ...props
-}: 1PersonIconProps) {
+}: AppIconProps) {
   const [entranceDone, setEntranceDone] = useState(!animate);
 
   useEffect(() => {

@@ -4,6 +4,8 @@ import type {
   AgentTemplate,
   AgentTemplateSummary,
   Attachment,
+  Autopilot,
+  AutopilotRun,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -15,8 +17,17 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
+  InboxItem,
+  Issue,
+  ChatMessage,
+  ChatMessagesPage,
+  ChatSession,
   ListIssuesResponse,
+  ListProjectsResponse,
   ListWebhookDeliveriesResponse,
+  Project,
+  SearchIssuesResponse,
+  SearchProjectsResponse,
   Squad,
   TimelineEntry,
   User,
@@ -249,6 +260,249 @@ export const ListIssuesResponseSchema = z.object({
 export const EMPTY_LIST_ISSUES_RESPONSE: ListIssuesResponse = {
   issues: [],
   total: 0,
+};
+
+export const EMPTY_ISSUE: Issue = {
+  id: "",
+  workspace_id: "",
+  number: 0,
+  identifier: "",
+  title: "",
+  description: null,
+  status: "todo",
+  priority: "none",
+  assignee_type: null,
+  assignee_id: null,
+  creator_type: "member",
+  creator_id: "",
+  parent_issue_id: null,
+  project_id: null,
+  position: 0,
+  start_date: null,
+  due_date: null,
+  metadata: {},
+  created_at: "",
+  updated_at: "",
+};
+
+// ---------------------------------------------------------------------------
+// Search schemas. `searchIssues` / `searchProjects` are the command-palette and
+// cross-workspace finder surfaces; a malformed row must not take those down.
+// `match_source` (`"title" | "description" | "comment"`) is kept lenient so a
+// new server-side match kind still renders. `ProjectSchema` nests into the
+// search result and is reused by the projects reads migration.
+// ---------------------------------------------------------------------------
+export const ProjectSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  icon: z.string().nullable(),
+  status: z.string(),
+  priority: z.string(),
+  lead_type: z.string().nullable(),
+  lead_id: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  issue_count: z.number(),
+  done_count: z.number(),
+  resource_count: z.number(),
+}).loose();
+
+export const EMPTY_PROJECT: Project = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: null,
+  icon: null,
+  status: "planned",
+  priority: "none",
+  lead_type: null,
+  lead_id: null,
+  created_at: "",
+  updated_at: "",
+  issue_count: 0,
+  done_count: 0,
+  resource_count: 0,
+};
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [],
+  total: 0,
+};
+
+const SearchIssueResultSchema = IssueSchema.extend({
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+  matched_description_snippet: z.string().optional(),
+  matched_comment_snippet: z.string().optional(),
+}).loose();
+
+export const SearchIssuesResponseSchema = z.object({
+  issues: z.array(SearchIssueResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
+  issues: [],
+  total: 0,
+};
+
+const SearchProjectResultSchema = ProjectSchema.extend({
+  match_source: z.string(),
+  matched_snippet: z.string().optional(),
+}).loose();
+
+export const SearchProjectsResponseSchema = z.object({
+  projects: z.array(SearchProjectResultSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
+  projects: [],
+  total: 0,
+};
+
+// ---------------------------------------------------------------------------
+// Agent schema. `listAgents` / `getAgent` are the agents-list and detail
+// surfaces. Runtime-mode / visibility / status / thinking-level are kept
+// lenient (`z.string()`) so a new backend value renders as a generic badge
+// rather than knocking the whole record into the fallback. Optional fields
+// (`has_custom_env`, `custom_env_key_count`, `mcp_config`, `thinking_level`)
+// stay optional — older backends omit them.
+// ---------------------------------------------------------------------------
+const AgentSkillSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string(),
+}).loose();
+
+export const AgentSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  runtime_id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  instructions: z.string(),
+  avatar_url: z.string().nullable(),
+  runtime_mode: z.string(),
+  runtime_config: z.record(z.string(), z.unknown()),
+  custom_args: z.array(z.string()).default([]),
+  has_custom_env: z.boolean().optional(),
+  custom_env_key_count: z.number().optional(),
+  mcp_config: z.unknown().nullable().optional(),
+  mcp_config_redacted: z.boolean().optional(),
+  visibility: z.string(),
+  status: z.string(),
+  max_concurrent_tasks: z.number(),
+  model: z.string(),
+  thinking_level: z.string().optional(),
+  owner_id: z.string().nullable(),
+  skills: z.array(AgentSkillSummarySchema).default([]),
+  created_at: z.string(),
+  updated_at: z.string(),
+  archived_at: z.string().nullable(),
+  archived_by: z.string().nullable(),
+}).loose();
+
+export const AgentListSchema = z.array(AgentSchema);
+
+export const EMPTY_AGENT: Agent = {
+  id: "",
+  workspace_id: "",
+  runtime_id: "",
+  name: "",
+  description: "",
+  instructions: "",
+  avatar_url: null,
+  runtime_mode: "local",
+  runtime_config: {},
+  custom_args: [],
+  visibility: "workspace",
+  status: "idle",
+  max_concurrent_tasks: 0,
+  model: "",
+  owner_id: null,
+  skills: [],
+  created_at: "",
+  updated_at: "",
+  archived_at: null,
+  archived_by: null,
+};
+
+export const EMPTY_AGENT_LIST: Agent[] = [];
+
+// ---------------------------------------------------------------------------
+// Chat schemas. `listChatSessions` / `getChatSession` / `listChatMessages` /
+// `listChatMessagesPage` feed the chat window (a primary interactive surface).
+// `role` and `status` are kept lenient (`z.string()`) and `attachments`
+// defaults to `[]` so a legacy message without the field still renders.
+// ---------------------------------------------------------------------------
+export const ChatSessionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  agent_id: z.string(),
+  creator_id: z.string(),
+  title: z.string(),
+  status: z.string(),
+  has_unread: z.boolean(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ChatSessionListSchema = z.array(ChatSessionSchema);
+
+export const EMPTY_CHAT_SESSION: ChatSession = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  creator_id: "",
+  title: "",
+  status: "active",
+  has_unread: false,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
+
+export const ChatMessageSchema = z.object({
+  id: z.string(),
+  chat_session_id: z.string(),
+  role: z.string(),
+  content: z.string(),
+  task_id: z.string().nullable(),
+  created_at: z.string(),
+  attachments: z.array(AttachmentSchema).optional(),
+  failure_reason: z.string().nullable().optional(),
+  failure_message: z.string().nullable().optional(),
+  elapsed_ms: z.number().nullable().optional(),
+}).loose();
+
+export const ChatMessageListSchema = z.array(ChatMessageSchema);
+
+export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
+
+export const ChatMessagesPageSchema = z.object({
+  messages: z.array(ChatMessageSchema).default([]),
+  limit: z.number().default(0),
+  has_more: z.boolean().default(false),
+  next_cursor: z
+    .object({ created_at: z.string(), id: z.string() })
+    .nullable()
+    .optional(),
+}).loose();
+
+export const EMPTY_CHAT_MESSAGES_PAGE: ChatMessagesPage = {
+  messages: [],
+  limit: 0,
+  has_more: false,
+  next_cursor: null,
 };
 
 const IssueAssigneeGroupSchema = z.object({
@@ -959,4 +1213,53 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// ---------------------------------------------------------------------------
+// Inbox schema. The inbox list is a primary surface (renders in both web and
+// desktop shells and feeds the unread count). `issue_status` is kept lenient
+// (`z.string()`) so a new server-side status renders as a generic badge
+// rather than knocking the whole list into the fallback `[]`. `details` is a
+// KV map of notification metadata whose values are always strings.
+// ---------------------------------------------------------------------------
+export const InboxItemSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  recipient_type: z.string(),
+  recipient_id: z.string(),
+  actor_type: z.string().nullable(),
+  actor_id: z.string().nullable(),
+  type: z.string(),
+  severity: z.string(),
+  issue_id: z.string().nullable(),
+  title: z.string(),
+  body: z.string().nullable(),
+  issue_status: z.string().nullable(),
+  read: z.boolean(),
+  archived: z.boolean(),
+  created_at: z.string(),
+  details: z.record(z.string(), z.string()).nullable(),
+}).loose();
+
+export const InboxItemListSchema = z.array(InboxItemSchema);
+
+export const EMPTY_INBOX_LIST: InboxItem[] = [];
+
+export const EMPTY_INBOX_ITEM: InboxItem = {
+  id: "",
+  workspace_id: "",
+  recipient_type: "member",
+  recipient_id: "",
+  actor_type: null,
+  actor_id: null,
+  type: "mentioned",
+  severity: "info",
+  issue_id: null,
+  title: "",
+  body: null,
+  issue_status: null,
+  read: false,
+  archived: false,
+  created_at: "",
+  details: null,
 };

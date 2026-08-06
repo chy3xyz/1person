@@ -10,12 +10,12 @@ import Svg, { Polygon } from "react-native-svg";
 import { THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
 
-interface 1PersonLogoProps {
+interface PersonLogoProps {
   size?: number;
   color?: string;
 }
 
-export function 1PersonLogo({ size = 48, color }: 1PersonLogoProps) {
+export function PersonLogo({ size = 48, color }: PersonLogoProps) {
   const { isDarkColorScheme } = useColorScheme();
   const resolvedColor =
     color ?? (isDarkColorScheme ? THEME.dark.foreground : THEME.light.foreground);

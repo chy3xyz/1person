@@ -147,12 +147,23 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
+  EMPTY_AGENT,
+  EMPTY_AGENT_LIST,
   EMPTY_ATTACHMENT,
+  EMPTY_CHAT_MESSAGE_LIST,
+  EMPTY_CHAT_MESSAGES_PAGE,
+  EMPTY_CHAT_SESSION,
+  EMPTY_CHAT_SESSION_LIST,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_INBOX_ITEM,
+  EMPTY_INBOX_LIST,
+  EMPTY_ISSUE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_PROJECT,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
@@ -160,15 +171,30 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  EMPTY_SEARCH_ISSUES_RESPONSE,
+  EMPTY_SEARCH_PROJECTS_RESPONSE,
   AppConfigSchema,
   type AppConfigResponse,
+  AgentListSchema,
+  AgentSchema,
+  ChatMessageListSchema,
+  ChatMessagesPageSchema,
+  ChatSessionListSchema,
+  ChatSessionSchema,
   GroupedIssuesResponseSchema,
+  InboxItemListSchema,
+  InboxItemSchema,
+  IssueSchema,
   ListIssuesResponseSchema,
+  ListProjectsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  ProjectSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SearchIssuesResponseSchema,
+  SearchProjectsResponseSchema,
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
@@ -553,7 +579,10 @@ export class ApiClient {
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
-    return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    const raw = await this.fetch<unknown>(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    return parseWithFallback(raw, SearchIssuesResponseSchema, EMPTY_SEARCH_ISSUES_RESPONSE, {
+      endpoint: "GET /api/issues/search",
+    });
   }
 
   async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
@@ -561,11 +590,17 @@ export class ApiClient {
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
-    return this.fetch(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    const raw = await this.fetch<unknown>(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    return parseWithFallback(raw, SearchProjectsResponseSchema, EMPTY_SEARCH_PROJECTS_RESPONSE, {
+      endpoint: "GET /api/projects/search",
+    });
   }
 
   async getIssue(id: string): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`);
+    const raw = await this.fetch<unknown>(`/api/issues/${id}`);
+    return parseWithFallback(raw, IssueSchema, EMPTY_ISSUE, {
+      endpoint: "GET /api/issues/:id",
+    });
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
@@ -783,11 +818,17 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
+    return parseWithFallback(raw, AgentListSchema, EMPTY_AGENT_LIST, {
+      endpoint: "GET /api/agents",
+    });
   }
 
   async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
+    return parseWithFallback(raw, AgentSchema, EMPTY_AGENT, {
+      endpoint: "GET /api/agents/:id",
+    });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
@@ -1366,15 +1407,28 @@ export class ApiClient {
 
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
-    return this.fetch("/api/inbox");
+    const raw = await this.fetch<unknown>("/api/inbox");
+    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_LIST, {
+      endpoint: "GET /api/inbox",
+    });
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {
-    return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
+    const raw = await this.fetch<unknown>(`/api/inbox/${id}/read`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, InboxItemSchema, EMPTY_INBOX_ITEM, {
+      endpoint: "POST /api/inbox/:id/read",
+    });
   }
 
   async archiveInbox(id: string): Promise<InboxItem> {
-    return this.fetch(`/api/inbox/${id}/archive`, { method: "POST" });
+    const raw = await this.fetch<unknown>(`/api/inbox/${id}/archive`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, InboxItemSchema, EMPTY_INBOX_ITEM, {
+      endpoint: "POST /api/inbox/:id/archive",
+    });
   }
 
   async getUnreadInboxCount(): Promise<{ count: number }> {
@@ -1678,11 +1732,17 @@ export class ApiClient {
   // Chat Sessions
   async listChatSessions(params?: { status?: string }): Promise<ChatSession[]> {
     const query = params?.status ? `?status=${params.status}` : "";
-    return this.fetch(`/api/chat/sessions${query}`);
+    const raw = await this.fetch<unknown>(`/api/chat/sessions${query}`);
+    return parseWithFallback(raw, ChatSessionListSchema, EMPTY_CHAT_SESSION_LIST, {
+      endpoint: "GET /api/chat/sessions",
+    });
   }
 
   async getChatSession(id: string): Promise<ChatSession> {
-    return this.fetch(`/api/chat/sessions/${id}`);
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${id}`);
+    return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "GET /api/chat/sessions/:id",
+    });
   }
 
   async createChatSession(data: { agent_id: string; title?: string }): Promise<ChatSession> {
@@ -1704,7 +1764,10 @@ export class ApiClient {
   }
 
   async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/messages`);
+    return parseWithFallback(raw, ChatMessageListSchema, EMPTY_CHAT_MESSAGE_LIST, {
+      endpoint: "GET /api/chat/sessions/:id/messages",
+    });
   }
 
   async listChatMessagesPage(
@@ -1718,9 +1781,12 @@ export class ApiClient {
       query.set("before_id", params.before.id);
     }
     try {
-      return await this.fetch(
+      const raw = await this.fetch<unknown>(
         `/api/chat/sessions/${sessionId}/messages/page?${query.toString()}`,
       );
+      return parseWithFallback(raw, ChatMessagesPageSchema, EMPTY_CHAT_MESSAGES_PAGE, {
+        endpoint: "GET /api/chat/sessions/:id/messages/page",
+      });
     } catch (err) {
       // Deployment-order compatibility: a backend deployed before this endpoint
       // existed returns 404 for the unknown route. Fall back to the legacy
@@ -1827,11 +1893,17 @@ export class ApiClient {
   async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    const raw = await this.fetch<unknown>(`/api/projects?${search}`);
+    return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
+      endpoint: "GET /api/projects",
+    });
   }
 
   async getProject(id: string): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`);
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`);
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, {
+      endpoint: "GET /api/projects/:id",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
@@ -2649,7 +2721,7 @@ export class ApiClient {
     });
   }
 
-  async getWallet(walletId: string): Promise<unknown> {
+  async getBlockchainWallet(walletId: string): Promise<unknown> {
     return this.fetch(`/api/blockchain/wallets/${walletId}`);
   }
 

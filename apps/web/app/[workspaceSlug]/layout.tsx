@@ -9,7 +9,7 @@ import { setCurrentWorkspace } from "@1person/core/platform";
 import { useAuthStore } from "@1person/core/auth";
 import { NoAccessPage } from "@1person/views/workspace/no-access-page";
 import { WelcomeAfterOnboarding } from "@1person/views/workspace/welcome-after-onboarding";
-import { 1PersonIcon } from "@1person/ui/components/common/1person-icon";
+import { AppIcon } from "@1person/ui/components/common/app-icon";
 import { useWorkspaceSeen } from "@1person/views/workspace/use-workspace-seen";
 
 export default function WorkspaceLayout({
@@ -76,7 +76,7 @@ export default function WorkspaceLayout({
 
   const loadingIndicator = (
     <div className="flex h-svh items-center justify-center">
-      <1PersonIcon className="size-6 animate-pulse" />
+      <AppIcon className="size-6 animate-pulse" />
     </div>
   );
 

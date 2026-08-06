@@ -1,11 +1,11 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 import { ArrowUpRight } from "lucide-react";
 
-// Docs-local stateless 1Person mark — matches @1person/ui's 1PersonIcon
+// Docs-local stateless 1Person mark — matches @1person/ui's AppIcon
 // visually (same 8-pointed-asterisk clip-path), but without useState/
 // useEffect so it's safe to render from Server Components such as
 // layout.config.tsx / layout.tsx. Keep in sync with
-// packages/ui/components/common/1person-icon.tsx if the mark changes.
+// packages/ui/components/common/app-icon.tsx if the mark changes.
 const MULTICA_CLIP = `polygon(
   45% 62.1%, 45% 100%, 55% 100%, 55% 62.1%,
   81.8% 88.9%, 88.9% 81.8%, 62.1% 55%, 100% 55%,
@@ -15,7 +15,7 @@ const MULTICA_CLIP = `polygon(
   0% 55%, 37.9% 55%, 11.1% 81.8%, 18.2% 88.9%
 )`;
 
-function 1PersonMark() {
+function PersonMark() {
   return (
     <span className="inline-block size-[1em]" aria-hidden="true">
       <span
@@ -67,7 +67,7 @@ export const baseOptions: BaseLayoutProps = {
       external: true,
     },
     {
-      icon: <1PersonMark />,
+      icon: <PersonMark />,
       text: externalLinkText("1Person"),
       url: "https://1person.ai",
       external: true,

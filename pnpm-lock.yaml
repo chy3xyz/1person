@@ -136,6 +136,15 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@1person/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@1person/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@1person/views':
+        specifier: workspace:*
+        version: link:../../packages/views
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -163,15 +172,6 @@ importers:
       '@fontsource/geist-mono':
         specifier: ^5.2.7
         version: 5.2.7
-      '@multica/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@multica/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../../packages/views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
@@ -206,15 +206,15 @@ importers:
         specifier: 'catalog:'
         version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
+      '@1person/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/eslint-config
+      '@1person/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@electron-toolkit/tsconfig':
         specifier: ^2.0.0
         version: 2.0.0(@types/node@25.5.0)
-      '@multica/eslint-config':
-        specifier: workspace:*
-        version: link:../../packages/eslint-config
-      '@multica/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
       '@tailwindcss/vite':
         specifier: ^4
         version: 4.2.2(vite@8.0.1(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@25.5.0)(jiti@2.6.1)(terser@5.47.1)(yaml@2.9.0))
@@ -263,7 +263,7 @@ importers:
 
   apps/docs:
     dependencies:
-      '@multica/ui':
+      '@1person/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       fumadocs-core:
@@ -315,12 +315,12 @@ importers:
 
   apps/mobile:
     dependencies:
+      '@1person/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@expo/vector-icons':
         specifier: ^14.1.0
         version: 14.1.0(expo-font@55.0.7)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
-      '@multica/core':
-        specifier: workspace:*
-        version: link:../../packages/core
       '@react-native-community/datetimepicker':
         specifier: 8.6.0
         version: 8.6.0(expo@55.0.24)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
@@ -520,6 +520,15 @@ importers:
 
   apps/web:
     dependencies:
+      '@1person/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@1person/ui':
+        specifier: workspace:*
+        version: link:../../packages/ui
+      '@1person/views':
+        specifier: workspace:*
+        version: link:../../packages/views
       '@base-ui/react':
         specifier: ^1.3.0
         version: 1.3.0(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -538,15 +547,6 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
-      '@multica/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@multica/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../../packages/views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
@@ -695,7 +695,7 @@ importers:
         specifier: 'catalog:'
         version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
-      '@multica/eslint-config':
+      '@1person/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
       '@tailwindcss/postcss':
@@ -762,10 +762,10 @@ importers:
         specifier: 'catalog:'
         version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
-      '@multica/eslint-config':
+      '@1person/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
-      '@multica/tsconfig':
+      '@1person/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@testing-library/react':
@@ -921,10 +921,10 @@ importers:
         specifier: ^1.1.2
         version: 1.1.2(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
     devDependencies:
-      '@multica/eslint-config':
+      '@1person/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
-      '@multica/tsconfig':
+      '@1person/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@types/linkify-it':
@@ -942,6 +942,12 @@ importers:
 
   packages/views:
     dependencies:
+      '@1person/core':
+        specifier: workspace:*
+        version: link:../core
+      '@1person/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@base-ui/react':
         specifier: ^1.3.0
         version: 1.3.0(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -957,12 +963,6 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
-      '@multica/core':
-        specifier: workspace:*
-        version: link:../core
-      '@multica/ui':
-        specifier: workspace:*
-        version: link:../ui
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.96.2(react@19.2.3)
@@ -1108,10 +1108,10 @@ importers:
         specifier: 'catalog:'
         version: 5.0.12(@types/react@19.2.14)(immer@11.1.4)(react@19.2.3)(use-sync-external-store@1.6.0(react@19.2.3))
     devDependencies:
-      '@multica/eslint-config':
+      '@1person/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
-      '@multica/tsconfig':
+      '@1person/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
       '@testing-library/jest-dom':
