@@ -12,8 +12,8 @@ src/
 ├── migrate.zig / health.zig / auth.zig (JWT helpers) / redis.zig / util.zig
 ├── tests.zig
 ├── middleware/      (workspace.zig, ratelimit.zig)
-├── common/          (cross-cutting helpers — placeholder today)
-└── modules/         31 per-domain packages, one directory per business
+├── common/          (shared helpers: response, validation, pagination, mem, ctx)
+└── modules/         50 per-domain packages, one directory per business
                      module. Each contains:
                      ├── handler.zig  thin HTTP delegate (1 line per route)
                      ├── service.zig  business logic + state + no-DB fallback
@@ -98,21 +98,20 @@ DATABASE_URL=... ./zig-out/bin/zserver server --port 18080
 
 ## Source-layout migration status (Step 4 ✅✅✅)
 
-**All 31 business modules migrated to the new zfinal layout.** The
+**All 50 business modules migrated to the new zfinal layout.** The
 legacy `src/handlers/` and `src/routes/` directories are deleted.
-Every business endpoint now lives under
-`src/modules/<name>/{handler,service,model,routes}.zig`.
+Every business endpoint lives under
+`src/modules/<name>/{handler,service,model,routes}.zig`, all registered
+from `src/router.zig`, and every endpoint the frontend calls resolves.
 
 The historical record of the migration is in
 `docs/handler-migration-guide-historical.md` (the old
 `HANDLER_MIGRATION_GUIDE.md` moved out of `src/` when `src/handlers/`
-was deleted).
+was deleted; the document reflects only the migration-time state).
 
-**One stub remains**: `src/modules/issue/` is a thin 501 Not
-Implemented stub for its 26 endpoints. The `routes.zig` + `handler.zig`
-are real; `service.zig` returns `501` with `{"endpoint": "<name>"}`.
-The real DB / in-memory logic from the legacy ~3278-line issue
-handler can be ported in a follow-up turn without touching
-`routes.zig` or `handler.zig`. The 12/12 smoke suite does not
-exercise issue endpoints, so the stub does not break CI.
+**No stubs remain.** The issue module (and every other module) is fully
+implemented with DB branches and no-DB in-memory fallbacks. Modules
+without a Go counterpart or DB table (billing, commission, blockchain,
+notification, etc.) intentionally keep in-memory implementations —
+see `README.md` for the list and rationale.
 
