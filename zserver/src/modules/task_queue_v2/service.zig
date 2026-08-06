@@ -18,6 +18,7 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const Config = @import("../../config.zig").Config;
 const model = @import("model.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const log = std.log.scoped(.task_queue_v2_service);
 
@@ -28,8 +29,8 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 // ──────────────────────────────────────────────────────────────────────
 // enqueue

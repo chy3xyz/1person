@@ -12,6 +12,7 @@ const zfinal = @import("zfinal");
 const deps = @import("../../deps.zig");
 const SqlParam = zfinal.SqlParam;
 const model = @import("model.zig");
+const common_mem = @import("../../common/mem.zig");
 
 const log = std.log.scoped(.lark_service);
 
@@ -19,8 +20,8 @@ var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_bindings: ?std.StringHashMap(model.BindingEntry) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memInit() !void {
     if (mem_bindings == null) {

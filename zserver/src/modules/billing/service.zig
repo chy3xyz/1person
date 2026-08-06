@@ -15,6 +15,7 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const Config = @import("../../config.zig").Config;
 const model = @import("model.zig");
+const common_mem = @import("../../common/mem.zig");
 
 const log = std.log.scoped(.billing_service);
 
@@ -40,8 +41,8 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memInit() !void {
     if (mem_initialized) return;
@@ -104,11 +105,17 @@ fn generateId(allocator: std.mem.Allocator, seed: []const u8) ![]const u8 {
     defer allocator.free(payload);
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(payload, &hash, .{});
-    const hex = try allocator.alloc(u8, 32);
+    const hex = try allocator.alloc(u8, 36);
     const charset = "0123456789abcdef";
+    var o: usize = 0;
     for (hash[0..16], 0..) |b, i| {
-        hex[i * 2] = charset[b >> 4];
-        hex[i * 2 + 1] = charset[b & 0x0f];
+        if (i == 4 or i == 6 or i == 8 or i == 10) {
+            hex[o] = '-';
+            o += 1;
+        }
+        hex[o] = charset[b >> 4];
+        hex[o + 1] = charset[b & 0x0f];
+        o += 2;
     }
     return hex;
 }
@@ -125,9 +132,8 @@ fn rfc3339(allocator: std.mem.Allocator, ts: i64) ![]const u8 {
 }
 
 fn nowString() ![]const u8 {
-    const secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return try rfc3339(memAlloc(), secs);
-}
+        return common_mem.nowString();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
     return try memAlloc().dupe(u8, text);

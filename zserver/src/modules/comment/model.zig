@@ -15,12 +15,13 @@ const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
 const attachment = @import("../attachment/service.zig");
+const common_mem = @import("../../common/mem.zig");
 
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode or when the pool is uninitialised.
 pub fn borrowDb() ?*zfinal.DB {
-    return deps.acquire() catch null;
-}
+        return common_mem.borrowDb();
+    }
 
 /// In-memory `comment` row. Mirrors the subset of columns the no-DB
 /// smoke path needs; values are stored as plain strings (no

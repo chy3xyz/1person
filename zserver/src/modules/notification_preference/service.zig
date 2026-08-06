@@ -8,6 +8,7 @@
 const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const log = std.log.scoped(.notification_pref_service);
 
@@ -16,12 +17,12 @@ var g_prefs: model.PreferencesResponse = model.default_prefs;
 pub fn init(_: *const anyopaque) void {}
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn getUserId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("user_id");
-}
+        return common_ctx.getUserId(ctx);
+    }
 
 pub fn getPreferences(ctx: *zfinal.Context) !void {
     if (getWorkspaceId(ctx)) |workspace_id| {

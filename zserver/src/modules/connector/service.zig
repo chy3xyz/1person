@@ -8,6 +8,8 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const log = std.log.scoped(.connector_service);
 
@@ -16,8 +18,8 @@ var mem_configs: ?std.StringHashMap(model.ConnectorConfig) = null;
 var mem_logs: ?std.ArrayList(model.ApiCallLog) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memInit() !void {
     if (mem_configs == null) {
@@ -33,13 +35,12 @@ fn memDup(text: []const u8) ![]const u8 {
 }
 
 fn nowString() ![]const u8 {
-    const secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return try std.fmt.allocPrint(memAlloc(), "{d}", .{secs});
-}
+        return common_mem.nowString();
+    }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 // ──────────────────────────────────────────────────────────────
 // request DTOs

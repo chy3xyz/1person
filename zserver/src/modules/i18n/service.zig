@@ -10,6 +10,7 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
 
 var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_translations: ?std.StringHashMap([]const u8) = null;
@@ -18,8 +19,8 @@ var mem_locales_initialized: bool = false;
 var mem_locales: [2]model.LocaleConfig = undefined;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memInitLocales() void {
     if (mem_locales_initialized) return;
@@ -37,8 +38,8 @@ fn memInitTranslations() !void {
 }
 
 fn memDup(text: []const u8) ![]const u8 {
-    return memAlloc().dupe(u8, text);
-}
+        return common_mem.memDup(text);
+    }
 
 /// GET /api/i18n/translations?locale=<locale>
 /// Returns all translations for the given locale as an array of

@@ -12,6 +12,7 @@ const deps = @import("../../deps.zig");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
 const validation = @import("../../common/validation.zig");
+const common_mem = @import("../../common/mem.zig");
 
 const log = std.log.scoped(.blockchain_service);
 
@@ -28,8 +29,8 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn ensureMaps() !void {
     if (mem_configs == null) mem_configs = std.StringHashMap(model.ChainConfig).init(memAlloc());

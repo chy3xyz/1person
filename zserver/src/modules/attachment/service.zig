@@ -19,6 +19,8 @@ const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
 const model = @import("model.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 // Re-export model types so cross-module consumers can keep importing
 // `../attachment/service.zig` for `AttachmentResponse` /
@@ -84,12 +86,12 @@ fn memInit() !void {
 }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn getUserId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("user_id");
-}
+        return common_ctx.getUserId(ctx);
+    }
 
 fn getWorkspaceRole(ctx: *zfinal.Context) ?[]const u8 {
     return ctx.attributes.get("workspace_role");
@@ -110,11 +112,17 @@ fn generateId(allocator: std.mem.Allocator, seed: []const u8) ![]const u8 {
     defer allocator.free(payload);
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(payload, &hash, .{});
-    const hex = try allocator.alloc(u8, 32);
+    const hex = try allocator.alloc(u8, 36);
     const charset = "0123456789abcdef";
+    var o: usize = 0;
     for (hash[0..16], 0..) |b, i| {
-        hex[i * 2] = charset[b >> 4];
-        hex[i * 2 + 1] = charset[b & 0x0f];
+        if (i == 4 or i == 6 or i == 8 or i == 10) {
+            hex[o] = '-';
+            o += 1;
+        }
+        hex[o] = charset[b >> 4];
+        hex[o + 1] = charset[b & 0x0f];
+        o += 2;
     }
     return hex;
 }
@@ -124,10 +132,8 @@ fn memDup(text: []const u8) ![]const u8 {
 }
 
 fn nowString() ![]const u8 {
-    const ts = std.Io.Timestamp.now(zfinal.io_instance.io, .real);
-    const secs = ts.toSeconds();
-    return try std.fmt.allocPrint(model.memAlloc(), "{d}", .{secs});
-}
+        return common_mem.nowString();
+    }
 
 fn ensureUploadDir() !void {
     try std.Io.Dir.cwd().createDirPath(io(), model.upload_dir);

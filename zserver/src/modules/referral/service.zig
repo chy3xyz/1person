@@ -8,6 +8,8 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 pub const ReferralCode = model.ReferralCode;
 pub const ReferralRecord = model.ReferralRecord;
@@ -17,12 +19,12 @@ var mem_codes: ?std.StringHashMap(model.ReferralCode) = null;
 var mem_records: ?std.StringHashMap(model.ReferralRecord) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
-    return memAlloc().dupe(u8, text);
-}
+        return common_mem.memDup(text);
+    }
 
 fn memInit() !void {
     if (mem_codes == null) {
@@ -42,8 +44,8 @@ fn nowStr() ![]const u8 {
 }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
     return getWorkspaceId(ctx) orelse {
@@ -53,8 +55,8 @@ fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
 }
 
 fn getUserId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("user_id");
-}
+        return common_ctx.getUserId(ctx);
+    }
 
 /// ── Referral Code CRUD ─────────────────────────────────────────
 

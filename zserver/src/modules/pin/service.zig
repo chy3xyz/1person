@@ -10,6 +10,8 @@ const zfinal = @import("zfinal");
 const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
 const model = @import("model.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const log = std.log.scoped(.pin_service);
 
@@ -23,8 +25,8 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memInit() !void {
     if (mem_pins == null) {
@@ -37,17 +39,16 @@ fn memDup(text: []const u8) ![]const u8 {
 }
 
 fn nowString() ![]const u8 {
-    const secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return try std.fmt.allocPrint(memAlloc(), "{d}", .{secs});
-}
+        return common_mem.nowString();
+    }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn getUserId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("user_id");
-}
+        return common_ctx.getUserId(ctx);
+    }
 
 fn memMaxPosition(workspace_id: []const u8, user_id: []const u8) f64 {
     var max: f64 = 0;

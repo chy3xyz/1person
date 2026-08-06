@@ -17,6 +17,7 @@ const SqlParam = zfinal.SqlParam;
 const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
 const model = @import("model.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const log = std.log.scoped(.agent_service);
 
@@ -27,12 +28,12 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn getUserId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("user_id");
-}
+        return common_ctx.getUserId(ctx);
+    }
 
 fn getWorkspaceRole(ctx: *zfinal.Context) ?[]const u8 {
     return ctx.attributes.get("workspace_role");

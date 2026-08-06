@@ -34,6 +34,7 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
+const common_mem = @import("../../common/mem.zig");
 
 // ──────────────────────────────────────────────────────────────────────
 // DB borrow helper
@@ -43,8 +44,8 @@ const deps = @import("../../deps.zig");
 /// in no-DB mode or when the pool is uninitialised. Caller owns the
 /// `defer deps.releaseBack(db)`.
 pub fn borrowDb() ?*zfinal.DB {
-    return deps.acquire() catch null;
-}
+        return common_mem.borrowDb();
+    }
 
 // ──────────────────────────────────────────────────────────────────────
 // in-memory state
@@ -78,11 +79,17 @@ pub fn generateId(allocator: std.mem.Allocator, seed: []const u8) ![]const u8 {
     defer allocator.free(payload);
     var hash: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash(payload, &hash, .{});
-    const hex = try allocator.alloc(u8, 32);
+    const hex = try allocator.alloc(u8, 36);
     const charset = "0123456789abcdef";
+    var o: usize = 0;
     for (hash[0..16], 0..) |b, i| {
-        hex[i * 2] = charset[b >> 4];
-        hex[i * 2 + 1] = charset[b & 0x0f];
+        if (i == 4 or i == 6 or i == 8 or i == 10) {
+            hex[o] = '-';
+            o += 1;
+        }
+        hex[o] = charset[b >> 4];
+        hex[o + 1] = charset[b & 0x0f];
+        o += 2;
     }
     return hex;
 }

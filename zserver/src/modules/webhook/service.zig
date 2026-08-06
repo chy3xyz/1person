@@ -11,6 +11,7 @@ const zfinal = @import("zfinal");
 const Config = @import("../../config.zig").Config;
 const autopilot = @import("../autopilot/service.zig");
 const model = @import("model.zig");
+const common_mem = @import("../../common/mem.zig");
 
 const log = std.log.scoped(.webhook_service);
 
@@ -24,8 +25,8 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn ensurePayloads() !void {
     if (mem_payloads == null) {
@@ -34,9 +35,8 @@ fn ensurePayloads() !void {
 }
 
 fn nowString() ![]const u8 {
-    const secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return try model.rfc3339(memAlloc(), secs);
-}
+        return common_mem.nowString();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
     return try memAlloc().dupe(u8, text);

@@ -6,6 +6,8 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const CommunityGroup = model.CommunityGroup;
 const Announcement = model.Announcement;
@@ -15,12 +17,12 @@ var mem_groups: ?std.StringHashMap(CommunityGroup) = null;
 var mem_announcements: ?std.StringHashMap(Announcement) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
-    return memAlloc().dupe(u8, text);
-}
+        return common_mem.memDup(text);
+    }
 
 fn memInit() !void {
     if (mem_groups == null) {
@@ -35,8 +37,8 @@ fn generateId(prefix: []const u8) ![]const u8 {
 }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
     return getWorkspaceId(ctx) orelse {

@@ -14,12 +14,13 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
+const common_mem = @import("../../common/mem.zig");
 
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode.
 pub fn borrowDb() ?*zfinal.DB {
-    return deps.acquire() catch null;
-}
+        return common_mem.borrowDb();
+    }
 
 /// `user` row.
 pub const User = struct {

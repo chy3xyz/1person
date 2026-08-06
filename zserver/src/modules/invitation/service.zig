@@ -20,6 +20,7 @@ const deps = @import("../../deps.zig");
 const util = @import("../../util.zig");
 const workspace = @import("../workspace/model.zig");
 const model = @import("model.zig");
+const common_mem = @import("../../common/mem.zig");
 
 const log = std.log.scoped(.invitation_service);
 
@@ -27,8 +28,8 @@ var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_invitations: ?std.StringHashMap(model.InvitationEntry) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memInit() !void {
     if (mem_invitations == null) {

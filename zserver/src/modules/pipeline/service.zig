@@ -4,6 +4,8 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 pub const PipelineConfig = model.PipelineConfig;
 pub const PipelineRun = model.PipelineRun;
@@ -13,8 +15,12 @@ var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_configs: ?std.StringHashMap(model.PipelineConfig) = null;
 var mem_runs: ?std.StringHashMap(model.PipelineRun) = null;
 
-fn memAlloc() std.mem.Allocator { return std.heap.page_allocator; }
-fn memDup(text: []const u8) ![]const u8 { return memAlloc().dupe(u8, text); }
+fn memAlloc() std.mem.Allocator {
+        return common_mem.memAlloc();
+    }
+fn memDup(text: []const u8) ![]const u8 {
+        return common_mem.memDup(text);
+    }
 
 fn memInit() !void {
     if (mem_configs == null) {
@@ -24,11 +30,12 @@ fn memInit() !void {
 }
 
 fn generateId(prefix: []const u8) ![]const u8 {
-    const ts = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return std.fmt.allocPrint(memAlloc(), "{s}-{d}", .{ prefix, ts });
-}
+        return common_mem.generateId(prefix);
+    }
 
-fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 { return ctx.attributes.get("workspace_id"); }
+fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
     return getWorkspaceId(ctx) orelse {

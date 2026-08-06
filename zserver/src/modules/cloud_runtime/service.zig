@@ -9,6 +9,8 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 pub const CloudNodeEntry = model.CloudNodeEntry;
 pub const CloudNodeResponse = model.CloudNodeResponse;
@@ -21,12 +23,12 @@ var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_cloud_nodes: ?std.StringHashMap(model.CloudNodeEntry) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
-    return memAlloc().dupe(u8, text);
-}
+        return common_mem.memDup(text);
+    }
 
 fn memInit() !void {
     if (mem_cloud_nodes == null) {
@@ -35,20 +37,16 @@ fn memInit() !void {
 }
 
 fn nowString() ![]const u8 {
-    const ts = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return std.fmt.allocPrint(memAlloc(), "{d}", .{ts});
-}
+        return common_mem.nowString();
+    }
 
 fn generateId(prefix: []const u8) ![]const u8 {
-    const ts = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return std.fmt.allocPrint(memAlloc(), "{s}-{d}", .{ prefix, ts });
-}
+        return common_mem.generateId(prefix);
+    }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id") orelse
-        ctx.attributes.get("X-Workspace-Id") orelse
-        null;
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
     return getWorkspaceId(ctx) orelse {

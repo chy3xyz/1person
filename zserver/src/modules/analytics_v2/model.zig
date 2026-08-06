@@ -7,12 +7,13 @@
 const std = @import("std");
 const zfinal = @import("zfinal");
 const deps = @import("../../deps.zig");
+const common_mem = @import("../../common/mem.zig");
 
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode or when the pool is uninitialised.
 pub fn borrowDb() ?*zfinal.DB {
-    return deps.acquire() catch null;
-}
+        return common_mem.borrowDb();
+    }
 
 /// A single tracked metric data point.
 pub const Metric = struct {

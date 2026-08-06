@@ -14,6 +14,7 @@ const SqlParam = zfinal.SqlParam;
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
 const validation = @import("../../common/validation.zig");
+const common_mem = @import("../../common/mem.zig");
 
 const log = std.log.scoped(.contact_service);
 
@@ -29,8 +30,8 @@ pub fn init(cfg: *const Config) void {
 }
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn ensureSubmissions() !void {
     if (mem_submissions == null) {
@@ -39,9 +40,8 @@ fn ensureSubmissions() !void {
 }
 
 fn nowString() ![]const u8 {
-    const secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    return try model.rfc3339(memAlloc(), secs);
-}
+        return common_mem.nowString();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
     return try memAlloc().dupe(u8, text);

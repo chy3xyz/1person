@@ -14,6 +14,7 @@
 const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 const log = std.log.scoped(.analytics_v2_service);
 
@@ -29,8 +30,8 @@ var reports: std.ArrayList(model.Report) = .empty;
 var next_report_id: usize = 1;
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 /// POST /api/analytics/track
 /// Body: { name, value, labels? }

@@ -8,6 +8,8 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
+const common_mem = @import("../../common/mem.zig");
+const common_ctx = @import("../../common/ctx.zig");
 
 pub const CommissionRule = model.CommissionRule;
 pub const CommissionRecord = model.CommissionRecord;
@@ -18,12 +20,12 @@ var mem_rules: ?std.StringHashMap(model.CommissionRule) = null;
 var mem_records: ?std.StringHashMap(model.CommissionRecord) = null;
 
 fn memAlloc() std.mem.Allocator {
-    return std.heap.page_allocator;
-}
+        return common_mem.memAlloc();
+    }
 
 fn memDup(text: []const u8) ![]const u8 {
-    return memAlloc().dupe(u8, text);
-}
+        return common_mem.memDup(text);
+    }
 
 fn memInit() !void {
     if (mem_rules == null) {
@@ -43,8 +45,8 @@ fn nowStr() ![]const u8 {
 }
 
 fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
-    return ctx.attributes.get("workspace_id");
-}
+        return common_ctx.getWorkspaceId(ctx);
+    }
 
 fn requireWorkspaceId(ctx: *zfinal.Context) ![]const u8 {
     return getWorkspaceId(ctx) orelse {

@@ -17,12 +17,13 @@ const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
 const task_queue = @import("../../task_queue.zig");
+const common_mem = @import("../../common/mem.zig");
 
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode or when the pool is uninitialised.
 pub fn borrowDb() ?*zfinal.DB {
-    return deps.acquire() catch null;
-}
+        return common_mem.borrowDb();
+    }
 
 pub fn memAlloc() std.mem.Allocator {
     return std.heap.page_allocator;
