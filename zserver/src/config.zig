@@ -58,7 +58,7 @@ pub const Options = struct {
     db_url: ?[]const u8 = null,
 };
 
-pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts: Options) !Config {
+pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts: Options, io: std.Io) !Config {
     var arena = std.heap.ArenaAllocator.init(parent_allocator);
     errdefer arena.deinit();
     const allocator = arena.allocator();
@@ -72,6 +72,9 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
         break :blk try std.fmt.parseInt(u16, raw, 10);
     };
 
+    const app_env_raw = try getEnvOwnedDefault(allocator, environ, "APP_ENV", "development");
+    const app_env = try allocator.dupe(u8, std.mem.trim(u8, app_env_raw, &std.ascii.whitespace));
+
     const db_url = blk: {
         if (opts.db_url) |u| break :blk try allocator.dupe(u8, u);
         break :blk getEnvOwned(allocator, environ, "DATABASE_URL") catch |err| switch (err) {
@@ -81,10 +84,24 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
     };
 
     const jwt_secret_env = try getEnvOwnedOptional(allocator, environ, "JWT_SECRET");
-    if (jwt_secret_env == null) {
-        log.warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.", .{});
-    }
-    const jwt_secret = jwt_secret_env orelse try allocator.dupe(u8, "dev-jwt-secret-change-me");
+    const jwt_secret = jwt_secret_env orelse blk: {
+        if (std.ascii.eqlIgnoreCase(app_env, "production")) {
+            log.err("JWT_SECRET must be set in production — refusing to start with a guessable secret", .{});
+            return error.JwtSecretRequired;
+        }
+        // Dev: generate a fresh random secret so a defaulted instance is
+        // not running on a publicly-known key. Tokens issued before a
+        // restart become invalid — acceptable for local development.
+        var bytes: [32]u8 = undefined;
+        io.randomSecure(&bytes) catch {
+            log.err("JWT_SECRET not set and no OS entropy available — refusing to start", .{});
+            return error.JwtSecretRequired;
+        };
+        const hex = std.fmt.bytesToHex(bytes, .lower);
+        const secret = try std.fmt.allocPrint(allocator, "dev-{s}", .{hex});
+        log.warn("JWT_SECRET is not set — generated a random dev secret (existing tokens invalidate on restart). Set JWT_SECRET to persist.", .{});
+        break :blk secret;
+    };
     const redis_url = try getEnvOwnedOptional(allocator, environ, "REDIS_URL");
     const cookie_domain = try getEnvOwnedOptional(allocator, environ, "COOKIE_DOMAIN");
 
@@ -114,9 +131,6 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
     const trusted_proxies = try splitCommaEnv(allocator, environ, "MULTICA_TRUSTED_PROXIES", &.{});
     const allowed_emails = try splitCommaEnv(allocator, environ, "ALLOWED_EMAILS", &.{});
     const allowed_email_domains = try splitCommaEnv(allocator, environ, "ALLOWED_EMAIL_DOMAINS", &.{});
-
-    const app_env_raw = try getEnvOwnedDefault(allocator, environ, "APP_ENV", "development");
-    const app_env = try allocator.dupe(u8, std.mem.trim(u8, app_env_raw, &std.ascii.whitespace));
 
     const dev_verification_code = blk: {
         if (std.ascii.eqlIgnoreCase(app_env, "production")) break :blk null;

@@ -218,7 +218,9 @@ pub fn generateCode() u32 {
 
 /// Derive a CSRF token from the auth token using a keyed HMAC.
 pub fn csrfTokenFor(allocator: std.mem.Allocator, token: []const u8) ![]const u8 {
-    const secret = if (g_cfg) |cfg| cfg.jwt_secret else "dev-jwt-secret-change-me";
+    // The CSRF key is the configured JWT secret (never a hardcoded
+    // fallback — config now generates a random secret when unset).
+    const secret = if (g_cfg) |cfg| cfg.jwt_secret else return error.AuthNotConfigured;
     var mac: [std.crypto.auth.hmac.sha2.HmacSha256.mac_length]u8 = undefined;
     std.crypto.auth.hmac.sha2.HmacSha256.create(&mac, token, secret);
 

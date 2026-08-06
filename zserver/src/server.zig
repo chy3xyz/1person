@@ -32,7 +32,7 @@ const log = std.log.scoped(.server);
 pub const Options = config.Options;
 
 pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts: Options) !void {
-    var cfg = try config.load(allocator, environ, opts);
+    var cfg = try config.load(allocator, environ, opts, zfinal.io_instance.io);
     defer cfg.deinit();
 
     var app = zfinal.ZFinal.init(allocator);
