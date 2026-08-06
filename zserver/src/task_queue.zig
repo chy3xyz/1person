@@ -76,7 +76,11 @@ pub fn enqueue(runtime_id: []const u8, task_type: TaskType, payload: []const u8)
         .session_id = null,
         .work_dir = null,
     });
-    return try memDup(id);
+    const dup_id = try memDup(id);
+    // Wake any daemon currently watching this runtime over its
+    // WebSocket (best-effort; daemons still fall back to HTTP claim).
+    @import("daemon_notify.zig").notifyTaskAvailable(runtime_id, dup_id);
+    return dup_id;
 }
 
 pub fn claim(runtime_id: []const u8) !?TaskEntry {

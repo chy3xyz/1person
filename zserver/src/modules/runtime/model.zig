@@ -236,6 +236,43 @@ pub fn runtimeResponseFromEntry(entry: RuntimeEntry) AgentRuntimeResponse {
     };
 }
 
+/// Like `runtimeResponseFromRow` but deep-copies every string field into
+/// `allocator`, so the returned response outlives the result set. Use
+/// this when the response is returned from a function whose `ResultSet`
+/// is deinitialized before the caller reads the response (e.g.
+/// `requireRuntimeAccess`); the borrowing variant is only safe while the
+/// result set stays alive (list handlers that render inside the scope).
+pub fn runtimeResponseFromRowDuped(allocator: std.mem.Allocator, rs: *zfinal.ResultSet, row: usize) AgentRuntimeResponse {
+    const r = &rs.rows.items[row];
+    return AgentRuntimeResponse{
+        .id = dupeText(allocator, r.getText(0)),
+        .workspace_id = dupeText(allocator, r.getText(1)),
+        .daemon_id = dupeOpt(allocator, r.getText(2)),
+        .name = dupeText(allocator, r.getText(3)),
+        .runtime_mode = dupeText(allocator, r.getText(4)),
+        .provider = dupeText(allocator, r.getText(5)),
+        .launch_header = "",
+        .status = dupeText(allocator, r.getText(6)),
+        .device_info = dupeText(allocator, r.getText(7)),
+        .metadata = .{ .object = std.json.ObjectMap.empty },
+        .owner_id = dupeOpt(allocator, r.getText(10)),
+        .visibility = dupeText(allocator, r.getText(13)),
+        .last_seen_at = dupeOpt(allocator, r.getText(9)),
+        .created_at = dupeText(allocator, r.getText(11)),
+        .updated_at = dupeText(allocator, r.getText(12)),
+    };
+}
+
+fn dupeText(allocator: std.mem.Allocator, text: ?[]const u8) []const u8 {
+    const t = text orelse return "";
+    return allocator.dupe(u8, t) catch "";
+}
+
+fn dupeOpt(allocator: std.mem.Allocator, text: ?[]const u8) ?[]const u8 {
+    const t = text orelse return null;
+    return allocator.dupe(u8, t) catch null;
+}
+
 pub fn runtimeResponseFromRow(rs: *zfinal.ResultSet, row: usize) AgentRuntimeResponse {
     const r = &rs.rows.items[row];
     return AgentRuntimeResponse{
@@ -291,7 +328,11 @@ pub fn requireRuntimeAccess(ctx: *zfinal.Context, db: *zfinal.DB, runtime_id: []
         try ctx.renderJson(.{ .@"error" = "runtime not found" });
         return null;
     }
-    return runtimeResponseFromRow(&rs, 0);
+    // Deep-copy: the ResultSet is deinitialized on return, so the
+    // borrowing variant would leave dangling string slices (the caller
+    // reads them after this function returns — see the UUUU corruption
+    // this previously caused in initiateUpdate).
+    return runtimeResponseFromRowDuped(ctx.allocator, &rs, 0);
 }
 
 // Re-exported so service.zig can call into the task queue without a

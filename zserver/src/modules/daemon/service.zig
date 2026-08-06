@@ -183,6 +183,24 @@ pub fn daemonWebSocket(ctx: *zfinal.Context) !void {
     defer allocator.free(greeting);
     ws.writeMessage(greeting, .text) catch return;
 
+    // The daemon declares the runtimes it services via `?runtime_ids=a,b`
+    // (same contract as the Go daemonws handshake). Register the
+    // connection so task enqueues can push `daemon:task_available`.
+    var runtime_ids: std.ArrayList([]const u8) = .empty;
+    defer runtime_ids.deinit(allocator);
+    if (try ctx.getPara("runtime_ids")) |raw| {
+        if (raw.len > 0) {
+            var it = std.mem.splitScalar(u8, raw, ',');
+            while (it.next()) |rid| {
+                const trimmed = std.mem.trim(u8, rid, &std.ascii.whitespace);
+                if (trimmed.len > 0) try runtime_ids.append(allocator, trimmed);
+            }
+        }
+    }
+    const daemon_notify = @import("../../daemon_notify.zig");
+    daemon_notify.register(runtime_ids.items, &ws);
+    defer daemon_notify.unregister(runtime_ids.items, &ws);
+
     // Frame loop: answer `daemon:heartbeat` with `daemon:heartbeat_ack`
     // and treat any text frame as liveness. Mirrors the subset of the
     // Go daemonws protocol that zserver supports (task push is not

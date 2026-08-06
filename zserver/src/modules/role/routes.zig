@@ -14,6 +14,11 @@ pub fn register(app: *zfinal.ZFinal) !void {
     defer defs.deinit();
     try defs.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
+    // Trailing-slash variants: zfinal's router does NOT normalize
+    // `/api/roles/defs` vs `/api/roles/defs/`, so register both forms
+    // (see workspace/routes.zig for the same pattern).
+    try defs.get("", handler.listRoleConfigs);
+    try defs.post("", handler.createRoleConfig);
     try defs.get("/", handler.listRoleConfigs);
     try defs.post("/", handler.createRoleConfig);
 
@@ -26,6 +31,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
     defer members.deinit();
     try members.addInterceptor(workspace_mw.RequireWorkspaceMember);
 
+    try members.get("", handler.listMemberRoles);
+    try members.post("", handler.assignRole);
     try members.get("/", handler.listMemberRoles);
     try members.post("/", handler.assignRole);
 

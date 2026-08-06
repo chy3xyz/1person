@@ -42,7 +42,11 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
 
     // The single zfinal.ConnectionPool that backs every handler. Lives
     // in `deps.pool`; handlers borrow from it via `deps.acquire()`.
-    deps.initPool(allocator, cfg.db_url);
+    // An empty db_url (e.g. `DATABASE_URL=""` from the e2e scripts)
+    // means "run without a database" — do NOT fall back to libpq's
+    // localhost default, which would silently target the wrong database
+    // and make every table-backed query fail.
+    if (cfg.db_url.len > 0) deps.initPool(allocator, cfg.db_url);
     defer deps.deinit(allocator);
 
     if (cfg.redis_url) |url| {
