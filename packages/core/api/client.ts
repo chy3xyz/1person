@@ -2092,11 +2092,17 @@ export class ApiClient {
   async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/autopilots?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
+    return parseWithFallback(raw, ListAutopilotsResponseSchema, EMPTY_LIST_AUTOPILOTS_RESPONSE, {
+      endpoint: "GET /api/autopilots",
+    });
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`);
+    return parseWithFallback(raw, GetAutopilotResponseSchema, EMPTY_GET_AUTOPILOT_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id",
+    });
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
@@ -2125,14 +2131,20 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.limit) search.set("limit", params.limit.toString());
     if (params?.offset) search.set("offset", params.offset.toString());
-    return this.fetch(`/api/autopilots/${id}/runs?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/runs?${search}`);
+    return parseWithFallback(raw, ListAutopilotRunsResponseSchema, EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id/runs",
+    });
   }
 
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/runs/${runId}`);
+    return parseWithFallback(raw, AutopilotRunSchema, EMPTY_AUTOPILOT_RUN, {
+      endpoint: "GET /api/autopilots/:id/runs/:runId",
+    });
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
