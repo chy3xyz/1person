@@ -13,18 +13,22 @@ _setup_sandbox() {
   local payload_dir="$tmp/payload"
   mkdir -p "$stub_bin" "$install_bin" "$payload_dir"
 
-  cat >"$payload_dir/multica" <<'STUB'
+  cat >"$payload_dir/1person" <<'STUB'
 #!/usr/bin/env bash
-echo "multica v0.3.2 (commit: test)"
+echo "1p 0.3.2 (commit: test)"
 STUB
-  chmod +x "$payload_dir/multica"
-  tar -czf "$tmp/multica.tar.gz" -C "$payload_dir" multica
+  chmod +x "$payload_dir/1person"
+  cp "$payload_dir/1person" "$tmp/1person"
 
   cat >"$stub_bin/curl" <<'STUB'
 #!/usr/bin/env bash
-if [[ "$*" == *"-sI"* ]]; then
-  printf 'HTTP/2 302\r\nlocation: https://github.com/multica-ai/multica/releases/tag/v0.3.2\r\n'
+if [[ "$*" == *"version.txt"* ]]; then
+  printf '0.3.2'
   exit 0
+fi
+if [[ "$*" == *".sha256"* ]]; then
+  # No checksum published in this fixture — installer must skip verification.
+  exit 1
 fi
 
 out=""
@@ -55,7 +59,7 @@ _run_installer() {
   local err="$tmp/install.err"
   if ! PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
     MULTICA_BIN_DIR="$tmp/install-bin" \
-    MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+    MULTICA_TEST_ARCHIVE="$tmp/1person" \
     bash "$ROOT_DIR/scripts/install.sh" >"$out" 2>"$err"; then
     echo "install.sh exited non-zero" >&2
     cat "$out" >&2 || true
@@ -63,8 +67,8 @@ _run_installer() {
     return 1
   fi
 
-  if [[ ! -x "$tmp/install-bin/multica" ]]; then
-    echo "expected fallback binary at $tmp/install-bin/multica" >&2
+  if [[ ! -x "$tmp/install-bin/1person" ]]; then
+    echo "expected fallback binary at $tmp/install-bin/1person" >&2
     cat "$out" >&2 || true
     cat "$err" >&2 || true
     return 1

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Multica installer — installs the CLI and optionally provisions a self-host server.
+# 1person installer — installs the Zig CLI and optionally provisions a self-host server.
 #
 # Install / upgrade CLI only:
-#   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash
 #
 # Install CLI + provision self-host server:
-#   curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
+#   curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --with-server
 #
 # After installation, run `multica setup` to configure your environment.
 #
@@ -14,10 +14,10 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-REPO_URL="https://github.com/multica-ai/multica.git"
-REPO_WEB_URL="https://github.com/multica-ai/multica"  # without .git, for GitHub web APIs
-INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.multica/server}"
-BREW_PACKAGE="multica-ai/tap/multica"
+REPO_URL="https://github.com/1person-ai/1person.git"
+REPO_WEB_URL="https://github.com/1person-ai/1person"  # without .git, for GitHub web APIs
+INSTALL_DIR="${MULTICA_INSTALL_DIR:-$HOME/.1person/server}"
+BREW_PACKAGE="1person-ai/tap/1person"
 
 # Colors (disabled when not a terminal)
 if [ -t 1 ] || [ -t 2 ]; then
@@ -87,7 +87,7 @@ detect_os() {
     Linux)  OS="linux" ;;
     MINGW*|MSYS*|CYGWIN*)
             fail "This script does not support Windows. Use the PowerShell installer instead:
-  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex" ;;
+  irm https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.ps1 | iex" ;;
     *)      fail "Unsupported operating system: $(uname -s). Multica supports macOS, Linux, and Windows." ;;
   esac
 
@@ -115,7 +115,7 @@ install_cli_brew() {
   info "Installing Multica CLI via Homebrew..."
   local brew_log
   brew_log=$(mktemp)
-  if ! brew tap multica-ai/tap >"$brew_log" 2>&1; then
+  if ! brew tap 1person-ai/tap >"$brew_log" 2>&1; then
     warn "Failed to add Homebrew tap. Falling back to GitHub Releases binary install."
     _dump_brew_log "$brew_log"
     rm -f "$brew_log"
@@ -139,41 +139,60 @@ install_cli_brew() {
 }
 
 install_cli_binary() {
-  info "Installing Multica CLI from GitHub Releases..."
+  info "Installing 1person CLI from GitHub Releases..."
 
-  # Get latest release tag
-  local latest
-  latest=$(curl -sI "$REPO_WEB_URL/releases/latest" 2>/dev/null | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n' || true)
-  if [ -z "$latest" ]; then
+  # Latest version via version.txt (same contract as '1person update').
+  local base_url="https://github.com/1person-ai/1person/releases/latest/download"
+  local version
+  version=$(curl -fsSL "$base_url/version.txt" 2>/dev/null | tr -d '\r\n' || true)
+  if [ -z "$version" ]; then
     fail "Could not determine latest release. Check your network connection."
   fi
 
-  local version="${latest#v}"
-  local url="https://github.com/multica-ai/multica/releases/download/${latest}/multica-cli-${version}-${OS}-${ARCH}.tar.gz"
+  local os_arch
+  case "$(uname -s)-$(uname -m)" in
+    Darwin-arm64)  os_arch="aarch64-macos" ;;
+    Darwin-x86_64) os_arch="x86_64-macos" ;;
+    Linux-x86_64)  os_arch="x86_64-linux" ;;
+    Linux-aarch64) os_arch="aarch64-linux" ;;
+    *) fail "Unsupported platform: $(uname -s)-$(uname -m)" ;;
+  esac
+
+  local url="$base_url/1person-${os_arch}"
   local tmp_dir
   tmp_dir=$(mktemp -d)
+  local tmp_bin="$tmp_dir/1person"
 
   info "Downloading $url ..."
-  if ! curl -fsSL "$url" -o "$tmp_dir/multica.tar.gz"; then
+  if ! curl -fsSL "$url" -o "$tmp_bin"; then
     rm -rf "$tmp_dir"
     fail "Failed to download CLI binary."
   fi
 
-  tar -xzf "$tmp_dir/multica.tar.gz" -C "$tmp_dir" multica
+  # Verify checksum when a .sha256 sibling is published.
+  if curl -fsSL "$url.sha256" -o "$tmp_dir/1person.sha256" 2>/dev/null; then
+    local expected actual
+    expected=$(awk '{print $1}' "$tmp_dir/1person.sha256" | tr -d '\r\n')
+    actual=$(shasum -a 256 "$tmp_bin" | awk '{print $1}')
+    if [ "$expected" != "$actual" ]; then
+      rm -rf "$tmp_dir"
+      fail "Checksum mismatch — refusing to install."
+    fi
+    ok "Checksum verified"
+  fi
+  chmod +x "$tmp_bin"
 
   # Try /usr/local/bin first, fall back to ~/.local/bin. Tests and scripted
   # installs can override the first choice with MULTICA_BIN_DIR.
   local bin_dir="${MULTICA_BIN_DIR:-/usr/local/bin}"
   if [ -w "$bin_dir" ]; then
-    mv "$tmp_dir/multica" "$bin_dir/multica"
+    mv "$tmp_bin" "$bin_dir/1person"
   elif command_exists sudo; then
-    sudo mv "$tmp_dir/multica" "$bin_dir/multica"
+    sudo mv "$tmp_bin" "$bin_dir/1person"
   else
     bin_dir="$HOME/.local/bin"
     mkdir -p "$bin_dir"
-    mv "$tmp_dir/multica" "$bin_dir/multica"
-    chmod +x "$bin_dir/multica"
-    # Add to PATH if not already there
+    mv "$tmp_bin" "$bin_dir/1person"
     if ! echo "$PATH" | tr ':' '\n' | grep -q "^$bin_dir$"; then
       export PATH="$bin_dir:$PATH"
       add_to_path "$bin_dir"
@@ -181,7 +200,7 @@ install_cli_binary() {
   fi
 
   rm -rf "$tmp_dir"
-  ok "Multica CLI installed to $bin_dir/multica"
+  ok "1person CLI installed to $bin_dir/1person"
 }
 
 add_to_path() {
@@ -285,7 +304,7 @@ install_cli() {
     fi
 
     local new_ver
-    new_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    new_ver=$(1person version 2>/dev/null | awk '{print $2}' || echo "unknown")
     ok "Multica CLI upgraded ($current_ver → $new_ver)"
     return 0
   fi
@@ -297,8 +316,8 @@ install_cli() {
   fi
 
   # Verify
-  if ! command_exists multica; then
-    fail "CLI installed but 'multica' not found on PATH. You may need to restart your shell."
+  if ! command_exists 1person; then
+    fail "CLI installed but '1person' not found on PATH. You may need to restart your shell."
   fi
 }
 
@@ -423,11 +442,11 @@ run_default() {
   printf "\n"
   printf "  ${BOLD}Next: configure your environment${RESET}\n"
   printf "\n"
-  printf "     ${CYAN}multica setup${RESET}                # Connect to Multica Cloud (multica.ai)\n"
-  printf "     ${CYAN}multica setup self-host${RESET}       # Connect to a self-hosted server\n"
+  printf "     ${CYAN}1person login${RESET}                 # Authenticate (local or cloud server)\n"
+  printf "     ${CYAN}1person login --server_url ...${RESET}   # Connect to a self-hosted server\n"
   printf "\n"
   printf "  ${BOLD}Self-hosting?${RESET} Install the server first:\n"
-  printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server\n"
+  printf "     curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --with-server\n"
   printf "\n"
 }
 
@@ -459,13 +478,13 @@ run_with_server() {
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"
   printf "\n"
-  printf "     ${CYAN}multica setup self-host${RESET}   # Configure + authenticate + start daemon\n"
+  printf "     ${CYAN}1person daemon${RESET}             # Start the local worker daemon\n"
   printf "\n"
   printf "  ${BOLD}Login:${RESET} configure ${CYAN}RESEND_API_KEY${RESET} in .env for email codes,\n"
   printf "  or read the generated code from backend logs when Resend is unset.\n"
   printf "\n"
   printf "  ${BOLD}To stop all services:${RESET}\n"
-  printf "     curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --stop\n"
+  printf "     curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --stop\n"
   printf "\n"
 }
 
