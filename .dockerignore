@@ -36,3 +36,8 @@ docs/
 
 # Desktop app (not needed for web self-hosting)
 apps/desktop
+
+# Zig framework checkouts — provisioned fresh in the build
+zig_ws
+zserver/.zig-cache
+zserver/zig-out

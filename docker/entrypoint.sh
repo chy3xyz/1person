@@ -1,8 +1,13 @@
 #!/bin/sh
 set -e
 
+# zserver backend container entrypoint: apply SQL migrations (idempotent,
+# fails fast on connection problems), then start the API server.
+# DATABASE_URL must be provided by the environment.
+cd /app
+
 echo "Running database migrations..."
-./migrate up
+./zserver migrate
 
 echo "Starting server..."
-exec ./server
+exec ./zserver server

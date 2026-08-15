@@ -84,3 +84,7 @@ zserver/uploads/
 zserver/ci-timings.log
 zserver/main.o
 zserver/mutex_test
+
+# Zig framework deps — provisioned by zserver/scripts/provision-zig-deps.sh
+# (pinned zfinal + zcli checkouts). Never commit these.
+zig_ws/

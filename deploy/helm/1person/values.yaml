@@ -3,13 +3,13 @@
 # -----------------------------------------------------------------------------
 images:
   backend:
-    repository: ghcr.io/multica-ai/multica-backend
+    repository: ghcr.io/1person-ai/1person-backend
     # Empty defaults to Chart.appVersion. Released OCI charts set appVersion to
     # the Git tag (for example v0.3.5), so installs use matching app images.
     tag: ""
     pullPolicy: IfNotPresent
   frontend:
-    repository: ghcr.io/multica-ai/multica-web
+    repository: ghcr.io/1person-ai/1person-web
     # Empty defaults to Chart.appVersion. Set explicitly to override.
     tag: ""
     pullPolicy: IfNotPresent
@@ -21,7 +21,7 @@ images:
 # -----------------------------------------------------------------------------
 # Pre-created Secret with sensitive values. Create it before `helm install`:
 #
-#   kubectl -n <namespace> create secret generic multica-secrets \
+#   kubectl -n <namespace> create secret generic 1person-secrets \
 #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
 #     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
 #     --from-literal=RESEND_API_KEY="" \
@@ -92,7 +92,7 @@ backend:
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
     appEnv: production
-    appUrl: http://multica.dev.lan
+    appUrl: http://1person.dev.lan
     frontendOrigin: http://multica.dev.lan
     corsAllowedOrigins: ""
     cookieDomain: ""

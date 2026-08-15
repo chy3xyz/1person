@@ -1,4 +1,4 @@
-name: multica
+name: 1person
 
 services:
   postgres:
