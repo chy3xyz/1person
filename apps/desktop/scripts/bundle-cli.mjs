@@ -100,58 +100,49 @@ async function exists(p) {
   }
 }
 
-if (hasGo()) {
-  const version = sh("git describe --tags --always --dirty") || "dev";
-  const commit = sh("git rev-parse --short HEAD") || "unknown";
-  const date = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-  const ldflags = `-X main.version=${version} -X main.commit=${commit} -X main.date=${date}`;
+// M5: bundle the Zig `1p` CLI (docs/zig-daemon-plan.md) instead of the
+// Go multica CLI. Builds it with `zig build` in zserver/ (provisioning the
+// pinned zig_ws checkouts first), then copies zig-out/bin/1p to
+// resources/bin/1person (the name the desktop runtime looks for).
+// Graceful: if zig is unavailable, skip the bundle and let the desktop fall
+// back to auto-installing at runtime.
+const zserverDir = join(repoRoot, "zserver");
+const zigSrcBin = join(zserverDir, "zig-out", "bin", "1p");
 
-  console.log(
-    `[bundle-cli] go build → ${srcBinary} (${goos}/${goarch}, version=${version} commit=${commit})`,
-  );
-  await mkdir(join(serverDir, "bin", `${goos}-${goarch}`), { recursive: true });
-  execFileSync(
-    "go",
-    [
-      "build",
-      "-ldflags",
-      ldflags,
-      "-o",
-      srcBinary,
-      "./cmd/1person",
-    ],
-    {
-      cwd: serverDir,
+function hasZig() {
+  try {
+    execSync("zig version", { stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+if (hasZig()) {
+  // Provision the pinned zfinal/zcli checkouts if not already present.
+  if (!(await exists(join(repoRoot, "zig_ws", "zfinal")))) {
+    console.log("[bundle-cli] provisioning zig deps (zfinal/zcli)...");
+    execSync("bash zserver/scripts/provision-zig-deps.sh", {
+      cwd: repoRoot,
       stdio: "inherit",
-      env: {
-        ...process.env,
-        CGO_ENABLED: "0",
-        GOOS: goos,
-        GOARCH: goarch,
-      },
-    },
-  );
+    });
+  }
+  console.log("[bundle-cli] zig build 1p ...");
+  execSync("zig build", { cwd: zserverDir, stdio: "inherit" });
+  if (!(await exists(zigSrcBin))) {
+    throw new Error("[bundle-cli] zig build produced no zserver/zig-out/bin/1p");
+  }
+  await mkdir(destDir, { recursive: true });
+  await copyFile(zigSrcBin, destBinary);
+  await chmod(destBinary, 0o755);
+  console.log(`[bundle-cli] bundled Zig 1p → ${destBinary}`);
 } else {
   console.warn(
-    "[bundle-cli] `go` not found in PATH — skipping CLI build. " +
+    "[bundle-cli] `zig` not found in PATH — skipping CLI bundle. " +
       "Desktop will use whatever is already in resources/bin/, or fall back " +
       "to auto-installing the latest release at runtime.",
   );
 }
-
-if (!(await exists(srcBinary))) {
-  console.warn(
-    `[bundle-cli] ${srcBinary} not present — Desktop will fall back to ` +
-      `auto-installing the latest release at runtime.`,
-  );
-  await rm(destDir, { recursive: true, force: true });
-  process.exit(0);
-}
-
-await rm(destDir, { recursive: true, force: true });
-await mkdir(destDir, { recursive: true });
-await copyFile(srcBinary, destBinary);
-await chmod(destBinary, 0o755);
 
 // macOS: ad-hoc sign so Gatekeeper doesn't complain when the parent app
 // (which itself may be unsigned in dev) spawns the child.
@@ -164,5 +155,3 @@ if (process.platform === "darwin") {
     // Non-fatal. Unsigned binaries still run when the parent app is trusted.
   }
 }
-
-console.log(`[bundle-cli] bundled ${srcBinary} → ${destBinary}`);
