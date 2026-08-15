@@ -69,6 +69,30 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the zserver binary");
     run_step.dependOn(&run_cmd.step);
 
+    // ── 1p CLI client (M1: config / login / daemon pair) ──
+    // Client-only: uses zfinal for Io + HTTP (HttpClient), zcli for arg
+    // parsing. Links libpq/sqlite3 defensively (the zfinal module can
+    // reference them); unused symbols are dropped at link time.
+    const cli_exe_mod = b.createModule(.{
+        .root_source_file = b.path("src/cli/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "zfinal", .module = zfinal_mod },
+            .{ .name = "zcli", .module = zcli_mod },
+            .{ .name = "build_options", .module = build_options.createModule() },
+        },
+    });
+    cli_exe_mod.link_libc = true;
+    cli_exe_mod.linkSystemLibrary("sqlite3", .{});
+    linkPq(cli_exe_mod, pg_lib_dir);
+
+    const cli_exe = b.addExecutable(.{
+        .name = "1p",
+        .root_module = cli_exe_mod,
+    });
+    b.installArtifact(cli_exe);
+
     const test_mod = b.createModule(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
