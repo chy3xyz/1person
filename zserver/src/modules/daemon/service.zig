@@ -14,6 +14,7 @@ const std = @import("std");
 const zfinal = @import("zfinal");
 const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
+const auth_lib = @import("../../auth.zig");
 const runtime = @import("../runtime/service.zig");
 const task_queue = @import("../../task_queue.zig");
 const model = @import("model.zig");
@@ -86,6 +87,82 @@ fn memInit() !void {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Daemon token minting
+// ──────────────────────────────────────────────────────────────────────
+
+/// Mint a daemon credential bound to a workspace. Requires a valid user
+/// token (the global auth interceptor stamps user_id) plus workspace
+/// membership. The returned token is `mdt_<40 hex>` and is stored
+/// SHA-256-hashed in daemon_token, so DaemonAuth can verify it in DB
+/// mode. This is the missing creation half of the daemon-token lifecycle
+/// (Go's GenerateDaemonToken + CreateDaemonToken).
+pub fn mintDaemonToken(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
+    const user_id = ctx.attributes.get("user_id") orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "unauthorized" });
+        return;
+    };
+
+    const parsed = try ctx.parseJsonBody(model.MintDaemonTokenRequest);
+    defer parsed.deinit();
+    const req = parsed.value;
+
+    if (req.workspace_id.len == 0) {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    }
+
+    // Minting persists to the daemon_token table; refuse in no-DB mode
+    // rather than minting a credential that DaemonAuth can never verify.
+    if (!deps.hasPool()) {
+        ctx.res_status = .service_unavailable;
+        try ctx.renderJson(.{ .@"error" = "database_required" });
+        return;
+    }
+
+    if (!model.userIsWorkspaceMember(user_id, req.workspace_id)) {
+        ctx.res_status = .forbidden;
+        try ctx.renderJson(.{ .@"error" = "not a workspace member" });
+        return;
+    }
+
+    const ttl_days = req.ttl_days orelse 30;
+    if (ttl_days < 1 or ttl_days > 365) {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "ttl_days must be between 1 and 365" });
+        return;
+    }
+
+    // mdt_ + 40 random hex chars (matches Go GenerateDaemonToken). The
+    // hex part IS the daemon_id — DaemonAuth compares the token's
+    // embedded id against the stored daemon_id column.
+    var bytes: [20]u8 = undefined;
+    try zfinal.io_instance.io.randomSecure(&bytes);
+    const hex = std.fmt.bytesToHex(bytes, .lower);
+    const token = try std.fmt.allocPrint(allocator, "mdt_{s}", .{hex});
+    defer allocator.free(token);
+    const daemon_id = token["mdt_".len..];
+
+    const token_hash = try auth_lib.hashToken(allocator, token);
+    defer allocator.free(token_hash);
+
+    if (!model.insertDaemonToken(req.workspace_id, daemon_id, token_hash, ttl_days)) {
+        ctx.res_status = .internal_server_error;
+        try ctx.renderJson(.{ .@"error" = "failed to store daemon token" });
+        return;
+    }
+
+    try ctx.renderJson(.{
+        .token = token,
+        .daemon_id = daemon_id,
+        .workspace_id = req.workspace_id,
+        .ttl_days = ttl_days,
+    });
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Daemon registry and heartbeat
 // ──────────────────────────────────────────────────────────────────────
 
@@ -102,6 +179,12 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
     }
 
     const daemon_id = try generateId(allocator, req.runtime_id);
+
+    // A registering daemon brings its runtime online (DB mode). Mirrors
+    // the Go daemonws handshake, which flips agent_runtime to online on
+    // connect so runtime-scoped requests (update/models/local-skills)
+    // are accepted while the daemon is serving.
+    _ = model.setRuntimeStatus(req.runtime_id, "online");
 
     try memInit();
     try mem_mutex.lock(zfinal.io_instance.io);
@@ -134,6 +217,10 @@ pub fn daemonDeregister(ctx: *zfinal.Context) !void {
     try memInit();
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
+    // Flip the runtime offline when the last serving daemon deregisters.
+    if (mem_daemons.?.getPtr(daemon_id)) |entry| {
+        _ = model.setRuntimeStatus(entry.runtime_id, "offline");
+    }
     _ = mem_daemons.?.remove(daemon_id);
     try response.okNoContent(ctx);
 }

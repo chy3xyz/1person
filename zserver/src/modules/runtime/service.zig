@@ -1119,7 +1119,9 @@ pub fn initiateUpdate(ctx: *zfinal.Context) !void {
     if (!runtimeOnlineCheck(ctx, status)) return;
 
     const update = try createUpdateRequest(runtime_id, req.target_version);
-    _ = try task_queue.enqueue(runtime_id, .update, req.target_version);
+    // Payload carries the update_id so the daemon can report the result
+    // against POST /runtimes/{rid}/update/{update_id}/result.
+    _ = try task_queue.enqueue(runtime_id, .update, update.id);
     try ctx.renderJson(update);
 }
 
@@ -1204,7 +1206,9 @@ pub fn initiateListModels(ctx: *zfinal.Context) !void {
     if (!runtimeOnlineCheck(ctx, status)) return;
 
     const model_req = try createModelListRequest(runtime_id);
-    _ = try task_queue.enqueue(runtime_id, .models, "");
+    // Payload carries the request_id so the daemon can report the result
+    // against POST /runtimes/{rid}/models/{request_id}/result.
+    _ = try task_queue.enqueue(runtime_id, .models, model_req.id);
     try ctx.renderJson(model_req);
 }
 
@@ -1302,7 +1306,8 @@ pub fn initiateListLocalSkills(ctx: *zfinal.Context) !void {
     if (!runtimeOnlineCheck(ctx, status)) return;
 
     const skill_req = try createLocalSkillListRequest(runtime_id);
-    _ = try task_queue.enqueue(runtime_id, .local_skills, "");
+    // Payload carries the request_id so the daemon can report the result.
+    _ = try task_queue.enqueue(runtime_id, .local_skills, skill_req.id);
     try ctx.renderJson(skill_req);
 }
 
@@ -1423,7 +1428,8 @@ pub fn initiateImportLocalSkill(ctx: *zfinal.Context) !void {
         req.target_skill_id,
         req.supports_conflict,
     );
-    _ = try task_queue.enqueue(runtime_id, .local_skill_import, skill_key);
+    // Payload carries the request_id so the daemon can report the result.
+    _ = try task_queue.enqueue(runtime_id, .local_skill_import, import_req.id);
     try ctx.renderJson(import_req);
 }
 

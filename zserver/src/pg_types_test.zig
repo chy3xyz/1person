@@ -25,7 +25,7 @@ fn testDb() !?*@import("zfinal").DB {
     if (!deps.hasPool()) {
         const url = std.mem.span(getenv("DATABASE_URL") orelse return null);
         if (url.len == 0) return null;
-        deps.initPool(std.heap.page_allocator, url);
+        _ = deps.initPool(std.heap.page_allocator, url);
         if (!deps.hasPool()) return null;
     }
     return deps.acquire() catch null;

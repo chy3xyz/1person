@@ -58,6 +58,14 @@ pub const Options = struct {
     db_url: ?[]const u8 = null,
 };
 
+/// Case-insensitive production-environment check. Production gates
+/// safety-critical behaviour: no-DB mode is forbidden, JWT_SECRET is
+/// mandatory, and dev-only shortcuts (fixed verification codes, format-only
+/// token checks) are disabled.
+pub fn isProduction(app_env: []const u8) bool {
+    return std.ascii.eqlIgnoreCase(app_env, "production");
+}
+
 pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts: Options, io: std.Io) !Config {
     var arena = std.heap.ArenaAllocator.init(parent_allocator);
     errdefer arena.deinit();
@@ -277,7 +285,11 @@ fn normalizeURL(allocator: std.mem.Allocator, raw: []const u8) !?[]const u8 {
 
 fn isOfficialCloud(app_url: []const u8) bool {
     const host = canonicalURLHost(app_url);
-    return std.mem.eql(u8, host, "multica.ai") or std.mem.eql(u8, host, "app.multica.ai");
+    // Both legacy (multica) and current (1person) cloud domains are
+    // recognised so self-hosted setups don't accidentally classify the
+    // official cloud as self-host.
+    return std.mem.eql(u8, host, "multica.ai") or std.mem.eql(u8, host, "app.multica.ai") or
+        std.mem.eql(u8, host, "1person.app") or std.mem.eql(u8, host, "app.1person.app");
 }
 
 fn canonicalURLHost(raw: []const u8) []const u8 {

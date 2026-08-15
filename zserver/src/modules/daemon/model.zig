@@ -48,6 +48,55 @@ pub const DaemonRegisterRequest = struct {
     name: ?[]const u8 = null,
 };
 
+pub const MintDaemonTokenRequest = struct {
+    workspace_id: []const u8,
+    ttl_days: ?i64 = null,
+};
+
+/// True when user_id is a member of workspace_id (any role). Used by
+/// the daemon-token minting endpoint so only workspace members can mint
+/// daemon credentials bound to that workspace.
+pub fn userIsWorkspaceMember(user_id: []const u8, workspace_id: []const u8) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT 1 FROM member WHERE workspace_id = $1::uuid AND user_id = $2::uuid LIMIT 1",
+        &[_]SqlParam{ .{ .text = workspace_id }, .{ .text = user_id } },
+    ) catch return false;
+    defer rs.deinit();
+    return rs.rows.items.len > 0;
+}
+
+/// Flip an agent_runtime row's status (e.g. online/offline). Used by the
+/// daemon register/deregister so runtimes the daemon serves show the
+/// right liveness state (Go parity). Returns false in no-DB mode.
+pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    db.execParams(
+        "UPDATE agent_runtime SET status = $2 WHERE id = $1::uuid",
+        &[_]SqlParam{ .{ .text = runtime_id }, .{ .text = status } },
+    ) catch return false;
+    return true;
+}
+
+/// Insert a minted daemon token (SHA-256 hash of the full mdt_ token)
+/// into the daemon_token table. Returns true on success.
+pub fn insertDaemonToken(workspace_id: []const u8, daemon_id: []const u8, token_hash: []const u8, ttl_days: i64) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    const sql =
+        "INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at) " ++
+        "VALUES ($1, $2::uuid, $3, now() + make_interval(days => $4))";
+    db.execParams(sql, &[_]SqlParam{
+        .{ .text = token_hash },
+        .{ .text = workspace_id },
+        .{ .text = daemon_id },
+        .{ .int = ttl_days },
+    }) catch return false;
+    return true;
+}
+
 pub const TaskProgressRequest = struct {
     progress: ?i32 = null,
 };

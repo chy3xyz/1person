@@ -1,4 +1,11 @@
-//! Redis-backed fixed-window rate limiting interceptor.
+//! Fixed-window rate limiting interceptor. Redis-backed when Redis is
+//! configured; falls back to an in-process fixed-window limiter when it
+//! is not, so rate limits are always enforced (per-instance rather than
+//! shared across instances without Redis).
+//!
+//! Multi-instance deployments should set REDIS_URL so limits are shared;
+//! the in-memory fallback is a fail-closed convenience, not a substitute
+//! for shared state.
 
 const std = @import("std");
 const zfinal = @import("zfinal");
@@ -19,6 +26,87 @@ const LimitConfig = struct {
 };
 
 var g_fallback: LimitConfig = .{ .max = 100, .window = 60 };
+
+// ── In-memory fallback state ─────────────────────────────────────────
+// Bounded map of per-(path,ip) fixed windows. Keys are owned by the map
+// (StringHashMap copies into its allocator). Entries older than the
+// active window are pruned once the table exceeds the cap, so memory is
+// bounded even under IP churn. page_allocator is used so the map never
+// holds per-request arenas; whatever is live at shutdown is a bounded
+// leak by design.
+const FallbackEntry = struct {
+    count: u32,
+    window_start_ms: i64,
+};
+
+const MEMORY_FALLBACK_MAX_KEYS: usize = 4096;
+
+var g_fallback_mutex: std.Io.Mutex = .init;
+var g_fallback_map: ?std.StringHashMap(FallbackEntry) = null;
+var g_fallback_initialized: bool = false;
+
+fn ensureFallbackMap() !void {
+    if (g_fallback_initialized) return;
+    try g_fallback_mutex.lock(zfinal.io_instance.io);
+    defer g_fallback_mutex.unlock(zfinal.io_instance.io);
+    if (g_fallback_initialized) return;
+    g_fallback_map = std.StringHashMap(FallbackEntry).init(std.heap.page_allocator);
+    g_fallback_initialized = true;
+}
+
+fn checkRateLimitMemory(ctx: *zfinal.Context, max: u32, window_seconds: u32) !bool {
+    try ensureFallbackMap();
+    const map = &g_fallback_map.?;
+
+    const key = try rateLimitKey(ctx);
+    defer ctx.allocator.free(key);
+
+    const now_ms = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toMilliseconds();
+    const window_ms: i64 = @as(i64, window_seconds) * 1000;
+
+    try g_fallback_mutex.lock(zfinal.io_instance.io);
+    defer g_fallback_mutex.unlock(zfinal.io_instance.io);
+
+    if (map.getPtr(key)) |entry| {
+        // Window rolled over: restart the count.
+        if (now_ms - entry.window_start_ms >= window_ms) {
+            entry.count = 0;
+            entry.window_start_ms = now_ms;
+        }
+    } else {
+        if (map.count() >= MEMORY_FALLBACK_MAX_KEYS) {
+            // Bound memory: drop entries outside the current window.
+            var it = map.iterator();
+            while (it.next()) |kv| {
+                if (now_ms - kv.value_ptr.window_start_ms >= window_ms) {
+                    _ = map.remove(kv.key_ptr.*);
+                }
+            }
+        }
+        try map.put(key, .{ .count = 0, .window_start_ms = now_ms });
+    }
+
+    const entry = map.getPtr(key).?;
+    entry.count += 1;
+    if (entry.count > max) {
+        ctx.res_status = .too_many_requests;
+        try ctx.renderJson(.{ .@"error" = "rate_limit_exceeded" });
+        return false;
+    }
+    return true;
+}
+
+/// Pure decision helper for unit tests: true when the window has rolled.
+fn memoryWindowRolledOver(now_ms: i64, start_ms: i64, window_ms: i64) bool {
+    return now_ms - start_ms >= window_ms;
+}
+
+test "memory fallback: window rollover logic" {
+    try std.testing.expect(memoryWindowRolledOver(1_000_000, 900_000, 60_000));
+    try std.testing.expect(!memoryWindowRolledOver(1_000_000, 950_000, 60_000));
+    try std.testing.expect(!memoryWindowRolledOver(1_000_000, 1_000_000, 60_000));
+    try std.testing.expect(memoryWindowRolledOver(2_000_000, 1_000_000, 60_000));
+}
 
 fn isTrustedProxy(ip: []const u8) bool {
     const cfg = g_cfg orelse return false;
@@ -59,39 +147,37 @@ fn rateLimitKey(ctx: *zfinal.Context) ![]const u8 {
     const ip = try clientIp(ctx);
     defer ctx.allocator.free(ip);
 
-    return try std.fmt.allocPrint(ctx.allocator, "mul:ratelimit:{s}:{s}", .{ normalized, ip });
+    // Bare {path}:{ip} — the Redis path prepends the "mul:ratelimit:" key
+    // prefix via zfinal.RedisRateLimiter; the in-memory fallback uses the
+    // key as-is.
+    return try std.fmt.allocPrint(ctx.allocator, "{s}:{s}", .{ normalized, ip });
 }
 
 fn checkRateLimit(ctx: *zfinal.Context, max: u32, window_seconds: u32) !bool {
-    const client = redis.client() orelse return true;
-
     const key = try rateLimitKey(ctx);
     defer ctx.allocator.free(key);
 
-    // v0.20.9's RedisClient exposes only get/set/setEx/del/exists/expire/
-    // publish/subscribe/ping — no INCR. Read-modify-write is non-atomic, but
-    // a best-effort fixed window is acceptable for rate limiting.
-    const prev: i64 = blk: {
-        const cur = client.get(key) catch null;
-        const raw = cur orelse break :blk 0;
-        defer client.allocator.free(raw);
-        break :blk std.fmt.parseInt(i64, raw, 10) catch 0;
-    };
-    const count = prev + 1;
-
-    var count_buf: [32]u8 = undefined;
-    const count_str = try std.fmt.bufPrint(&count_buf, "{d}", .{count});
-    // SETEX also refreshes the TTL, which keeps the window anchored to the
-    // most recent request rather than the first one in the window.
-    client.setEx(key, count_str, window_seconds) catch {};
-
-    if (count > max) {
-        ctx.res_status = .too_many_requests;
-        try ctx.renderJson(.{ .@"error" = "rate_limit_exceeded" });
-        return false;
+    if (redis.client()) |client| {
+        // Distributed fixed-window via zfinal.RedisRateLimiter (atomic
+        // INCR + EXPIRE-on-first-hit, fail-closed on Redis errors). On
+        // Redis failure we degrade to the in-memory limiter — limits are
+        // always enforced, never silently skipped.
+        var rl = zfinal.RedisRateLimiter.init(client, "mul:ratelimit:");
+        const allowed = rl.allow(key, max, window_seconds) catch {
+            log.warn("redis rate limit unavailable — falling back to in-memory limiter", .{});
+            return try checkRateLimitMemory(ctx, max, window_seconds);
+        };
+        if (!allowed) {
+            ctx.res_status = .too_many_requests;
+            try ctx.renderJson(.{ .@"error" = "rate_limit_exceeded" });
+            return false;
+        }
+        return true;
     }
 
-    return true;
+    // No Redis → enforce the limit in-process instead of silently
+    // skipping it. Per-instance rather than shared, but limits still apply.
+    return try checkRateLimitMemory(ctx, max, window_seconds);
 }
 
 fn authSendCodeBefore(ctx: *zfinal.Context) !bool {

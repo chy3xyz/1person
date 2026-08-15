@@ -8,7 +8,8 @@
 const std = @import("std");
 const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
-const Config = @import("../config.zig").Config;
+const config = @import("../config.zig");
+const Config = config.Config;
 const deps = @import("../deps.zig");
 
 const log = std.log.scoped(.workspace_middleware);
@@ -127,6 +128,19 @@ fn workspaceRoleCheck(ctx: *zfinal.Context, min_role: []const u8) !bool {
     }
 
     // No-DB fallback: allow the request as owner for smoke tests / local dev.
+    // server.zig refuses to boot without a database in production, so this
+    // branch is only reachable in dev/test. Defensive double-check anyway:
+    // granting owner to every caller in production would be a privilege
+    // escalation even if a misconfiguration ever allowed boot to proceed.
+    if (g_cfg) |cfg| {
+        if (config.isProduction(cfg.app_env)) {
+            log.err("workspace role check reached the no-DB owner stub in production — refusing request", .{});
+            ctx.res_status = .service_unavailable;
+            try ctx.renderJson(.{ .@"error" = "database_required" });
+            return false;
+        }
+    }
+
     try ctx.setAttr("workspace_id", workspace_id);
     try ctx.setAttr("workspace_role", "owner");
     return true;

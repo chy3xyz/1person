@@ -20,6 +20,7 @@ pub fn register(app: *zfinal.ZFinal) !void {
     defer api.deinit();
     try api.addInterceptor(daemon_mw.DaemonAuthInterceptor);
 
+    try api.post("/tokens", handler.mintDaemonToken);
     try api.post("/register", handler.daemonRegister);
     try api.post("/deregister", handler.daemonDeregister);
     try api.post("/heartbeat", handler.daemonHeartbeat);

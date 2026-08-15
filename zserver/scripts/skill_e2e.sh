@@ -18,6 +18,7 @@ PORT="${PORT:-18097}"
 BASE="http://127.0.0.1:${PORT}"
 JWT_SECRET="${JWT_SECRET:-test-secret}"
 export JWT_SECRET
+export DATABASE_URL="${DATABASE_URL:-}"
 
 RED="\033[0;31m"
 GREEN="\033[0;32m"

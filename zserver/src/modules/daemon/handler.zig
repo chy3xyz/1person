@@ -12,6 +12,10 @@ pub fn init(cfg: *const Config) void {
     service.init(cfg);
 }
 
+pub fn mintDaemonToken(ctx: *zfinal.Context) !void {
+    try service.mintDaemonToken(ctx);
+}
+
 pub fn daemonRegister(ctx: *zfinal.Context) !void {
     try service.daemonRegister(ctx);
 }

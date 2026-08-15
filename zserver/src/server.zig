@@ -46,7 +46,25 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     // means "run without a database" — do NOT fall back to libpq's
     // localhost default, which would silently target the wrong database
     // and make every table-backed query fail.
-    if (cfg.db_url.len > 0) deps.initPool(allocator, cfg.db_url);
+    //
+    // Production policy: no-DB mode is a dev/test-only convenience. It is
+    // also a fail-open auth bypass (format-only token checks, "owner" role
+    // for everyone), so in production the server refuses to start when a
+    // database is unavailable — silently degrading would authenticate
+    // arbitrary `mul_`/`mdt_` tokens and grant workspace ownership.
+    const prod = config.isProduction(cfg.app_env);
+    if (cfg.db_url.len > 0) {
+        const pool_ready = deps.initPool(allocator, cfg.db_url);
+        if (!pool_ready and prod) {
+            log.err("DATABASE_URL configured but the connection pool failed to initialise — refusing to start in production (no-DB fallback is a security hole)", .{});
+            return error.DatabaseRequired;
+        }
+    } else if (prod) {
+        log.err("DATABASE_URL is required in production — refusing to start without a database (no-DB mode is dev/test only)", .{});
+        return error.DatabaseRequired;
+    } else {
+        log.warn("running WITHOUT a database (no-DB mode) — auth degrades to format-only token checks and workspace roles are granted to everyone. Dev/test only.", .{});
+    }
     defer deps.deinit(allocator);
 
     if (cfg.redis_url) |url| {
@@ -89,6 +107,13 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     try app.router.global_interceptors.add(middleware.RecoverInterceptor);
 
     try router.registerAll(&app, allocator, &cfg, redis.client());
+
+    // Graceful shutdown: zfinal's accept loop watches the shutdown flag
+    // (closing the listener, draining in-flight connections up to the
+    // configured drain timeout, then letting app.start() return). Without
+    // this, SIGTERM/SIGINT kill the process immediately and open
+    // WebSockets are dropped mid-frame.
+    zfinal.shutdown.registerHandlers();
 
     log.info("server starting on port {}", .{cfg.port});
     try app.start();

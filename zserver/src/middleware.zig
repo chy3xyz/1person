@@ -231,10 +231,14 @@ fn validatePersonalToken(ctx: *zfinal.Context, token: []const u8) !bool {
     const hash = try auth_lib.hashToken(ctx.allocator, token);
     defer ctx.allocator.free(hash);
 
+    // Fail closed: a pool exists (hasPool() was true above), so a failed
+    // acquire is a DB outage — accepting the token on format alone would
+    // authenticate without verification. 503 beats an auth bypass.
     const db = deps.acquire() catch {
-        try ctx.setAttr("token_type", "personal");
-        try ctx.setAttr("token_value", token);
-        return true;
+        log.err("DB acquire failed during personal-token verification — rejecting request", .{});
+        ctx.res_status = .service_unavailable;
+        try ctx.renderJson(.{ .@"error" = "database_unavailable" });
+        return false;
     };
     defer deps.releaseBack(db);
 
@@ -273,10 +277,14 @@ fn validateTaskToken(ctx: *zfinal.Context, token: []const u8) !bool {
     const hash = try auth_lib.hashToken(ctx.allocator, token);
     defer ctx.allocator.free(hash);
 
+    // Fail closed: a pool exists (hasPool() was true above), so a failed
+    // acquire is a DB outage — accepting the token on format alone would
+    // authenticate without verification. 503 beats an auth bypass.
     const db = deps.acquire() catch {
-        try ctx.setAttr("token_type", "task");
-        try ctx.setAttr("token_value", token);
-        return true;
+        log.err("DB acquire failed during task-token verification — rejecting request", .{});
+        ctx.res_status = .service_unavailable;
+        try ctx.renderJson(.{ .@"error" = "database_unavailable" });
+        return false;
     };
     defer deps.releaseBack(db);
 

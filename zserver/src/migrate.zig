@@ -41,8 +41,9 @@ pub fn run(allocator: std.mem.Allocator, db_url: ?[]const u8) !void {
     }
 
     // Stand up the same pool the HTTP server uses, run the migrations,
-    // tear it down.
-    deps.initPool(allocator, db_url.?);
+    // tear it down. The bool result reports pool readiness; the explicit
+    // hasPool() check below decides whether to continue.
+    _ = deps.initPool(allocator, db_url.?);
     defer deps.deinit(allocator);
 
     if (!deps.hasPool()) {
@@ -100,7 +101,11 @@ fn migrationsDir(allocator: std.mem.Allocator) ?[]const u8 {
         "server/migrations",
     };
     for (candidates) |cand| {
-        if (std.Io.Dir.cwd().openDir(io(), cand, .{})) |dir| {
+        // iterate=true: discoverMigrations scans the directory. Without it
+        // the open succeeds but iteration is Illegal Behavior — tolerated
+        // by macOS, but musl returns no entries (containerized migrate
+        // found zero migrations).
+        if (std.Io.Dir.cwd().openDir(io(), cand, .{ .iterate = true })) |dir| {
             var d = dir;
             d.close(io());
             return allocator.dupe(u8, cand) catch null;
@@ -110,7 +115,7 @@ fn migrationsDir(allocator: std.mem.Allocator) ?[]const u8 {
 }
 
 fn discoverMigrations(allocator: std.mem.Allocator, dir_rel: []const u8) ![]MigrationFile {
-    const dir = std.Io.Dir.cwd().openDir(io(), dir_rel, .{}) catch |err| {
+    const dir = std.Io.Dir.cwd().openDir(io(), dir_rel, .{ .iterate = true }) catch |err| {
         log.warn("cannot open migrations dir {s}: {s}", .{ dir_rel, @errorName(err) });
         return &[_]MigrationFile{};
     };
@@ -138,6 +143,37 @@ fn discoverMigrations(allocator: std.mem.Allocator, dir_rel: []const u8) ![]Migr
     };
     std.mem.sort(MigrationFile, entries.items, SortCtx{}, SortCtx.less);
     return try entries.toOwnedSlice(allocator);
+}
+
+/// Highest migration version available on disk (from the server/migrations
+/// directory), derived from the zero-padded NNN_ filename prefix.
+/// Used by the readiness check so the expected version never drifts from
+/// the actual migration files — no hardcoded constant to forget to bump.
+/// Returns null when the directory cannot be located or no .up.sql
+/// files exist.
+pub fn latestMigrationVersion(allocator: std.mem.Allocator) ?i64 {
+    const dir = migrationsDir(allocator) orelse return null;
+    defer allocator.free(dir);
+
+    const files = discoverMigrations(allocator, dir) catch return null;
+    defer {
+        for (files) |f| {
+            allocator.free(f.name);
+            allocator.free(f.path);
+        }
+        allocator.free(files);
+    }
+
+    var max_version: i64 = 0;
+    for (files) |f| {
+        // Filename format: NNN_slug.up.sql — the leading number is the
+        // version. Split on '_' so 4+ digit versions keep working.
+        var it = std.mem.splitScalar(u8, f.name, '_');
+        const num_str = it.next() orelse continue;
+        const num = std.fmt.parseInt(i64, num_str, 10) catch continue;
+        if (num > max_version) max_version = num;
+    }
+    return max_version;
 }
 
 fn readFileAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {

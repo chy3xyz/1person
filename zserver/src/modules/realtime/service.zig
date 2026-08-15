@@ -695,20 +695,24 @@ fn ensureManager() !void {
 ///
 /// When Redis is available (`REDIS_URL` env), `publishIssueEvent`
 /// and `publishChatMessage` also publish the payload to Redis
-/// channel `ws:<workspace_id>`. This enables multi-instance
-/// deployment: zserver instances behind a load balancer can consume
-/// each other's WS events via a Redis subscriber.
+/// channel `ws:<workspace_id>`. The publish side works through
+/// `redis.publish` (zfinal.RedisClient supports PUBLISH).
 ///
-/// The subscriber side (background thread that reads Redis messages
-/// and forwards to the local RoomManager) is currently gated on
-/// zfinal adding `subscribe` / `readMessage` to its Redis client.
-/// Once available, wire `ensureRedisSubscribed` into `handleRealtime`
-/// (when the first client joins a workspace) and launch the loop.
-/// The publish side already works through `redis.publish`.
+/// The subscriber side is NOT implemented. zfinal.RedisClient exposes a
+/// synchronous command API with no message-read primitive for Redis
+/// pub/sub push mode, so a background subscriber loop cannot be built on
+/// it today. Consequence: multi-instance WS fanout does not exist yet —
+/// a deployment with multiple zserver instances behind a load balancer
+/// must pin each client's WS connection to one instance, or accept that
+/// WS events are only delivered on the instance that published them.
+/// This is a documented constraint, not a silent gap: SELF_HOSTING notes
+/// single-instance operation for realtime. Implement the subscriber by
+/// wiring `ensureRedisSubscribed` into `handleRealtime` once zfinal
+/// exposes a read/message API.
 
 /// Publish `payload` to Redis channel `ws:<id>` if Redis is
 /// available. Silently no-ops when no Redis client or when the
-/// publish fails (zfinal may not support PUBLISH yet).
+/// publish fails.
 fn broadcastToRedis(workspace_id: []const u8, payload: []const u8) void {
     const channel = std.fmt.allocPrint(std.heap.page_allocator, "ws:{s}", .{workspace_id}) catch return;
     defer std.heap.page_allocator.free(channel);

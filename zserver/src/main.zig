@@ -51,9 +51,16 @@ fn handle_server(cmd: ServerCmd, init: std.process.Init) !void {
     });
 }
 
-fn handle_migrate(cmd: MigrateCmd) !void {
+fn handle_migrate(cmd: MigrateCmd, init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
-    try migrate_mod.run(allocator, cmd.db_url);
+    // --db-url flag wins; otherwise fall back to the DATABASE_URL /
+    // MULTICA_DATABASE_URL env vars (documented in the zcli_options).
+    // Reading the env here keeps `zserver migrate` usable in containers
+    // and CI without an explicit flag.
+    const db_url = cmd.db_url orelse
+        init.environ_map.get("DATABASE_URL") orelse
+        init.environ_map.get("MULTICA_DATABASE_URL");
+    try migrate_mod.run(allocator, db_url);
 }
 
 fn handle_version(_: VersionCmd) !void {
@@ -82,7 +89,7 @@ pub fn main(init: std.process.Init) !void {
 
     switch (parsed.active) {
         .server => try handle_server(parsed.value.server, init),
-        .migrate => try handle_migrate(parsed.value.migrate),
+        .migrate => try handle_migrate(parsed.value.migrate, init),
         .version => try handle_version(parsed.value.version),
     }
 }
