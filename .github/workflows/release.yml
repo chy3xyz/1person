@@ -45,23 +45,24 @@ jobs:
             echo "is_stable=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
-      - name: Run tests
-        run: cd server && go test ./...
+      - name: Verify backend (zserver) builds and tests pass
+        # The Go backend sources are gitignored (zserver-centric repo), so
+        # release verification now runs the Zig backend: provision deps,
+        # build, unit tests. Mirrors .github/workflows/zserver-ci.yml.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libpq-dev
+          bash zserver/scripts/provision-zig-deps.sh
+          cd zserver && zig build && zig build test
 
   release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
-    if: github.repository_owner == 'multica-ai'
+    # DISABLED: the CLI (multica, Go) that GoReleaser built is mid-migration
+    # to the Zig `1p` CLI/daemon (docs/zig-daemon-plan.md, M5). Its sources
+    # are gitignored, so this job cannot run on a fresh checkout. Re-enable
+    # once the Zig CLI reaches M5 and this job is rewired to build it.
+    # Original guard: only run on the canonical upstream repo (forks lack
+    # HOMEBREW_TAP_GITHUB_TOKEN and must not publish to the tap).
+    if: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -112,7 +113,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-backend
+          images: ghcr.io/${{ github.repository_owner }}/1person-backend
           labels: |
             org.opencontainers.image.title=Multica Backend
             org.opencontainers.image.description=Multica self-hosted backend
@@ -141,7 +142,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.verify.outputs.tag_name }}
             COMMIT=${{ github.sha }}
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-backend,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/1person-backend,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -178,7 +179,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-backend
+          images: ghcr.io/${{ github.repository_owner }}/1person-backend
           flavor: |
             latest=false
           tags: |
@@ -198,12 +199,12 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-backend@sha256:%s ' *)
+            $(printf 'ghcr.io/${{ github.repository_owner }}/1person-backend@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-backend:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/1person-backend:${{ steps.meta.outputs.version }}
 
   docker-web-build:
     needs: verify
@@ -229,7 +230,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-web
+          images: ghcr.io/${{ github.repository_owner }}/1person-web
           labels: |
             org.opencontainers.image.title=Multica Web
             org.opencontainers.image.description=Multica self-hosted web frontend
@@ -258,7 +259,7 @@ jobs:
           build-args: |
             REMOTE_API_URL=http://backend:8080
             NEXT_PUBLIC_APP_VERSION=${{ needs.verify.outputs.tag_name }}
-          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/multica-web,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/1person-web,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -295,7 +296,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/multica-web
+          images: ghcr.io/${{ github.repository_owner }}/1person-web
           flavor: |
             latest=false
           tags: |
@@ -315,12 +316,12 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf 'ghcr.io/${{ github.repository_owner }}/multica-web@sha256:%s ' *)
+            $(printf 'ghcr.io/${{ github.repository_owner }}/1person-web@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            ghcr.io/${{ github.repository_owner }}/multica-web:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/1person-web:${{ steps.meta.outputs.version }}
 
   helm-chart:
     needs: [verify, docker-backend-merge, docker-web-merge]

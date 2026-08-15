@@ -1,0 +1,99 @@
+name: zserver CI
+
+# zserver (Zig backend) build + test + migration + e2e gate.
+#
+# Lives at the repo root because GitHub Actions ignores workflows in
+# nested .github directories (the previous zserver/.github/workflows/*,
+# which never ran). This workflow provisions the pinned zfinal/zcli
+# checkouts (scripts/provision-zig-deps.sh) so the build is
+# reproducible from a clean checkout.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "zserver/**"
+      - "server/migrations/**"
+      - ".github/workflows/zserver-ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "zserver/**"
+      - "server/migrations/**"
+      - ".github/workflows/zserver-ci.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: zserver-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      PATH: ${{ env.PATH }}:${{ github.workspace }}/.zig
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Zig (pinned 0.17.0-dev.1567)
+        run: |
+          bash zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"
+          zig version
+
+      - name: Install libpq headers (Postgres client lib)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libpq-dev
+
+      - name: Provision zig deps (pinned zfinal + zcli)
+        run: bash zserver/scripts/provision-zig-deps.sh
+
+      - name: Build
+        run: cd zserver && zig build
+
+      - name: Unit tests
+        run: cd zserver && zig build test
+
+      - name: Migrations (apply + idempotency)
+        run: |
+          cd zserver
+          ./zig-out/bin/zserver migrate
+          echo "==> re-run (idempotency check)"
+          ./zig-out/bin/zserver migrate
+
+      - name: E2E — issue suite, no-DB mode
+        run: |
+          cd zserver
+          JWT_SECRET=test-secret MULTICA_DEV_VERIFICATION_CODE=000000 DATABASE_URL="" \
+            bash scripts/issue_e2e.sh
+
+      - name: E2E — issue suite, DB mode
+        run: |
+          cd zserver
+          JWT_SECRET=test-secret MULTICA_DEV_VERIFICATION_CODE=000000 \
+            bash scripts/issue_e2e.sh
+
+      - name: E2E — smoke (DB mode)
+        run: |
+          cd zserver
+          JWT_SECRET=test-secret MULTICA_DEV_VERIFICATION_CODE=000000 \
+            bash scripts/smoke_test.sh

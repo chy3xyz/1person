@@ -33,27 +33,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Zig
-        # The project targets Zig 0.17.0-dev.813+2153f8143. zigup uses the
-        # `zigup` shorthand `0.17.0-dev.813+2153f8143` if the upstream index has
-        # it; otherwise it falls back to `latest`, which is still a 0.17-dev
-        # nightly and compatible with the source. Tighten this once a stable
-        # 0.17 release ships.
+      - name: Install Zig (pinned 0.17.0-dev.1567)
         run: |
           set -euo pipefail
-          if ! command -v zigup > /dev/null 2>&1; then
-            echo "==> installing zigup"
-            curl -L --retry 5 --retry-delay 2 -o /tmp/zigup \
-              https://github.com/marlonrichert/zigup/releases/latest/download/zigup-x86_64-linux
-            install -m 0755 /tmp/zigup /usr/local/bin/zigup
-          fi
-          if ! zigup 0.17.0-dev.813+2153f8143 2>/dev/null; then
-            echo "==> exact pin unavailable; falling back to latest 0.17-dev"
-            zigup latest
-          fi
+          bash zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"
+          echo "${GITHUB_WORKSPACE}/.zig" >> "${GITHUB_PATH}"
 
       - name: Show Zig version
         run: zig version
+
+      - name: Provision zig deps (pinned zfinal + zcli)
+        # build.zig.zon resolves zfinal/zcli to <repo>/zig_ws; a clean
+        # checkout has neither, so provision them before building.
+        run: bash zserver/scripts/provision-zig-deps.sh
 
       - name: Build
         # libpq headers are required by build.zig (pq C shim).
