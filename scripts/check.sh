@@ -96,8 +96,8 @@ pnpm test || { EXIT_CODE=1; exit 1; }
 echo ""
 echo "==> [3/5] Go tests..."
 echo "==> Running database migrations..."
-(cd server && go run ./cmd/migrate up) || { EXIT_CODE=1; exit 1; }
-(cd server && go test ./...) || { EXIT_CODE=1; exit 1; }
+(cd zserver && zig build && ./zig-out/bin/zserver migrate) || { EXIT_CODE=1; exit 1; }
+(cd zserver && zig build test) || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 4: Start services for E2E (only if not already running)
@@ -109,7 +109,7 @@ if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   echo "    Backend already running on :$PORT"
 else
   echo "    Starting backend..."
-  (cd server && go run ./cmd/server) > /tmp/multica-check-backend.log 2>&1 &
+  (cd zserver && ./zig-out/bin/zserver server) > /tmp/multica-check-backend.log 2>&1 &
   BACKEND_PID=$!
   STARTED_BACKEND=true
   wait_for_port "$PORT" "Backend" 90 "/health"

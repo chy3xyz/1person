@@ -169,8 +169,10 @@ setup: ## Prepare the current checkout from its env file: install deps, ensure D
 	@echo "==> Installing dependencies..."
 	pnpm install
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@echo "==> Building zserver (Zig backend)..."
+	cd zserver && zig build
 	@echo "==> Running migrations..."
-	cd server && go run ./cmd/migrate up
+	cd zserver && ./zig-out/bin/zserver migrate
 	@echo ""
 	@echo "✓ Setup complete! Run 'make start' to launch the app."
 
@@ -180,11 +182,13 @@ start: ## Start backend and frontend for the current checkout and run migrations
 	@echo "Backend: http://localhost:$(PORT)"
 	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
+	@echo "Building zserver (Zig backend)..."
+	cd zserver && zig build
 	@echo "Running migrations..."
-	cd server && go run ./cmd/migrate up
+	cd zserver && ./zig-out/bin/zserver migrate
 	@echo "Starting backend and frontend..."
 	@trap 'kill 0' EXIT; \
-		(cd server && go run ./cmd/server) & \
+		(cd zserver && ./zig-out/bin/zserver server) & \
 		pnpm dev:web & \
 		wait
 
@@ -226,7 +230,7 @@ db-reset: ## Drop and recreate the current env's database, then re-run all migra
 		-c "DROP DATABASE IF EXISTS \"$(POSTGRES_DB)\" WITH (FORCE);" \
 		-c "CREATE DATABASE \"$(POSTGRES_DB)\";"
 	@echo "==> Running migrations..."
-	cd server && go run ./cmd/migrate up
+	cd zserver && zig build && ./zig-out/bin/zserver migrate
 	@echo ""
 	@echo "✓ Database '$(POSTGRES_DB)' reset. Run 'make start' to launch the app."
 
@@ -269,10 +273,10 @@ check-worktree: ## Run the full verification pipeline for this worktree
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
 
-server: ## Run only the Go server for the current checkout
+server: ## Run only the zserver (Zig backend) for the current checkout
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/server
+	cd zserver && zig build && ./zig-out/bin/zserver server
 
 daemon: ## Restart the local agent daemon using the CLI's stored auth/session
 	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
@@ -280,23 +284,21 @@ daemon: ## Restart the local agent daemon using the CLI's stored auth/session
 cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
 
-multica: ## Run the multica CLI entrypoint directly from the Go source tree
-	cd server && go run ./cmd/multica $(MULTICA_ARGS)
+multica: ## Run the Zig 1p CLI built from zserver
+	cd zserver && zig build && ./zig-out/bin/1p $(MULTICA_ARGS)
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-build: ## Build the server, CLI, and migrate binaries into server/bin
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
-	cd server && go build -o bin/migrate ./cmd/migrate
+build: ## Build zserver + the Zig 1p CLI
+	cd zserver && zig build
 
-test: ## Run Go tests after ensuring the target DB exists and migrations are applied
+test: ## Run zserver Zig tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/migrate up
-	cd server && go test ./...
+	cd zserver && zig build && ./zig-out/bin/zserver migrate
+	cd zserver && zig build test
 
 # Database
 ##@ Database
@@ -304,15 +306,13 @@ test: ## Run Go tests after ensuring the target DB exists and migrations are app
 migrate-up: ## Create the target DB if needed, then apply database migrations
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/migrate up
+	cd zserver && zig build && ./zig-out/bin/zserver migrate
 
-migrate-down: ## Create the target DB if needed, then roll back database migrations
-	$(REQUIRE_ENV)
-	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/migrate down
+migrate-down: ## Roll back database migrations (unsupported by zserver; use db-reset)
+	@echo "zserver migrate only applies forward migrations. Use 'make db-reset' for a clean slate."
 
-sqlc: ## Regenerate sqlc code
-	cd server && sqlc generate
+sqlc: ## (retired) sqlc codegen was Go-specific; zserver uses handwritten models
+	@echo "sqlc is not used by the Zig backend — models live in zserver/src/modules/*/model.zig"
 
 # Cleanup
 ##@ Cleanup

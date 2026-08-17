@@ -53,7 +53,7 @@ fi
 bash scripts/ensure-postgres.sh "$ENV_FILE"
 
 echo "==> Running migrations..."
-(cd server && go run ./cmd/migrate up)
+(cd zserver && zig build && ./zig-out/bin/zserver migrate)
 
 # ---------- Start services ----------
 echo ""
@@ -63,6 +63,6 @@ echo "  Frontend: http://localhost:${FRONTEND_PORT:-3000}"
 echo ""
 
 trap 'kill 0' EXIT
-(cd server && go run ./cmd/server) &
+(cd zserver && ./zig-out/bin/zserver server) &
 pnpm dev:web &
 wait

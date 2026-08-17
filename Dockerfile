@@ -36,7 +36,7 @@ WORKDIR /app
 # zserver binary + migrations (zserver migrate reads server/migrations
 # relative to the working directory).
 COPY --from=builder /src/zserver/zig-out/bin/zserver ./zserver
-COPY --from=builder /src/server/migrations ./server/migrations
+COPY --from=builder /src/zserver/migrations ./zserver/migrations
 COPY docker/entrypoint.sh .
 RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
 
