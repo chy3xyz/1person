@@ -13,13 +13,13 @@ on:
     branches: [main]
     paths:
       - "zserver/**"
-      - "server/migrations/**"
+      - "zserver/migrations/**"
       - ".github/workflows/zserver-ci.yml"
   pull_request:
     branches: [main]
     paths:
       - "zserver/**"
-      - "server/migrations/**"
+      - "zserver/migrations/**"
       - ".github/workflows/zserver-ci.yml"
   workflow_dispatch:
 

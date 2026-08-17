@@ -8,7 +8,7 @@ on:
 
 jobs:
   migrate:
-    # Verifies that `zserver migrate` applies every server/migrations/*.up.sql
+    # Verifies that `zserver migrate` applies every zserver/migrations/*.up.sql
     # against a fresh Postgres and stays idempotent on a second run. This
     # exercises the same code path CI uses for the Go server, but for the Zig
     # rewrite that depends on zfinal/zcli via zig_ws/zfinal.

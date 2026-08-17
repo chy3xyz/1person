@@ -69,15 +69,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v6 # (retired — Go release removed, zserver release pending)
         with:
           version: "~> v2"
           args: release --clean
@@ -389,13 +382,6 @@ jobs:
       - name: Install rpmbuild (Linux)
         if: matrix.target == 'linux'
         run: sudo apt-get update && sudo apt-get install -y rpm
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: server/go.mod
-          cache-dependency-path: server/go.sum
-
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
 
