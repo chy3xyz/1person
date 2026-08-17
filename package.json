@@ -46,5 +46,9 @@
     "pg": "^8.20.0",
     "turbo": "^2.5.4",
     "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=9"
   }
 }
