@@ -10,10 +10,9 @@ This file provides guidance to AI agents when working with code in this reposito
 
 ### Architecture
 
-Go backend + Zig backend (zserver) + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.
+Zig backend (zserver) + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.
 
-- `zserver/` — Zig backend (zfinal framework, 43 modules, 24 e2e suites)
-- `server/` — Go backend (Chi router, sqlc, gorilla/websocket)
+- `zserver/` — Zig backend (zfinal framework, 43 modules, 24 e2e suites; canonical backend)
 - `apps/web/` — Next.js frontend (App Router)
 - `apps/desktop/` — Electron desktop app
 - `packages/core/` — Headless business logic (React Query hooks, API client)
@@ -41,7 +40,7 @@ Go backend + Zig backend (zserver) + monorepo frontend (pnpm workspaces + Turbor
 make dev              # Auto-setup + start everything
 pnpm typecheck        # TypeScript check
 pnpm test             # TS unit tests (Vitest)
-make test             # Go tests
+make test             # zserver (Zig) tests
 make check            # Full verification pipeline
 ```
 

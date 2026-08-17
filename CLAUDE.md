@@ -27,9 +27,9 @@ The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the
 
 ## Architecture
 
-**Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.**
+**Zig backend (zserver) + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.**
 
-- `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
+- `zserver/` — Zig backend (zfinal framework; canonical backend; migrations live in zserver/migrations/)
 - `apps/web/` — Next.js frontend (App Router)
 - `apps/desktop/` — Electron desktop app (electron-vite)
 - `apps/mobile/` — Expo / React Native iOS app. See `apps/mobile/CLAUDE.md`.
@@ -104,23 +104,22 @@ pnpm typecheck        # TypeScript check (all packages + apps via turbo)
 pnpm lint             # ESLint
 pnpm test             # TS tests (Vitest, all packages + apps via turbo)
 
-# Backend (Go)
-make server           # Run Go server only (port 8080)
-make daemon           # Run local daemon
-make build            # Build server + CLI binaries to server/bin/
-make cli ARGS="..."   # Run 1person CLI (e.g. make cli ARGS="config")
-make test             # Go tests
-make sqlc             # Regenerate sqlc code after editing SQL in server/pkg/db/queries/
-make migrate-up       # Run database migrations
-make migrate-down     # Rollback migrations
+# Backend (zserver — Zig)
+make server           # Run zserver only (port 8080)
+make daemon           # Restart the local agent daemon via the Zig 1p CLI
+make build            # Build zserver + the Zig 1p CLI
+make cli ARGS="..."   # Run the Zig 1p CLI (e.g. make cli ARGS="config")
+make test             # zserver (Zig) unit tests
+make migrate-up       # Apply database migrations (zserver migrate)
+make migrate-down     # Rollback not supported by zserver; use make db-reset
 
 # Run a single TS test (works for any package with a test script)
 pnpm --filter @1person/views exec vitest run auth/login-page.test.tsx
 pnpm --filter @1person/core exec vitest run runtimes/version.test.ts
 pnpm --filter @1person/web exec vitest run app/\(auth\)/login/page.test.tsx
 
-# Run a single Go test
-cd server && go test ./internal/handler/ -run TestName
+# Run a single zserver (Zig) test / unit tests
+cd zserver && zig build test
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts
@@ -150,7 +149,7 @@ make db-reset         # Drop + recreate current env's DB, then re-run migrations
 
 ### CI Requirements
 
-CI runs on Node 22 and Go 1.26.1 with a `pgvector/pgvector:pg17` PostgreSQL service. See `.github/workflows/ci.yml`.
+CI runs on Node 22 with a `pgvector/pgvector:pg17` PostgreSQL service. zserver (Zig 0.17) is built via `zserver-ci.yml` / `migrate.yml`. See `.github/workflows/ci.yml`.
 
 ### Worktree Support
 
@@ -167,7 +166,7 @@ make start-worktree     # Start using .env.worktree
 ## Coding Rules
 
 - TypeScript strict mode is enabled; keep types explicit.
-- Go code follows standard Go conventions (gofmt, go vet).
+- Zig code follows the zserver conventions (zfinal framework idioms, standard library style).
 - Keep comments in code **English only**.
 - Prefer existing patterns/components over introducing parallel abstractions.
 - Unless the user explicitly asks for backwards compatibility, do **not** add compatibility layers, fallback paths, dual-write logic, legacy adapters, or temporary shims **for internal, non-boundary code** (a function calling another function in the same package, a component reading its own state, a store helper, etc.).
@@ -175,8 +174,8 @@ make start-worktree     # Start using .env.worktree
 - If a flow or API is being replaced and the product is not yet live, prefer removing the old path instead of preserving both old and new behavior.
 - Avoid broad refactors unless required by the task.
 - New global (pre-workspace) routes MUST use a single word (`/login`, `/inbox`) or a `/{noun}/{verb}` pair (`/workspaces/new`). NEVER add hyphenated word-group root routes (`/new-workspace`, `/create-team`) — they collide with common user workspace names and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
-- The reserved-slug list lives in **one** place: `server/internal/handler/reserved_slugs.json`. The Go side embeds the JSON; `packages/core/paths/reserved-slugs.ts` is generated from it by `pnpm generate:reserved-slugs`. Edit the JSON, run the generator, commit both. CI re-runs the generator and fails on any drift, so a stale TS file cannot land.
-- When you change a CLI command or flag, an API request/response field, or product behavior that a built-in skill documents (`server/internal/service/builtin_skills/*`), update that skill's `SKILL.md` **and** its `references/*-source-map.md` in the same PR. The built-in skills are source-traced contracts shipped to agents — if the code moves and the skill doesn't, it silently teaches stale behavior.
+- The reserved-slug list lives in **one** place: `zserver/src/modules/workspace/reserved_slugs.json` (embedded by the Zig backend). `packages/core/paths/reserved-slugs.ts` is generated from it by `pnpm generate:reserved-slugs`. Edit the JSON, run the generator, commit both. CI re-runs the generator and fails on any drift, so a stale TS file cannot land.
+- When you change a CLI command or flag, an API request/response field, or product behavior that a built-in skill documents (`zserver/src/modules/skill/builtin_skills/*`), update that skill's `SKILL.md` **and** its `references/*-source-map.md` in the same PR. The built-in skills are source-traced contracts shipped to agents — if the code moves and the skill doesn't, it silently teaches stale behavior.
 
 ### API Response Compatibility
 
@@ -193,16 +192,22 @@ When writing code that consumes an API response, follow these rules:
 
 This is not premature defense — it is the *only* defense for an installed-app architecture. CSR-only browser apps can ship a fix in minutes; an Electron build sitting on a developer's laptop cannot.
 
-### Backend Handler UUID Parsing Convention
+### Backend Handler Conventions (zserver)
 
-Every Go handler in `server/internal/handler/` follows these rules. The convention exists because `util.ParseUUID` used to silently return a zero UUID on invalid input, which caused #1661 — a `DELETE` returning 204 success while the SQL `DELETE` matched zero rows.
+Handlers live in `zserver/src/modules/<domain>/handler.zig` and delegate to
+`service.zig` (business logic) + `model.zig` (DB access). Core rules:
 
-- **Resource path params that accept either a UUID or a human-readable identifier** (e.g. `chi.URLParam(r, "id")` for an issue, which accepts both `MUL-123` and a UUID) MUST be resolved through the dedicated loader (`loadIssueForUser` / `loadSkillForUser` / `loadAgentForUser` / `requireDaemonRuntimeAccess`). After resolution, all subsequent DB calls — especially `Queries.Delete*` / `Queries.Update*` — MUST use `entity.ID` from the resolved object. Never round-trip the raw URL string through `parseUUID` for a write query.
-- **Pure-UUID inputs from request boundaries** (URL params that are always UUIDs, request body fields, query params, headers) MUST be validated with `parseUUIDOrBadRequest(w, s, fieldName)`. On invalid input it writes a 400 and returns `ok=false` — return immediately.
-- **Trusted UUID round-trips** (sqlc-returned UUIDs being passed back into queries, test fixtures) use `parseUUID(s)` which calls `util.MustParseUUID` and panics on invalid input. A panic here means an unguarded user-input string slipped in — that is a real bug. `chi`'s `middleware.Recoverer` translates the panic into a 500 so the process keeps running.
-- **`util.ParseUUID(s) (pgtype.UUID, error)`** is the only safe variant outside the handler package. Always check the error.
-
-When adding a `Queries.Delete*` or `Queries.Update*` call, ask: "Where did this UUID come from?" If the answer is "raw user input that hasn't been validated," route it through `parseUUIDOrBadRequest` or a loader first.
+- Path params are parsed via `response.parseStringId(ctx, "id")`; resource
+  lookups go through the domain model (never trust raw URL strings).
+- Workspace context comes from the `X-Workspace-ID` / `X-Workspace-Slug`
+  headers via `requireWorkspaceId(ctx)` + the workspace middleware.
+- Auth is enforced by interceptors (e.g. `RequireWorkspaceMember`) attached
+  at route registration in `routes.zig`.
+- Write handlers that mutate state MUST publish the matching realtime event
+  (e.g. `publishIssueEvent(..., "issue:updated", ...)`) in BOTH the DB and
+  in-memory paths — a missing publish silently breaks realtime clients.
+- Rate limiting: Redis-backed when `REDIS_URL` is set; the in-memory
+  fallback is mutex-protected — never touch the fallback map without the lock.
 
 ### Dependency Declaration Rule
 
@@ -323,7 +328,7 @@ Tests follow the code, not the app. This is the most important testing principle
 - `packages/views/` — Vitest, jsdom environment, `@testing-library/react`
 - `apps/web/` — Vitest, jsdom environment, framework-specific mocks
 - `e2e/` — Playwright
-- `server/` — Go standard `go test`
+- `zserver/` — Zig unit tests (`zig build test`)
 
 All test deps are in the pnpm catalog for unified versioning.
 
@@ -341,9 +346,11 @@ All test deps are in the pnpm catalog for unified versioning.
 3. Run `pnpm test` (Turborepo discovers all packages).
 4. Green → done.
 
-### Go tests
+### zserver (Zig) tests
 
-Standard `go test`. Tests should create their own fixture data in a test database.
+Run with `cd zserver && zig build test`. Tests live in `src/**/*_test.zig`
+next to the code they exercise; DB-backed tests create their own fixture
+data in the target database.
 
 ### E2E tests
 
@@ -378,7 +385,7 @@ test("example", async ({ page }) => {
 ## Minimum Pre-Push Checks
 
 ```bash
-make check    # Runs all checks: typecheck, unit tests, Go tests, E2E
+make check    # Runs all checks: typecheck, unit tests, zserver tests, E2E
 ```
 
 Run verification only when the user explicitly asks for it.
@@ -387,7 +394,7 @@ For targeted checks when requested:
 ```bash
 pnpm typecheck        # TypeScript type errors only
 pnpm test             # TS unit tests only (Vitest, all packages)
-make test             # Go tests only
+make test             # zserver (Zig) tests only
 pnpm exec playwright test   # E2E only (requires backend + frontend running)
 ```
 
@@ -414,7 +421,7 @@ make check
 
 1. Create a tag on the `main` branch: `git tag v0.x.x`
 2. Push the tag: `git push origin v0.x.x`
-3. GitHub Actions automatically triggers `release.yml`: runs Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap
+3. GitHub Actions automatically triggers `release.yml`: builds zserver + the Zig `1p` CLI and publishes the CLI to GitHub Releases + Homebrew tap
 
 By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), unless the user specifies a specific version.
 
