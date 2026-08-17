@@ -1,0 +1,129 @@
+{
+  "groups": [
+    {
+      "label": "`onboarding` is historical, kept reserved post-removal of the route.",
+      "slugs": [
+        "login",
+        "logout",
+        "signin",
+        "signout",
+        "signup",
+        "auth",
+        "oauth",
+        "callback",
+        "invite",
+        "invitations",
+        "verify",
+        "reset",
+        "password",
+        "onboarding"
+      ]
+    },
+    {
+      "label": "`/homepage` landing variant in apps/web.",
+      "slugs": [
+        "api",
+        "admin",
+        "multica",
+        "www",
+        "new",
+        "home",
+        "homepage",
+        "dashboard",
+        "help",
+        "about",
+        "pricing",
+        "changelog",
+        "docs",
+        "support",
+        "status",
+        "legal",
+        "privacy",
+        "terms",
+        "security",
+        "contact",
+        "contact-sales",
+        "blog",
+        "careers",
+        "press",
+        "download",
+        "usecases"
+      ]
+    },
+    {
+      "label": "Account / billing (likely-future global routes in the avatar menu)",
+      "slugs": [
+        "profile",
+        "account",
+        "billing",
+        "notifications",
+        "search",
+        "members"
+      ]
+    },
+    {
+      "label": "page; `teams` is reserved for future team management.",
+      "slugs": [
+        "issues",
+        "projects",
+        "autopilots",
+        "agents",
+        "squads",
+        "inbox",
+        "my-issues",
+        "usage",
+        "runtimes",
+        "skills",
+        "settings",
+        "workspaces",
+        "teams"
+      ]
+    },
+    {
+      "label": "slugs that read like API identifiers.",
+      "slugs": [
+        "v1",
+        "v2",
+        "graphql",
+        "webhooks",
+        "sdk",
+        "tokens",
+        "cli"
+      ]
+    },
+    {
+      "label": "these paths are ever proxied through the web origin.",
+      "slugs": [
+        "health",
+        "readyz",
+        "healthz",
+        "ws",
+        "metrics",
+        "ping"
+      ]
+    },
+    {
+      "label": "messaging.",
+      "slugs": [
+        "postmaster",
+        "abuse",
+        "noreply",
+        "webmaster",
+        "hostmaster"
+      ]
+    },
+    {
+      "label": "subdomain-takeover attempts.",
+      "slugs": [
+        "mail",
+        "ftp",
+        "static",
+        "cdn",
+        "assets",
+        "public",
+        "files",
+        "uploads"
+      ]
+    }
+  ]
+}

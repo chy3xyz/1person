@@ -421,6 +421,11 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
             req.parent_id orelse "",
             req.assignee_id orelse "",
         )) |resp| {
+            // DB path must fan out the same WS event as the in-memory
+            // path below; without this, realtime clients never see
+            // issue updates in production (DB configured).
+            const update_actor_db = resolveActor(ctx);
+            publishIssueEvent(ctx.allocator, workspace_id, "issue:updated", update_actor_db.actor_type, update_actor_db.actor_id, issue_id);
             try response.ok(ctx, resp);
             return;
         }
@@ -476,6 +481,8 @@ pub fn deleteIssue(ctx: *zfinal.Context) !void {
 
     if (deps.hasPool()) {
         if (model.softDeleteIssue(workspace_id, issue_id)) {
+            const del_actor = resolveActor(ctx);
+            publishIssueEvent(ctx.allocator, workspace_id, "issue:deleted", del_actor.actor_type, del_actor.actor_id, issue_id);
             try response.okNoContent(ctx);
             return;
         }
@@ -494,6 +501,8 @@ pub fn deleteIssue(ctx: *zfinal.Context) !void {
         _ = model.mem_issue_labels.?.fetchRemove(issue_id);
         _ = model.mem_tasks.?.fetchRemove(issue_id);
         _ = model.mem_pull_requests.?.fetchRemove(issue_id);
+        const del_actor_mem = resolveActor(ctx);
+        publishIssueEvent(ctx.allocator, workspace_id, "issue:deleted", del_actor_mem.actor_type, del_actor_mem.actor_id, issue_id);
         try response.okNoContent(ctx);
         return;
     }

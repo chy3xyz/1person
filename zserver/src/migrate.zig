@@ -95,10 +95,14 @@ fn io() std.Io {
 }
 
 fn migrationsDir(allocator: std.mem.Allocator) ?[]const u8 {
+    // Migrations now live inside the zserver tree (the Go backend is
+    // retired). Order: primary "migrations" (cwd = zserver/), then
+    // legacy/container relative paths for compatibility.
     const candidates = [_][]const u8{
+        "migrations",
+        "../migrations",
+        "zserver/migrations",
         "../../server/migrations",
-        "../server/migrations",
-        "server/migrations",
     };
     for (candidates) |cand| {
         // iterate=true: discoverMigrations scans the directory. Without it
@@ -130,8 +134,12 @@ fn discoverMigrations(allocator: std.mem.Allocator, dir_rel: []const u8) ![]Migr
         const name = entry.name;
         if (!std.mem.endsWith(u8, name, ".up.sql")) continue;
         const path = try std.fs.path.join(allocator, &.{ dir_rel, name });
+        // Strip the .up.sql suffix so the tracked name matches the Go
+        // migrate runner's `version` column values ("001_init"), keeping
+        // schema_migrations interoperable between both backends.
+        const version = name[0 .. name.len - ".up.sql".len];
         try entries.append(allocator, MigrationFile{
-            .name = try allocator.dupe(u8, name),
+            .name = try allocator.dupe(u8, version),
             .path = path,
         });
     }
@@ -201,7 +209,7 @@ fn ensureSchemaMigrationsTable() bool {
     defer deps.releaseBack(db);
     db.exec(
         \\CREATE TABLE IF NOT EXISTS schema_migrations (
-        \\    name        TEXT PRIMARY KEY,
+        \\    version     TEXT PRIMARY KEY,
         \\    applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
         \\)
     ) catch {
@@ -214,7 +222,7 @@ fn migrationAlreadyApplied(name: []const u8) bool {
     const db = deps.acquire() catch return false;
     defer deps.releaseBack(db);
     var rs = db.queryParams(
-        "SELECT 1 FROM schema_migrations WHERE name = $1",
+        "SELECT 1 FROM schema_migrations WHERE version = $1",
         &[_]SqlParam{.{ .text = name }},
     ) catch return false;
     defer rs.deinit();
@@ -261,7 +269,7 @@ fn applyMigration(name: []const u8, content: []const u8) bool {
     };
 
     db.execParams(
-        "INSERT INTO schema_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING",
+        "INSERT INTO schema_migrations (version) VALUES ($1) ON CONFLICT (version) DO NOTHING",
         &[_]SqlParam{.{ .text = name }},
     ) catch {
         if (!concurrent) db.exec("ROLLBACK") catch {};

@@ -46,7 +46,11 @@ var g_fallback_map: ?std.StringHashMap(FallbackEntry) = null;
 var g_fallback_initialized: bool = false;
 
 fn ensureFallbackMap() !void {
-    if (g_fallback_initialized) return;
+    // No lock-free fast path: the first callers race on g_fallback_map
+    // and a hash map grown concurrently corrupts its buckets (observed
+    // as putAssumeCapacityNoClobber assertion failures under parallel
+    // request load). Always take the mutex; the cost is one uncontended
+    // lock per request while the map is warm.
     try g_fallback_mutex.lock(zfinal.io_instance.io);
     defer g_fallback_mutex.unlock(zfinal.io_instance.io);
     if (g_fallback_initialized) return;
@@ -76,12 +80,18 @@ fn checkRateLimitMemory(ctx: *zfinal.Context, max: u32, window_seconds: u32) !bo
     } else {
         if (map.count() >= MEMORY_FALLBACK_MAX_KEYS) {
             // Bound memory: drop entries outside the current window.
+            // Collect keys first and remove after iteration — mutating a
+            // StringHashMap while iterating can invalidate its internal
+            // bucket state and corrupt subsequent grows.
+            var stale: std.ArrayList([]const u8) = .empty;
+            defer stale.deinit(std.heap.page_allocator);
             var it = map.iterator();
             while (it.next()) |kv| {
                 if (now_ms - kv.value_ptr.window_start_ms >= window_ms) {
-                    _ = map.remove(kv.key_ptr.*);
+                    stale.append(std.heap.page_allocator, kv.key_ptr.*) catch {};
                 }
             }
+            for (stale.items) |k| _ = map.remove(k);
         }
         try map.put(key, .{ .count = 0, .window_start_ms = now_ms });
     }

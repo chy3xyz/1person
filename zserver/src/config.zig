@@ -323,7 +323,12 @@ fn getEnvOwned(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, 
 
 fn getEnvOwnedOptional(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, name: []const u8) !?[]const u8 {
     const value = environ.get(name) orelse return null;
-    return try allocator.dupe(u8, value);
+    // Treat empty / whitespace-only values as unset — .env files
+    // conventionally ship blank optionals (RESEND_API_KEY=, GOOGLE_CLIENT_ID=)
+    // and a literal empty string is not a usable credential.
+    const trimmed = std.mem.trim(u8, value, &std.ascii.whitespace);
+    if (trimmed.len == 0) return null;
+    return try allocator.dupe(u8, trimmed);
 }
 
 fn getEnvOwnedDefault(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, name: []const u8, default: []const u8) ![]const u8 {
