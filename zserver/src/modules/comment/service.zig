@@ -20,6 +20,7 @@ const attachment = @import("../attachment/service.zig");
 const model = @import("model.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
+const realtime = @import("../realtime/service.zig");
 
 const log = std.log.scoped(.comment_service);
 
@@ -28,6 +29,18 @@ var g_cfg: ?*const Config = null;
 var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_comments: ?std.StringHashMap(model.CommentEntry) = null;
 var mem_reactions: ?std.StringHashMap(model.ReactionEntry) = null;
+
+/// Fan out a workspace realtime event for a comment mutation.
+fn publishCommentEvent(ctx: *zfinal.Context, workspace_id: []const u8, event_type: []const u8, comment_id: []const u8, issue_id: []const u8) void {
+    const user_id = common_ctx.getUserId(ctx) orelse "";
+    const text = std.fmt.allocPrint(
+        ctx.allocator,
+        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"comment_id\":\"{s}\",\"issue_id\":\"{s}\",\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, workspace_id, comment_id, issue_id, user_id },
+    ) catch return;
+    defer ctx.allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
+}
 
 pub fn init(cfg: *const Config) void {
     g_cfg = cfg;
@@ -581,6 +594,7 @@ pub fn createComment(ctx: *zfinal.Context) !void {
         }
         var resp = commentResponseFromRow(&rs, 0, false, 0, null, null);
         resp.attachments = try loadAttachments(allocator, workspace_id, comment_id);
+        publishCommentEvent(ctx, workspace_id, "comment:created", comment_id, issue_id);
         ctx.res_status = .created;
         try ctx.renderJson(resp);
     } else {
@@ -624,6 +638,7 @@ pub fn createComment(ctx: *zfinal.Context) !void {
         }
         var resp = commentResponseFromEntry(entry, false, 0, null, null);
         resp.attachments = try loadAttachments(allocator, workspace_id, entry.id);
+        publishCommentEvent(ctx, workspace_id, "comment:created", entry.id, issue_id);
         ctx.res_status = .created;
         try ctx.renderJson(resp);
     }
@@ -662,7 +677,7 @@ pub fn updateComment(ctx: *zfinal.Context) !void {
         defer deps.releaseBack(db);
 
         var check = try db.queryParams(
-            "SELECT author_type, author_id FROM comment WHERE id = $1::uuid AND workspace_id = $2::uuid",
+            "SELECT author_type, author_id, issue_id FROM comment WHERE id = $1::uuid AND workspace_id = $2::uuid",
             &[_]SqlParam{
                 .{ .text = comment_id },
                 .{ .text = workspace_id },
@@ -696,6 +711,7 @@ pub fn updateComment(ctx: *zfinal.Context) !void {
         defer rs.deinit();
         var resp = commentResponseFromRow(&rs, 0, false, 0, null, null);
         resp.attachments = try loadAttachments(allocator, workspace_id, comment_id);
+        publishCommentEvent(ctx, workspace_id, "comment:updated", comment_id, rs.rows.items[0].getText(1) orelse "");
         try ctx.renderJson(resp);
     } else {
         try memInit();
@@ -762,6 +778,7 @@ pub fn deleteComment(ctx: *zfinal.Context) !void {
         }
         const author_type = check.rows.items[0].getText(0) orelse "";
         const author_id = check.rows.items[0].getText(1) orelse "";
+        const del_issue_id = check.rows.items[0].getText(2) orelse "";
         if (!std.mem.eql(u8, author_type, "member") or !std.mem.eql(u8, author_id, user_id)) {
             ctx.res_status = .forbidden;
             try ctx.renderJson(.{ .@"error" = "not authorized to delete this comment" });
@@ -775,6 +792,7 @@ pub fn deleteComment(ctx: *zfinal.Context) !void {
                 .{ .text = workspace_id },
             },
         );
+        publishCommentEvent(ctx, workspace_id, "comment:deleted", comment_id, del_issue_id);
         try response.okNoContent(ctx);
     return;
     } else {
@@ -798,6 +816,7 @@ pub fn deleteComment(ctx: *zfinal.Context) !void {
             return;
         }
         _ = mem_comments.?.fetchRemove(comment_id);
+        publishCommentEvent(ctx, workspace_id, "comment:deleted", comment_id, entry.issue_id);
         try response.okNoContent(ctx);
     return;
     }
@@ -842,6 +861,7 @@ pub fn resolveComment(ctx: *zfinal.Context) !void {
         }
         var resp = commentResponseFromRow(&rs, 0, false, 0, null, null);
         resp.attachments = try loadAttachments(allocator, workspace_id, comment_id);
+        publishCommentEvent(ctx, workspace_id, "comment:resolved", comment_id, rs.rows.items[0].getText(1) orelse "");
         try ctx.renderJson(resp);
     } else {
         try memInit();
@@ -901,6 +921,7 @@ pub fn unresolveComment(ctx: *zfinal.Context) !void {
         }
         var resp = commentResponseFromRow(&rs, 0, false, 0, null, null);
         resp.attachments = try loadAttachments(allocator, workspace_id, comment_id);
+        publishCommentEvent(ctx, workspace_id, "comment:unresolved", comment_id, rs.rows.items[0].getText(1) orelse "");
         try ctx.renderJson(resp);
     } else {
         try memInit();

@@ -35,33 +35,23 @@ var g_fallback: LimitConfig = .{ .max = 100, .window = 60 };
 // holds per-request arenas; whatever is live at shutdown is a bounded
 // leak by design.
 const FallbackEntry = struct {
-    count: u32,
-    window_start_ms: i64,
+    key: []const u8 = "",
+    count: u32 = 0,
+    window_start_ms: i64 = 0,
 };
 
 const MEMORY_FALLBACK_MAX_KEYS: usize = 4096;
 
 var g_fallback_mutex: std.Io.Mutex = .init;
-var g_fallback_map: ?std.StringHashMap(FallbackEntry) = null;
-var g_fallback_initialized: bool = false;
-
-fn ensureFallbackMap() !void {
-    // No lock-free fast path: the first callers race on g_fallback_map
-    // and a hash map grown concurrently corrupts its buckets (observed
-    // as putAssumeCapacityNoClobber assertion failures under parallel
-    // request load). Always take the mutex; the cost is one uncontended
-    // lock per request while the map is warm.
-    try g_fallback_mutex.lock(zfinal.io_instance.io);
-    defer g_fallback_mutex.unlock(zfinal.io_instance.io);
-    if (g_fallback_initialized) return;
-    g_fallback_map = std.StringHashMap(FallbackEntry).init(std.heap.page_allocator);
-    g_fallback_initialized = true;
-}
+// Fixed-size open table. A StringHashMap grown concurrently corrupts its
+// buckets (putAssumeCapacityNoClobber assertions under parallel request
+// load), so the fallback uses a flat array with linear probing inside the
+// mutex. 4096 entries with an occasional O(n) prune is fine for a rate
+// limiter.
+var g_fallback_table: [MEMORY_FALLBACK_MAX_KEYS]FallbackEntry = undefined;
+var g_fallback_count: usize = 0;
 
 fn checkRateLimitMemory(ctx: *zfinal.Context, max: u32, window_seconds: u32) !bool {
-    try ensureFallbackMap();
-    const map = &g_fallback_map.?;
-
     const key = try rateLimitKey(ctx);
     defer ctx.allocator.free(key);
 
@@ -71,38 +61,57 @@ fn checkRateLimitMemory(ctx: *zfinal.Context, max: u32, window_seconds: u32) !bo
     try g_fallback_mutex.lock(zfinal.io_instance.io);
     defer g_fallback_mutex.unlock(zfinal.io_instance.io);
 
-    if (map.getPtr(key)) |entry| {
-        // Window rolled over: restart the count.
-        if (now_ms - entry.window_start_ms >= window_ms) {
-            entry.count = 0;
-            entry.window_start_ms = now_ms;
+    // Find the slot, pruning expired entries we pass.
+    var free_slot: ?usize = null;
+    var entry: ?*FallbackEntry = null;
+    for (&g_fallback_table, 0..) |*slot, i| {
+        if (i >= g_fallback_count) break;
+        if (slot.key.len == 0) {
+            if (free_slot == null) free_slot = i;
+            continue;
         }
-    } else {
-        if (map.count() >= MEMORY_FALLBACK_MAX_KEYS) {
-            // Bound memory: drop entries outside the current window.
-            // Collect keys first and remove after iteration — mutating a
-            // StringHashMap while iterating can invalidate its internal
-            // bucket state and corrupt subsequent grows.
-            var stale: std.ArrayList([]const u8) = .empty;
-            defer stale.deinit(std.heap.page_allocator);
-            var it = map.iterator();
-            while (it.next()) |kv| {
-                if (now_ms - kv.value_ptr.window_start_ms >= window_ms) {
-                    stale.append(std.heap.page_allocator, kv.key_ptr.*) catch {};
-                }
-            }
-            for (stale.items) |k| _ = map.remove(k);
+        if (now_ms - slot.window_start_ms >= window_ms) {
+            // Expired — reclaim the slot (key is allocator-owned; the
+            // map frees on remove in the old impl, here we just clear).
+            slot.key = "";
+            slot.count = 0;
+            if (free_slot == null) free_slot = i;
+            continue;
         }
-        try map.put(key, .{ .count = 0, .window_start_ms = now_ms });
+        if (std.mem.eql(u8, slot.key, key)) {
+            entry = slot;
+            break;
+        }
     }
 
-    const entry = map.getPtr(key).?;
-    entry.count += 1;
-    if (entry.count > max) {
-        ctx.res_status = .too_many_requests;
-        try ctx.renderJson(.{ .@"error" = "rate_limit_exceeded" });
-        return false;
+    if (entry) |e| {
+        e.count += 1;
+        if (e.count > max) {
+            ctx.res_status = .too_many_requests;
+            try ctx.renderJson(.{ .@"error" = "rate_limit_exceeded" });
+            return false;
+        }
+        return true;
     }
+
+    // New key — use the first free slot or reclaim a stale one.
+    if (free_slot) |idx| {
+        g_fallback_table[idx] = .{
+            .key = try ctx.allocator.dupe(u8, key),
+            .count = 1,
+            .window_start_ms = now_ms,
+        };
+        if (idx >= g_fallback_count) g_fallback_count = idx + 1;
+        if (1 > max) {
+            ctx.res_status = .too_many_requests;
+            try ctx.renderJson(.{ .@"error" = "rate_limit_exceeded" });
+            return false;
+        }
+        return true;
+    }
+
+    // Table full — fail open (allow) rather than crash.
+    log.warn("rate limit fallback table full; allowing request", .{});
     return true;
 }
 

@@ -813,6 +813,13 @@ pub fn publishIssueEvent(workspace_id: []const u8, payload: []const u8) void {
     broadcastToRedis(workspace_id, payload);
 }
 
+/// Generic workspace-room broadcast (same semantics as publishIssueEvent —
+/// the name is historical). All modules fan out realtime events through this.
+pub fn publishEvent(workspace_id: []const u8, payload: []const u8) void {
+    if (g_manager) |*m| m.broadcast(workspace_id, payload);
+    broadcastToRedis(workspace_id, payload);
+}
+
 /// Replay envelopes with `seq > since_seq` from the
 /// per-(workspace, user) ring buffer to the given WebSocket
 /// connection. Each stored envelope is forwarded as a text frame in

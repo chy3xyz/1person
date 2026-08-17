@@ -14,6 +14,7 @@ const model = @import("model.zig");
 const response = @import("../../common/response.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
+const realtime = @import("../realtime/service.zig");
 
 const log = std.log.scoped(.project_service);
 
@@ -22,6 +23,19 @@ var g_cfg: ?*const Config = null;
 var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_projects: ?std.StringHashMap(model.ProjectEntry) = null;
 var mem_project_resources: ?std.StringHashMap(std.ArrayList(model.ResourceEntry)) = null;
+
+/// Fan out a workspace realtime event for a project mutation.
+/// Best-effort: alloc/encode failures are logged and swallowed.
+fn publishProjectEvent(ctx: *zfinal.Context, workspace_id: []const u8, event_type: []const u8, project_id: []const u8) void {
+    const user_id = common_ctx.getUserId(ctx) orelse "";
+    const text = std.fmt.allocPrint(
+        ctx.allocator,
+        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"project_id\":\"{s}\",\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, workspace_id, project_id, user_id },
+    ) catch return;
+    defer ctx.allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
+}
 
 pub fn init(cfg: *const Config) void {
     g_cfg = cfg;
@@ -229,6 +243,7 @@ pub fn createProject(ctx: *zfinal.Context) !void {
             lead_type,
             lead_id,
         )) |resp| {
+            publishProjectEvent(ctx, workspace_id, "project:created", resp.id);
             ctx.res_status = .created;
             try ctx.renderJson(resp);
         } else {
@@ -328,6 +343,7 @@ pub fn updateProject(ctx: *zfinal.Context) !void {
             lead_type,
             lead_id,
         )) |resp| {
+            publishProjectEvent(ctx, workspace_id, "project:updated", project_id);
             try ctx.renderJson(resp);
         } else {
             ctx.res_status = .not_found;
@@ -358,6 +374,7 @@ pub fn updateProject(ctx: *zfinal.Context) !void {
     if (req.lead_type) |t| entry.lead_type = try memDup(t);
     if (req.lead_id) |id| entry.lead_id = try memDup(id);
     entry.updated_at = try nowString();
+    publishProjectEvent(ctx, workspace_id, "project:updated", project_id);
     try ctx.renderJson(model.projectResponseFromEntry(entry.*, 0, 0, 0));
 }
 
@@ -397,6 +414,7 @@ pub fn deleteProject(ctx: *zfinal.Context) !void {
         // Cascade: drop any project resources.
         _ = mem_project_resources.?.fetchRemove(project_id);
     }
+    publishProjectEvent(ctx, workspace_id, "project:deleted", project_id);
     try response.okNoContent(ctx);
 }
 

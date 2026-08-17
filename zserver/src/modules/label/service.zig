@@ -14,6 +14,7 @@ const model = @import("model.zig");
 const response = @import("../../common/response.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
+const realtime = @import("../realtime/service.zig");
 
 const log = std.log.scoped(.label_service);
 
@@ -27,6 +28,17 @@ var mem_labels: ?std.StringHashMap(model.LabelEntry) = null;
 /// can read it without introducing a service→model import cycle.
 /// Returns the `StringHashMap` by value; callers should treat the
 /// pointer as borrowed (no inserts via this handle).
+fn publishLabelEvent(ctx: *zfinal.Context, workspace_id: []const u8, event_type: []const u8, label_id: []const u8) void {
+    const user_id = common_ctx.getUserId(ctx) orelse "";
+    const text = std.fmt.allocPrint(
+        ctx.allocator,
+        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"label_id\":\"{s}\",\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, workspace_id, label_id, user_id },
+    ) catch return;
+    defer ctx.allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
+}
+
 pub fn labelStore() *std.StringHashMap(model.LabelEntry) {
     return &(mem_labels orelse blk: {
         mem_labels = std.StringHashMap(model.LabelEntry).init(memAlloc());
@@ -180,6 +192,7 @@ pub fn createLabel(ctx: *zfinal.Context) !void {
             return;
         }
         if (model.dbCreateLabel(workspace_id, name, color)) |resp| {
+            publishLabelEvent(ctx, workspace_id, "label:created", resp.id);
             ctx.res_status = .created;
             try ctx.renderJson(resp);
         } else {
@@ -214,6 +227,7 @@ pub fn createLabel(ctx: *zfinal.Context) !void {
         .updated_at = try memDup(now),
     };
     try mem_labels.?.put(entry.id, entry);
+    publishLabelEvent(ctx, workspace_id, "label:created", entry.id);
     ctx.res_status = .created;
     try ctx.renderJson(model.labelResponseFromEntry(entry));
 }
@@ -301,6 +315,7 @@ pub fn updateLabel(ctx: *zfinal.Context) !void {
     }
     if (color) |c| entry.color = c;
     entry.updated_at = try nowString();
+    publishLabelEvent(ctx, workspace_id, "label:updated", label_id);
     try ctx.renderJson(model.labelResponseFromEntry(entry.*));
 }
 
@@ -322,6 +337,7 @@ pub fn deleteLabel(ctx: *zfinal.Context) !void {
 
     if (deps.hasPool()) {
         if (model.dbDeleteLabel(label_id, workspace_id)) {
+            publishLabelEvent(ctx, workspace_id, "label:deleted", label_id);
             try response.okNoContent(ctx);
         } else {
             ctx.res_status = .not_found;
@@ -349,5 +365,6 @@ pub fn deleteLabel(ctx: *zfinal.Context) !void {
         const issue_model = @import("../issue/model.zig");
         _ = issue_model.memCascadeDeleteLabel(label_id);
     }
+    publishLabelEvent(ctx, workspace_id, "label:deleted", label_id);
     try response.okNoContent(ctx);
 }

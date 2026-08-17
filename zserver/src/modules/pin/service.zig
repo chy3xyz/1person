@@ -13,6 +13,7 @@ const deps = @import("../../deps.zig");
 const model = @import("model.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
+const realtime = @import("../realtime/service.zig");
 
 const log = std.log.scoped(.pin_service);
 
@@ -20,6 +21,17 @@ var g_cfg: ?*const Config = null;
 
 var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_pins: ?std.StringHashMap(model.PinEntry) = null;
+
+fn publishPinEvent(ctx: *zfinal.Context, workspace_id: []const u8, event_type: []const u8, item_type: []const u8, item_id: []const u8) void {
+    const user_id = common_ctx.getUserId(ctx) orelse "";
+    const text = std.fmt.allocPrint(
+        ctx.allocator,
+        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"item_type\":\"{s}\",\"item_id\":\"{s}\",\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, workspace_id, item_type, item_id, user_id },
+    ) catch return;
+    defer ctx.allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
+}
 
 pub fn init(cfg: *const Config) void {
     g_cfg = cfg;
@@ -163,6 +175,7 @@ pub fn createPin(ctx: *zfinal.Context) !void {
         const max_pos = model.dbMaxPosition(workspace_id, user_id);
         const new_pos = max_pos + 1;
         if (try model.dbCreatePin(allocator, workspace_id, user_id, req.item_type, req.item_id, new_pos)) |resp| {
+            publishPinEvent(ctx, workspace_id, "pin:created", req.item_type, req.item_id);
             ctx.res_status = .created;
             try ctx.renderJson(resp);
         } else {
@@ -201,6 +214,7 @@ pub fn createPin(ctx: *zfinal.Context) !void {
         .created_at = try memDup(now),
     };
     try mem_pins.?.put(entry.id, entry);
+    publishPinEvent(ctx, workspace_id, "pin:created", entry.item_type, entry.item_id);
     ctx.res_status = .created;
     try ctx.renderJson(model.pinResponseFromEntry(entry));
 }
@@ -233,6 +247,7 @@ pub fn deletePin(ctx: *zfinal.Context) !void {
 
     if (deps.hasPool()) {
         model.dbDeletePin(workspace_id, user_id, item_type, item_id);
+        publishPinEvent(ctx, workspace_id, "pin:deleted", item_type, item_id);
         try response.okNoContent(ctx);
         return;
     }
@@ -251,6 +266,7 @@ pub fn deletePin(ctx: *zfinal.Context) !void {
             break;
         }
     }
+    publishPinEvent(ctx, workspace_id, "pin:reordered", "", "");
     try response.okNoContent(ctx);
 return;
 }

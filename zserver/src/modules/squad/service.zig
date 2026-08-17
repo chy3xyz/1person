@@ -16,6 +16,7 @@ const deps = @import("../../deps.zig");
 const model = @import("model.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
+const realtime = @import("../realtime/service.zig");
 
 const log = std.log.scoped(.squad_service);
 
@@ -24,6 +25,17 @@ var g_cfg: ?*const Config = null;
 var mem_mutex: std.Io.Mutex = std.Io.Mutex.init;
 var mem_squads: ?std.StringHashMap(model.SquadEntry) = null;
 var mem_members: ?std.StringHashMap(std.ArrayList(model.SquadMemberEntry)) = null;
+
+fn publishSquadEvent(ctx: *zfinal.Context, workspace_id: []const u8, event_type: []const u8, squad_id: []const u8) void {
+    const user_id = common_ctx.getUserId(ctx) orelse "";
+    const text = std.fmt.allocPrint(
+        ctx.allocator,
+        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"squad_id\":\"{s}\",\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, workspace_id, squad_id, user_id },
+    ) catch return;
+    defer ctx.allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
+}
 
 pub fn init(cfg: *const Config) void {
     g_cfg = cfg;
@@ -188,6 +200,7 @@ pub fn getSquad(ctx: *zfinal.Context) !void {
         const members = try model.dbMembersForSquad(allocator, db, squad_id);
         defer allocator.free(members);
         const resp = try model.squadResponseFromRow(allocator, rs, 0, members);
+        publishSquadEvent(ctx, workspace_id, "squad:updated", resp.id);
         try ctx.renderJson(resp);
     } else {
         try memInit();
@@ -295,6 +308,7 @@ pub fn createSquad(ctx: *zfinal.Context) !void {
         const members = try model.dbMembersForSquad(allocator, db, squad_id);
         defer allocator.free(members);
         const resp = try model.squadResponseFromRow(allocator, rs, 0, members);
+        publishSquadEvent(ctx, workspace_id, "squad:created", resp.id);
         ctx.res_status = .created;
         try ctx.renderJson(resp);
     } else {
@@ -523,6 +537,7 @@ pub fn deleteSquad(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "squad not found" });
             return;
         }
+        publishSquadEvent(ctx, workspace_id, "squad:deleted", squad_id);
         try response.okNoContent(ctx);
     return;
     } else {
@@ -548,6 +563,7 @@ pub fn deleteSquad(ctx: *zfinal.Context) !void {
         entry.archived_at = try nowString();
         entry.archived_by = try memDup(user_id);
         entry.updated_at = try nowString();
+        publishSquadEvent(ctx, workspace_id, "squad:deleted", squad_id);
         try response.okNoContent(ctx);
     return;
     }
