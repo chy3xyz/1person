@@ -1,3 +1,8 @@
 .next/
 .source/
 node_modules/
+
+# SolidStart / Nitro build output + generated docs source
+.output
+.nitro
+.source

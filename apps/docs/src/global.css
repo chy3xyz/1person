@@ -1,0 +1,477 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/source-serif-4";
+@import "@fontsource/geist-mono";
+@import "../../../packages/ui/styles/tokens.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@source "../../../packages/ui/**/*.{ts,tsx}";
+
+/* ---------------------------------------------------------------------------
+ * Fonts. Self-hosted via fontsource (replaces next/font): Inter (Latin UI),
+ * Source Serif 4 (editorial headings, upright only — CJK italic is a broken
+ * synthetic slant), Geist Mono (code). CJK falls back to system fonts; the
+ * Japanese-first chain applies only to <html lang="ja">.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --font-inter: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Source Serif 4 Variable", ui-serif, "Iowan Old Style", "Apple Garamond",
+    Baskerville, "Times New Roman", serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo",
+    "Malgun Gothic", "Noto Sans CJK KR", sans-serif;
+}
+
+html[lang|="ja"] {
+  --font-sans: var(--font-inter), "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Yu Gothic", "YuGothic", "Meiryo", "Noto Sans CJK JP", "Noto Sans JP",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans CJK KR", sans-serif;
+}
+
+/* Layout slots (moved from the Fumadocs preset) */
+:root {
+  --fd-page-width: 1080px;
+  --fd-layout-width: 1400px;
+}
+
+/* ---------------------------------------------------------------------------
+ * Editorial palette — light
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --background: oklch(0.972 0.003 85);
+  --foreground: oklch(0.182 0.012 50);
+  --muted: oklch(0.955 0.006 85);
+  --muted-foreground: oklch(0.482 0.012 65);
+  --card: oklch(0.99 0.002 85);
+  --card-foreground: oklch(0.182 0.012 50);
+  --popover: oklch(0.99 0.002 85);
+  --popover-foreground: oklch(0.182 0.012 50);
+  --primary: oklch(0.55 0.16 255);
+  --primary-foreground: oklch(0.985 0.008 85);
+  --secondary: oklch(0.945 0.012 85);
+  --secondary-foreground: oklch(0.182 0.012 50);
+  --accent: oklch(0.945 0.022 255);
+  --accent-foreground: oklch(0.46 0.16 255);
+  --border: oklch(0.91 0.014 85);
+  --input: oklch(0.91 0.014 85);
+  --ring: oklch(0.55 0.16 255);
+  --sidebar: oklch(0.99 0.002 85);
+  --sidebar-foreground: oklch(0.182 0.012 50);
+  --sidebar-accent: oklch(0.945 0.006 85);
+  --sidebar-accent-foreground: oklch(0.182 0.012 50);
+  --sidebar-border: oklch(0.91 0.014 85);
+
+  --docs-rule: oklch(0.835 0.018 85);
+  --docs-faint: oklch(0.72 0.018 75);
+  --docs-code-bg: oklch(0.94 0.018 85);
+  --docs-code-border: oklch(0.89 0.018 85);
+  --docs-terminal-bg: oklch(0.18 0.012 50);
+  --docs-terminal-fg: oklch(0.92 0.012 80);
+  --docs-terminal-accent: oklch(0.65 0.16 255);
+
+  /* Callout accents */
+  --color-fd-info: oklch(62.3% 0.214 259.815);
+  --color-fd-warning: oklch(76.9% 0.188 70.08);
+  --color-fd-error: oklch(63.7% 0.237 25.331);
+  --color-fd-success: oklch(72.3% 0.219 149.579);
+}
+
+/* Editorial palette — dark (warm dark, NOT the product's cool dark) */
+.dark {
+  --background: oklch(0.18 0.008 50);
+  --foreground: oklch(0.95 0.012 85);
+  --muted: oklch(0.22 0.008 50);
+  --muted-foreground: oklch(0.65 0.012 75);
+  --card: oklch(0.21 0.008 50);
+  --card-foreground: oklch(0.95 0.012 85);
+  --popover: oklch(0.22 0.008 50);
+  --popover-foreground: oklch(0.95 0.012 85);
+  --primary: oklch(0.7 0.15 255);
+  --primary-foreground: oklch(0.18 0.008 50);
+  --secondary: oklch(0.24 0.008 50);
+  --secondary-foreground: oklch(0.95 0.012 85);
+  --accent: oklch(0.3 0.05 255);
+  --accent-foreground: oklch(0.78 0.14 255);
+  --border: oklch(0.28 0.012 50);
+  --input: oklch(0.28 0.012 50);
+  --ring: oklch(0.7 0.15 255);
+  --sidebar: oklch(0.21 0.008 50);
+  --sidebar-foreground: oklch(0.95 0.012 85);
+  --sidebar-accent: oklch(0.26 0.01 50);
+  --sidebar-accent-foreground: oklch(0.95 0.012 85);
+  --sidebar-border: oklch(0.28 0.012 50);
+
+  --docs-rule: oklch(0.36 0.012 50);
+  --docs-faint: oklch(0.42 0.012 50);
+  --docs-code-bg: oklch(0.22 0.008 50);
+  --docs-code-border: oklch(0.26 0.012 50);
+  --docs-terminal-bg: oklch(0.155 0.012 50);
+  --docs-terminal-fg: oklch(0.92 0.012 80);
+  --docs-terminal-accent: oklch(0.78 0.14 255);
+}
+
+/* ---------------------------------------------------------------------------
+ * Editorial typography (ported from the Next site's global.css; Fumadocs
+ * DOM-specific selectors replaced with ours).
+ * ------------------------------------------------------------------------- */
+
+.prose {
+  font-size: 0.96875rem;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+/* DocsTitle h1 */
+article > h1.docs-title,
+article > h1 {
+  font-family: var(--font-serif), ui-serif, serif !important;
+  font-size: 1.875rem !important;
+  font-weight: 400 !important;
+  letter-spacing: -0.018em;
+  line-height: 1.15;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+}
+
+/* Lead paragraph below the title */
+article > p.docs-description,
+article > p.text-lg {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.125rem;
+  line-height: 1.55;
+  margin-bottom: 2rem;
+  color: var(--muted-foreground);
+}
+
+/* Paragraph rhythm */
+.prose :where(p):not(:where([class~="not-prose"] *)) {
+  margin-top: 0;
+  margin-bottom: 0.875rem;
+  color: oklch(from var(--foreground) calc(l + 0.06) c h);
+}
+.prose :where(p):not(:where([class~="not-prose"] *)):last-child {
+  margin-bottom: 0;
+}
+.prose :where(p) strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.prose :where(ul, ol) {
+  margin-top: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.prose h1 {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.875rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+}
+.prose em,
+.prose i,
+.prose cite,
+.prose blockquote,
+.prose blockquote p {
+  font-style: normal;
+}
+.prose h1 em {
+  color: var(--primary);
+  font-weight: 500;
+}
+.prose p em,
+.prose li em {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.prose h2 {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.625rem;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin-top: 2em;
+  margin-bottom: 0.5em;
+  color: var(--foreground);
+  scroll-margin-top: 80px;
+}
+
+.prose h3 {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+  margin-top: 2.25em;
+  margin-bottom: 0.75em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+
+.prose h4 {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-size: 1.0625rem;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  line-height: 1.4;
+  margin-top: 1.5em;
+  margin-bottom: 0.375em;
+  color: var(--foreground);
+}
+
+/* Links — hairline underline, brand on hover */
+.prose a:not([data-card]):not(.not-prose) {
+  color: var(--foreground);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms, color 150ms;
+}
+.prose a:not([data-card]):not(.not-prose):hover {
+  color: var(--primary);
+  text-decoration-color: var(--primary);
+}
+
+/* Callout links — no underline (callout already carries 4 signals) */
+.callout a,
+.callout a:hover {
+  text-decoration: none;
+}
+
+/* Inline code — warm beige chip */
+.prose :not(pre) > code {
+  background: var(--docs-code-bg);
+  color: var(--accent-foreground);
+  padding: 0.125rem 0.375rem;
+  border-radius: 3px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.875em;
+  font-weight: 500;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.prose :not(pre) > code::before,
+.prose :not(pre) > code::after {
+  content: none;
+}
+
+/* Lists */
+.prose :where(ul, ol) > li {
+  margin-top: 0.375em;
+  margin-bottom: 0.375em;
+  padding-inline-start: 0.375em;
+}
+.prose :where(ul) > li::marker {
+  color: var(--docs-faint);
+  content: "\2014  ";
+  font-family: var(--font-serif), serif;
+}
+.prose :where(ol) > li::marker {
+  color: var(--muted-foreground);
+}
+
+/* Blockquote — editorial accent rule, serif voice */
+.prose blockquote {
+  font-family: var(--font-serif), ui-serif, serif;
+  font-weight: 400;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--foreground);
+  border-inline-start-width: 2px;
+  border-inline-start-color: var(--primary);
+  padding-inline-start: 1.25em;
+  margin-block: 1.5em;
+  quotes: none;
+}
+.prose blockquote p::before,
+.prose blockquote p::after {
+  content: none;
+}
+
+/* Tables */
+.prose table {
+  font-size: 0.9375em;
+  border-collapse: collapse;
+  margin-block: 1.5em;
+}
+.prose thead {
+  border-bottom: 1px solid var(--border);
+}
+.prose thead th {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  padding-block: 0.5rem 0.625rem;
+  text-align: start;
+}
+.prose tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+.prose tbody td {
+  padding-block: 0.875rem;
+}
+
+/* HR */
+.prose hr {
+  border: none;
+  border-top: 1px solid var(--docs-rule);
+  margin-block: 3em;
+}
+
+/* ---------------------------------------------------------------------------
+ * Callout — editorial 2px accent bar + soft accent wash
+ * ------------------------------------------------------------------------- */
+
+.callout {
+  display: flex;
+  gap: 0.625rem;
+  align-items: flex-start;
+  margin-block: 1.5rem;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  border: none;
+  border-inline-start: 2px solid var(--primary);
+  padding: 0.875rem 1.125rem;
+}
+.callout-warning {
+  border-inline-start-color: var(--color-fd-warning);
+  background: color-mix(in oklab, var(--color-fd-warning) 8%, var(--background));
+}
+.callout-error {
+  border-inline-start-color: var(--color-fd-error);
+  background: color-mix(in oklab, var(--color-fd-error) 8%, var(--background));
+}
+.callout-success {
+  border-inline-start-color: var(--color-fd-success);
+  background: color-mix(in oklab, var(--color-fd-success) 8%, var(--background));
+}
+.callout .callout-label {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin: 0;
+  padding-top: 0.15rem;
+  white-space: nowrap;
+}
+.callout-warning .callout-label { color: var(--color-fd-warning); }
+.callout-error .callout-label { color: var(--color-fd-error); }
+.callout-success .callout-label { color: var(--color-fd-success); }
+.callout .callout-body {
+  color: var(--foreground);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  min-width: 0;
+}
+.callout .callout-body :where(p) {
+  margin-bottom: 0.5rem;
+}
+.callout .callout-body :where(p):last-child {
+  margin-bottom: 0;
+}
+.callout .callout-body :where(p) strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * Code blocks — warm beige (light) / warm dark (dark), highlight.js tokens
+ * ------------------------------------------------------------------------- */
+
+.prose pre {
+  background: var(--docs-code-bg) !important;
+  border: 1px solid var(--docs-code-border) !important;
+  border-radius: 4px !important;
+  margin-block: 1.25rem !important;
+  padding: 1rem 1.125rem !important;
+  font-size: 0.84375rem !important;
+  line-height: 1.7;
+  overflow-x: auto;
+  color: var(--foreground);
+}
+
+/* hljs tokens — mapped to docs tokens so syntax follows page theme */
+.prose pre code.hljs {
+  background: transparent !important;
+  padding: 0 !important;
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+.prose .hljs-comment,
+.prose .hljs-quote {
+  color: var(--docs-faint);
+  font-style: normal;
+}
+.prose .hljs-keyword,
+.prose .hljs-selector-tag,
+.prose .hljs-meta,
+.prose .hljs-literal {
+  color: var(--primary);
+}
+.prose .hljs-string,
+.prose .hljs-regexp,
+.prose .hljs-attribute {
+  color: oklch(0.52 0.14 165);
+}
+.dark .prose .hljs-string,
+.dark .prose .hljs-regexp,
+.dark .prose .hljs-attribute {
+  color: oklch(0.72 0.12 165);
+}
+.prose .hljs-number,
+.prose .hljs-symbol,
+.prose .hljs-bullet {
+  color: oklch(0.5 0.12 45);
+}
+.dark .prose .hljs-number,
+.dark .prose .hljs-symbol,
+.dark .prose .hljs-bullet {
+  color: oklch(0.74 0.1 45);
+}
+.prose .hljs-title,
+.prose .hljs-function .hljs-title,
+.prose .hljs-section,
+.prose .hljs-type,
+.prose .hljs-built_in {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.prose .hljs-variable,
+.prose .hljs-template-variable,
+.prose .hljs-params {
+  color: oklch(0.55 0.11 255);
+}
+.dark .prose .hljs-variable,
+.dark .prose .hljs-template-variable,
+.dark .prose .hljs-params {
+  color: oklch(0.74 0.1 255);
+}
+.prose .hljs-doctag,
+.prose .hljs-name {
+  color: var(--primary);
+}
+.prose .hljs-emphasis {
+  font-weight: 500;
+}
+.prose .hljs-strong {
+  font-weight: 600;
+}
