@@ -82,7 +82,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
   （DB 模式）断言。
 - 服务端依赖已就绪：`POST /api/daemon/tokens`（scripts/daemon_db_e2e.sh
   全绿）、DB 模式 mdt_ 认证（伪造令牌 401）。
-- 构建复用 zserver 的 build.zig.zon 依赖（zfinal/zcli，zig_ws 供给脚本）。
+- 构建复用 zserver 的 build.zig.zon 依赖（zfinal/zcli，Zig git 包依赖）。
 
 ## 8. 边界与已知约束
 
