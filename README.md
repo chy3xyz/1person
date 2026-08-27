@@ -112,7 +112,7 @@ pnpm typecheck                    # TypeScript 类型检查
 
 ## 开发
 
-**前提**: [Zig](https://ziglang.org/) 0.17+, [Node.js](https://nodejs.org/) 20+, [pnpm](https://pnpm.io/), [Go](https://go.dev/) 1.26+
+**前提**: [Zig](https://ziglang.org/) 0.17+, [Node.js](https://nodejs.org/) 20+, [pnpm](https://pnpm.io/)
 
 ```bash
 # 后端

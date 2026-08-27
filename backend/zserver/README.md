@@ -27,7 +27,8 @@ no-DB mode and are zserver-specific features.
 
 ```bash
 # Build + test (zfinal + zcli fetched automatically from build.zig.zon)
-cd zserver
+# From repo root:
+cd backend/zserver
 zig build
 zig build test                # unit tests
 

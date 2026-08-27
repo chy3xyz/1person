@@ -1,12 +1,14 @@
 # Dependencies
 node_modules
+**/node_modules
 .pnpm-store
 
 # Build outputs
 .next
+**/.next
 dist
-server/bin
-server/tmp
+**/.turbo
+frontend/.turbo
 
 # Git
 .git
@@ -28,16 +30,19 @@ server/tmp
 Thumbs.db
 
 # Test
-e2e/test-results
+**/test-results
 coverage
 
-# Docs
-docs/
-
-# Desktop app (not needed for web self-hosting)
-apps/desktop
-
-# Zig framework checkouts — provisioned fresh in the build
+# Local-only / optional clones
 zig_ws
-zserver/.zig-cache
-zserver/zig-out
+archive
+
+# Zig build caches
+backend/zserver/.zig-cache
+backend/zserver/zig-out
+backend/zserver/zig-pkg
+backend/zserver/uploads
+
+# Desktop/mobile not needed for web self-host image
+frontend/apps/desktop
+frontend/apps/mobile

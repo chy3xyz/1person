@@ -47,7 +47,7 @@ set +a
 . scripts/local-env.sh
 
 # ---------- Install dependencies ----------
-if [ ! -d "${FRONTEND_DIR}/node_modules" ] && [ ! -d node_modules ]; then
+if [ ! -d "${FRONTEND_DIR}/node_modules" ]; then
   echo "==> Installing dependencies..."
   pnpm --dir "$FRONTEND_DIR" install
 fi

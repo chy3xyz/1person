@@ -1,7 +1,6 @@
-# Deploy the frontend apps from the monorepo root.
-# Keep apps/web, apps/docs, shared packages, and root workspace metadata.
-# Exclude unrelated workspaces and local artifacts that can make
-# `vercel deploy` upload far more than the app needs.
+# Deploy the frontend apps. Prefer deploying from `frontend/` as the
+# project root when possible. This file trims uploads if the Vercel
+# root is still the monorepo root.
 
 .agent_context
 .claude
@@ -25,7 +24,6 @@ _features
 /CONTRIBUTING.md
 /Dockerfile
 /Dockerfile.web
-/HANDOFF_ARCHITECTURE_AUDIT.md
 /Makefile
 /README.md
 /README.zh-CN.md
@@ -33,15 +31,14 @@ _features
 /SELF_HOSTING_ADVANCED.md
 /SELF_HOSTING_AI.md
 /docker-compose*.yml
-/playwright.config.ts
 /skills-lock.json
 
 /.github/
 /docker/
 /docs/
-/e2e/
-/server/
-/apps/desktop/
+/archive/
+/backend/
+/zig_ws/
 /scripts/
 
 *.log
@@ -65,17 +62,17 @@ out
 build
 dist-electron
 
-# Deployment-only trims: tests and lint configs are not used by `next build`.
+# Deployment-only trims
 **/__tests__/**
 **/test/**
 **/*.test.*
 **/*.spec.*
-/packages/eslint-config/
-/apps/web/components.json
-/apps/web/eslint.config.mjs
-/apps/web/vitest.config.ts
+/frontend/packages/eslint-config/
+/frontend/apps/desktop/
+/frontend/apps/mobile/
+/frontend/e2e/
+/frontend/docs/
 
-# Root repo metadata not needed in the deployment source.
 /.env.example
 /.gitattributes
 /.gitignore
