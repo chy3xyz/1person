@@ -14,7 +14,7 @@ for Go-compatible shapes.
 
 A Zig CLI client (`1p`, built by `zig build`) covers the M1 milestone:
 `config` / `login` / `pair` / `version` — see
-`docs/zig-daemon-plan.md` for the roadmap and `scripts/cli_m1_e2e.sh`
+`backend/docs/zig-daemon-plan.md` for the roadmap and `scripts/cli_m1_e2e.sh`
 for the end-to-end verification.
 
 Modules with intentional in-memory/demo implementations (no DB table or Go
@@ -118,7 +118,7 @@ Hardening status as of the zserver 转正 (promotion) pass:
    Verified by `scripts/daemon_db_e2e.sh` (login → mint → register → heartbeat,
    plus forged-token 401 and non-member 403 checks). The Zig daemon CLI
    client that consumes these tokens is in progress (see
-   `docs/zig-daemon-plan.md`).
+   `backend/docs/zig-daemon-plan.md`).
 3. **Redis WS fanout: publish side only.** `broadcastToRedis` publishes
    events to `ws:<workspace_id>`, but no subscriber exists (zfinal's Redis
    client has no message-read primitive for pub/sub push mode), so

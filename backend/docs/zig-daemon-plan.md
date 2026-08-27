@@ -1,5 +1,7 @@
 # Zig CLI / Daemon — 立项方案
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 
 ## M1 落地记录

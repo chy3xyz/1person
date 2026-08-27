@@ -1,5 +1,7 @@
 # Product Analytics
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 This document is the source of truth for the analytics events 1Person ships
 to PostHog. Events feed the acquisition → activation → expansion funnel that
 drives our weekly Active Workspaces (WAW) north-star metric.

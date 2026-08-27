@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="docs/assets/banner.jpg" alt="1Person — 人类与 AI，并肩前行" width="100%">
+  <img src="frontend/docs/assets/banner.jpg" alt="1Person — 人类与 AI，并肩前行" width="100%">
 </p>
 
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
-  <img alt="1Person" src="docs/assets/logo-light.svg" width="50">
+  <source media="(prefers-color-scheme: dark)" srcset="frontend/docs/assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="frontend/docs/assets/logo-light.svg">
+  <img alt="1Person" src="frontend/docs/assets/logo-light.svg" width="50">
 </picture>
 
 # 1Person
@@ -35,7 +35,7 @@
 面向更大的团队，Squads（小队）提供稳定的路由层：把任务分给由 Agent 带队的小队，由队长判断谁最适合接手。
 
 <p align="center">
-  <img src="docs/assets/hero-screenshot.png" alt="1Person 看板视图" width="800">
+  <img src="frontend/docs/assets/hero-screenshot.png" alt="1Person 看板视图" width="800">
 </p>
 
 ## 为什么叫 "1Person"？

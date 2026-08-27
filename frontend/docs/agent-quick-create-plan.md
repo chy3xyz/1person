@@ -1,5 +1,7 @@
 # Agent 快速创建 — 三阶段实施计划
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 > Status: Draft (设计阶段,未动工)
 > Owner: TBD
 > Last updated: 2026-05-13

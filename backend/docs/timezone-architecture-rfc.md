@@ -1,5 +1,7 @@
 # Timezone 架构重构 — Scheduling / Viewing 两层模型
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 > Status: Implemented
 > Last updated: 2026-05-20
 

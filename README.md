@@ -9,19 +9,25 @@
 ## 架构
 
 ```
-frontend/apps/web (Next.js 16)
-  ├── frontend/packages/core    — 无头业务逻辑 (React Query hooks + Zustand + API client)
-  ├── frontend/packages/ui      — 原子 UI 组件 (shadcn/Base UI, 零业务逻辑)
-  └── frontend/packages/views   — 共享业务页面
+frontend/
+  apps/web | desktop | mobile | docs
+  packages/core | ui | views
 
 backend/zserver (Zig, zfinal)
-  ├── 43 模块, 24 套 e2e (no-DB + PostgreSQL 双模式)
-  ├── Redis pub/sub bridge (WS 多实例同步)
-  └── 30 前端集成检查
-
-server/ (Go, 生产用)
-  └── PostgreSQL 17 + Redis
+  ├── modules + migrations
+  ├── Redis pub/sub (WS 多实例)
+  └── e2e scripts (no-DB + PostgreSQL)
 ```
+
+## 文档
+
+| 位置 | 说明 |
+|------|------|
+| [`docs/`](docs/) | 文档索引 + 跨端工程计划 |
+| [`frontend/docs/`](frontend/docs/) | 产品 / 设计 / 前端计划（含 [PRD](frontend/docs/PRD.md)） |
+| [`backend/docs/`](backend/docs/) | 后端 / 部署 / daemon |
+| [`frontend/apps/docs/`](frontend/apps/docs/) | 对外文档站（Fumadocs） |
+| [`archive/`](archive/) | 非本品历史材料（不参与产品文档） |
 
 ---
 
@@ -100,18 +106,7 @@ pnpm typecheck                    # TypeScript 类型检查
 
 ## 方案文档
 
-所有方案在 `docs/` 目录下：
-
-| 文档 | 内容 |
-|------|------|
-| `common-infrastructure.md` | 共性基础设施——zserver 实现方案 |
-| `one-person-factory.md` | 黑灯工厂——已有业务全自动运营 |
-| `idea-to-revenue.md` | 创意变现——想法→产品→赚钱全链路 |
-| `geo-auto-delivery.md` | GEO 自动交付——实体商户 AI 营销代运营 |
-| `theory-to-ecosystem.md` | 理论→社群→生态——知识 IP 自动化体系 |
-| `meaningful-consumption-community.md` | 意义消费万社互联——社区电商网络 |
-| `lifepp-digital-life-community.md` | life++ 数字生命社区——Web3 灵性科技 |
-| `us-insurance-ai-platform.md` | 美国保险经纪人 AI 平台——SaaS 运营 |
+见 [`docs/`](docs/) 索引。产品与前端计划在 [`frontend/docs/`](frontend/docs/)，后端与部署在 [`backend/docs/`](backend/docs/)。与本品无关的历史材料在 [`archive/`](archive/)，不列入产品文档。
 
 ---
 

@@ -1,5 +1,7 @@
 # 1Person Design System
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 本文档定义 1Person 的视觉语言和交互规范。所有 UI 开发以此为准。
 
 ---

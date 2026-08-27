@@ -1,5 +1,7 @@
 # Onboarding v3 — Thin Server, Frontend-Orchestrated Welcome
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 ## 1. 背景
 
 两次错位重构(MUL-2438 + da0ecb6a)叠加产出了一个味道很重的 onboarding:

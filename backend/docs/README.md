@@ -1,0 +1,29 @@
+# Backend / ops docs
+
+Notes for `backend/zserver`, daemon/CLI, deployment, and infrastructure.
+
+> Older files may still say `zserver/` at repo root. Current path: **`backend/zserver/`**.
+
+## Ops & architecture
+
+| Doc | What it is |
+|-----|------------|
+| [deployment.md](deployment.md) | Deployment modes (no-DB / Postgres / multi-instance) |
+| [zig-daemon-plan.md](zig-daemon-plan.md) | Zig `1p` CLI + daemon roadmap |
+| [timezone-architecture-rfc.md](timezone-architecture-rfc.md) | Timezone architecture RFC |
+| [common-infrastructure.md](common-infrastructure.md) | Shared infra notes |
+| [common-gaps.md](common-gaps.md) | Known gaps |
+| [codex-sandbox-troubleshooting.md](codex-sandbox-troubleshooting.md) | Codex sandbox troubleshooting |
+
+## Plans
+
+| Doc | What it is |
+|-----|------------|
+| [plans/](plans/) | Backend-scoped historical plans (e.g. zserver alignment) |
+
+## Also see
+
+- Product / frontend docs: [`../../frontend/docs/`](../../frontend/docs/)
+- Shared plans: [`../../docs/plans/`](../../docs/plans/)
+- Self-hosting (repo root): `SELF_HOSTING.md`, `SELF_HOSTING_ADVANCED.md`
+- Backend code guide: [`../zserver/AGENTS.md`](../zserver/AGENTS.md)

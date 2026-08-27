@@ -1,5 +1,7 @@
 # 1Person Docs 站重写规划（v2）
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 > **本规划是什么**：1Person 对外 doc 站（`apps/docs/`，Fumadocs + Next.js）的从零重写方案。它替换 v1 规划——v1 之前在代码调研之前写的，很多对概念的切分现在看是错的。
 >
 > **v2 的数据基础**：4 份并行 subagent 的代码级调研，覆盖 Workspace/Members/Issues/Projects、Agent/Runtime/Daemon/Tasks、Skill/MCP/Autopilot/Chat、Inbox/Realtime/Auth 四大领域。每一处涉及产品行为的陈述都能在代码里找到对应位置。

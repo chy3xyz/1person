@@ -2,9 +2,9 @@
 
 > **文档性质**：本 PRD 由现有代码反向归纳（reverse-engineered），描述**当前已实现**的产品能力与行为契约，作为产品、设计与工程的统一基准。与 README 的"目标愿景"不同，本文只说现状 —— 凡未实现的一律列入「范围外」。
 >
-> 数据来源：`packages/core/api`（类型定义 + API client）、`server/`（Go 生产后端）、`zserver/`（Zig 并行实现）、`apps/{web,desktop,mobile}` 路由与页面、`apps/*/CLAUDE.md` 架构基准。
+> 数据来源：`frontend/packages/core/api`（类型定义 + API client）、`backend/zserver/`（Zig 生产后端）、`frontend/apps/{web,desktop,mobile}` 路由与页面、各端 `CLAUDE.md` / `AGENTS.md` 架构基准。
 >
-> 最后同步于 2026-08。存放于 `docs/PRD.md`。
+> 最后同步于 2026-08。存放于 `frontend/docs/PRD.md`。
 
 ---
 
@@ -20,7 +20,7 @@
 
 | 视角 | 说的是什么 |
 |------|-----------|
-| **协作底座** | 类故障工单 + 项目管理：Issue / Project / Label / 成员 / 收件箱 / 评论 / 通知 |
+| **协作底座** | 类 Linear 工单 + 项目管理：Issue / Project / Label / 成员 / 收件箱 / 评论 / 通知 |
 | **AI 劳动力层** | Agent 智能体（真实执行任务、流式输出）、Skill 能力包、Runtimes 运行环境、Autopilot 无人值守规则、Squad 智能体编队、Chat 与 Agent 对话 |
 
 这两个视角由"任务（task）+ 实时事件（realtime）"两层粘合：**人和 Agent 共同操作同一套 Issue 数据模型**，任何变更通过 WebSocket 事件流实时同步到各端。
@@ -28,12 +28,11 @@
 ### 1.2 平台形态（同一套后端，多端覆盖）
 
 ```
-apps/web     — Next.js 桌面 Web（完整功能）
-apps/desktop — Electron 打包桌面端（登录 + 核心详情页，本地 CLI 能力）
-apps/mobile  — Expo/React Native 移动端（收件箱/聊天/我的任务/Issue 轻量操作）
-CLI + daemon — 本地命令行 + Agent 守护进程（本地执行任务、与云端握手）
-server/      — Go 生产后端（PostgreSQL 17 + Redis，WS 多实例同步）
-zserver/     — 生产后端原型（Zig，内存 / PostgreSQL 双模式）
+frontend/apps/web     — Next.js 桌面 Web（完整功能）
+frontend/apps/desktop — Electron 打包桌面端（登录 + 核心详情页，本地 CLI 能力）
+frontend/apps/mobile  — Expo/React Native 移动端（收件箱/聊天/我的任务/Issue 轻量操作）
+CLI + daemon          — 本地命令行 + Agent 守护进程（本地执行任务、与云端握手）
+backend/zserver       — Zig 生产后端（PostgreSQL 17 + Redis，WS 多实例同步）
 ```
 
 ---

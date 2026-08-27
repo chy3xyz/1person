@@ -1,5 +1,7 @@
 # 1Person Docs 执行大纲
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 > 这份是**执行文档 + 协作 tracker**。每篇文档都有独立条目，委派出去的人直接在对应条目里认领、更新状态。
 >
 > 战略思路（产品定位、读者画像、设计原则、视觉方向）保留在 [`docs-rewrite-plan.md`](./docs-rewrite-plan.md)。

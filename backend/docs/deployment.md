@@ -1,5 +1,7 @@
 # 1person 部署指南
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 ## 一、部署模式
 
 ### 模式 A：单机 No-DB（开发/小规模）

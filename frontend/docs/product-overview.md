@@ -1,5 +1,7 @@
 # 1Person 产品全景文档
 
+
+> **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 > **文档说明**
 >
 > 这份文档的目的是：**让任何没有写过代码的新同事，在 30 分钟内完全理解 1Person 这个产品到底有哪些功能、每个功能在整体中处于什么位置、一个功能和另一个功能如何协同**。
