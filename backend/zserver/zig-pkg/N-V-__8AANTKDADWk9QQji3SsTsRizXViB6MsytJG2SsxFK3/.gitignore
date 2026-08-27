@@ -1,0 +1,28 @@
+# Reference files
+_ref/
+red.md
+
+# Zig build artifacts
+.zig-cache/
+zig-out/
+
+# Temporary files
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Build directories
+build/
+bin/
+obj/
+
+# Temporary databases
+*.db
+*.sqlite
+*.sqlite3

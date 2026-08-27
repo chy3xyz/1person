@@ -1,0 +1,3 @@
+{"seq":1,"type":"inbox_updated","inbox_id":"s1","workspace_id":"ws-parsed-since","user_id":"uid-parsed-since","action":"read","count":1}
+{"seq":2,"type":"inbox_updated","inbox_id":"s2","workspace_id":"ws-parsed-since","user_id":"uid-parsed-since","action":"archive","count":1}
+{"seq":3,"type":"inbox_updated","inbox_id":"s3","workspace_id":"ws-parsed-since","user_id":"uid-parsed-since","action":"read","count":1}

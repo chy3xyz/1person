@@ -1,0 +1,739 @@
+const std = @import("std");
+const TypeInfo = @import("graph.zig").TypeInfo;
+const EdgeInfo = @import("graph.zig").EdgeInfo;
+
+fn findTypeInfo(comptime infos: []const TypeInfo, comptime name: []const u8) TypeInfo {
+    for (infos) |info| {
+        if (std.mem.eql(u8, info.name, name)) return info;
+    }
+    @compileError("TypeInfo not found: " ++ name);
+}
+
+fn toSnakeCase(name: []const u8) []const u8 {
+    comptime {
+        var result: []const u8 = "";
+        for (name, 0..) |c, i| {
+            if (std.ascii.isUpper(c) and i > 0) {
+                result = result ++ "_";
+            }
+            result = result ++ &[_]u8{std.ascii.toLower(c)};
+        }
+        return result;
+    }
+}
+
+/// Generate a light entity struct (fields only, no edges) from TypeInfo.
+/// This breaks comptime recursion when edges reference each other.
+/// Pure scalar fields (no edges) - the terminal node of nested eager loads.
+fn PlainFields(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    _ = infos;
+    comptime {
+        // +1 for the json_arena member so eager-loaded targets get the same
+        // arena-based JSON ownership contract as full entities.
+        var field_names: [info.fields.len + 1][:0]const u8 = undefined;
+        var field_types: [info.fields.len + 1]type = undefined;
+        var field_attrs: [info.fields.len + 1]std.builtin.Type.Struct.FieldAttributes = undefined;
+        for (info.fields, 0..) |f, i| {
+            const FieldType = if (f.optional) ?f.zig_type else f.zig_type;
+            field_names[i] = (f.name)[0..f.name.len :0];
+            field_types[i] = FieldType;
+            field_attrs[i] = .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = @alignOf(FieldType),
+            };
+        }
+        const i = info.fields.len;
+        field_names[i] = "json_arena";
+        field_types[i] = ?*std.heap.ArenaAllocator;
+        field_attrs[i] = .{
+            .default_value_ptr = null,
+            .@"comptime" = false,
+            .@"align" = @alignOf(?*std.heap.ArenaAllocator),
+        };
+        return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+    }
+}
+
+/// One level of edges whose targets are plain fields (no further nesting).
+/// Used by LightEntity so `WithEdge("posts.comments")` can preload two
+/// levels; a third level is a compile error (no edges container on the
+/// terminal target).
+fn EdgesTypeShallow(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    comptime {
+        if (info.edges.len == 0) {
+            return struct {
+                pub fn deinit(_: @This(), _: std.mem.Allocator) void {}
+            };
+        }
+        var field_names: [info.edges.len][:0]const u8 = undefined;
+        var field_types: [info.edges.len]type = undefined;
+        var field_attrs: [info.edges.len]std.builtin.Type.Struct.FieldAttributes = undefined;
+        for (info.edges, 0..) |e, i| {
+            const target_info = findTypeInfo(infos, e.target_name);
+            const TargetEntity = PlainFields(infos, target_info);
+            const FieldType = ?[]TargetEntity;
+            const default_val: FieldType = null;
+            field_names[i] = (e.name)[0..e.name.len :0];
+            field_types[i] = FieldType;
+            field_attrs[i] = .{
+                .default_value_ptr = &default_val,
+                .@"comptime" = false,
+                .@"align" = @alignOf(FieldType),
+            };
+        }
+        return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+    }
+}
+
+/// Light entity (fields + one shallow edges level) used as the eager-load
+/// target type, so nested `WithEdge("a.b")` works for two levels.
+pub fn LightEntity(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    comptime {
+        const ET = EdgesTypeShallow(infos, info);
+        const edges_default: ET = .{};
+        const Plain = PlainFields(infos, info);
+        const fields_info = @typeInfo(Plain).@"struct";
+        var field_names: [fields_info.field_names.len + 1][:0]const u8 = undefined;
+        var field_types: [fields_info.field_names.len + 1]type = undefined;
+        var field_attrs: [fields_info.field_names.len + 1]std.builtin.Type.Struct.FieldAttributes = undefined;
+        for (fields_info.field_names, fields_info.field_types, 0..) |fname, ftype, i| {
+            field_names[i] = fname;
+            field_types[i] = ftype;
+            field_attrs[i] = .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = @alignOf(ftype),
+            };
+        }
+        const i = fields_info.field_names.len;
+        field_names[i] = "edges";
+        field_types[i] = ET;
+        field_attrs[i] = .{
+            .default_value_ptr = &edges_default,
+            .@"comptime" = false,
+            .@"align" = @alignOf(ET),
+        };
+        return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+    }
+}
+
+/// Generate an Edges struct for an entity.
+/// Uses LightEntity for target types to avoid comptime recursion.
+fn EdgesType(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    comptime {
+        if (info.edges.len == 0) {
+            return struct {
+                pub fn deinit(_: @This(), _: std.mem.Allocator) void {}
+            };
+        }
+        var field_names: [info.edges.len][:0]const u8 = undefined;
+        var field_types: [info.edges.len]type = undefined;
+        var field_attrs: [info.edges.len]std.builtin.Type.Struct.FieldAttributes = undefined;
+        for (info.edges, 0..) |e, i| {
+            const target_info = findTypeInfo(infos, e.target_name);
+            const TargetEntity = LightEntity(infos, target_info);
+            const FieldType = ?[]TargetEntity;
+            const default_val: FieldType = null;
+            field_names[i] = (e.name)[0..e.name.len :0];
+            field_types[i] = FieldType;
+            field_attrs[i] = .{
+                .default_value_ptr = &default_val,
+                .@"comptime" = false,
+                .@"align" = @alignOf(FieldType),
+            };
+        }
+        return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+    }
+}
+
+fn EntityFields(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    comptime {
+        const ET = EdgesType(infos, info);
+        const edges_default: ET = .{};
+        var field_names: [info.fields.len + 1][:0]const u8 = undefined;
+        var field_types: [info.fields.len + 1]type = undefined;
+        var field_attrs: [info.fields.len + 1]std.builtin.Type.Struct.FieldAttributes = undefined;
+        for (info.fields, 0..) |f, i| {
+            const FieldType = if (f.optional) ?f.zig_type else f.zig_type;
+            field_names[i] = (f.name)[0..f.name.len :0];
+            field_types[i] = FieldType;
+            field_attrs[i] = .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = @alignOf(FieldType),
+            };
+        }
+        field_names[info.fields.len] = "edges";
+        field_types[info.fields.len] = ET;
+        field_attrs[info.fields.len] = .{
+            .default_value_ptr = &edges_default,
+            .@"comptime" = false,
+            .@"align" = @alignOf(ET),
+        };
+        return @Struct(.auto, null, &field_names, &field_types, &field_attrs);
+    }
+}
+
+fn FreeField(comptime FieldType: type, field_ptr: *FieldType, allocator: std.mem.Allocator) void {
+    const T = @typeInfo(FieldType);
+    switch (T) {
+        .pointer => |p| {
+            if (p.size == .slice and p.child == u8) {
+                allocator.free(field_ptr.*);
+            } else if (p.size == .slice) {
+                for (field_ptr.*) |item| {
+                    FreeField(p.child, &item, allocator);
+                }
+                allocator.free(field_ptr.*);
+            }
+        },
+        .optional => |opt| {
+            if (field_ptr.*) |*p| {
+                FreeField(opt.child, p, allocator);
+            }
+        },
+        else => {},
+    }
+}
+
+fn hasJsonStructField(comptime info: TypeInfo) bool {
+    inline for (info.fields) |f| {
+        // Any .json field needs the arena — typed structs AND untyped
+        // std.json.Value documents (the parsed value is arena-owned).
+        if (f.field_type == .json) return true;
+    }
+    return false;
+}
+
+/// Generate an entity struct from TypeInfo.
+pub fn Entity(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    comptime {
+        const ET = EdgesType(infos, info);
+        const edges_default: ET = .{};
+        const needs_arena = hasJsonStructField(info);
+        const extra_count = 1 + @as(usize, @intFromBool(needs_arena));
+        var field_names: [info.fields.len + extra_count][:0]const u8 = undefined;
+        var field_types: [info.fields.len + extra_count]type = undefined;
+        var field_attrs: [info.fields.len + extra_count]std.builtin.Type.Struct.FieldAttributes = undefined;
+        for (info.fields, 0..) |f, i| {
+            const FieldType = if (f.optional) ?f.zig_type else f.zig_type;
+            field_names[i] = (f.name)[0..f.name.len :0];
+            field_types[i] = FieldType;
+            field_attrs[i] = .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = @alignOf(FieldType),
+            };
+        }
+        const arena_idx = info.fields.len;
+        const edges_idx = info.fields.len + @as(usize, @intFromBool(needs_arena));
+        if (needs_arena) {
+            field_names[arena_idx] = "json_arena";
+            field_types[arena_idx] = ?*std.heap.ArenaAllocator;
+            field_attrs[arena_idx] = .{
+                .default_value_ptr = null,
+                .@"comptime" = false,
+                .@"align" = @alignOf(?*std.heap.ArenaAllocator),
+            };
+        }
+        field_names[edges_idx] = "edges";
+        field_types[edges_idx] = ET;
+        field_attrs[edges_idx] = .{
+            .default_value_ptr = &edges_default,
+            .@"comptime" = false,
+            .@"align" = @alignOf(ET),
+        };
+        return @Struct(.auto, null, field_names[0 .. edges_idx + 1], field_types[0 .. edges_idx + 1], field_attrs[0 .. edges_idx + 1]);
+    }
+}
+
+/// Recursively free heap allocations owned by an entity (fields + eager-loaded
+/// edges). The caller still owns the entity itself and the outer `[]Entity` slice.
+pub fn deinitEntity(comptime infos: []const TypeInfo, comptime info: TypeInfo, self: anytype, allocator: std.mem.Allocator) void {
+    // Reject immutable pointers at compile time.
+    comptime {
+        const T = @TypeOf(self);
+        const ptr_info = @typeInfo(T).pointer;
+        if (ptr_info.attrs.@"const") @compileError("deinitEntity requires a mutable entity pointer");
+    }
+
+    // Release the per-entity JSON arena: both the Create path and the scan
+    // path (scanRowWithArena) attach one when the entity carries JSON
+    // fields. Entities without JSON fields have no json_arena member.
+    if (comptime @hasField(@TypeOf(self.*), "json_arena")) {
+        if (self.json_arena) |arena| {
+            arena.deinit();
+            allocator.destroy(arena);
+            self.json_arena = null;
+        }
+    }
+
+    inline for (info.fields) |f| {
+        if (!comptime isOwningField(f.zig_type)) continue;
+        const field_type = if (f.optional) ?f.zig_type else f.zig_type;
+        const fp: *field_type = &@field(self, f.name);
+        FreeField(field_type, fp, allocator);
+    }
+    deinitEntityEdges(infos, info, self, allocator);
+}
+
+/// Recursively free eager-loaded edges (one level of nesting supported).
+/// The edges field type is `?[]Target` where Target is LightEntity (with a
+/// shallow edges level) or PlainFields (terminal); Target is derived from the
+/// field type so both work.
+fn deinitEntityEdges(comptime infos: []const TypeInfo, comptime info: TypeInfo, self: anytype, allocator: std.mem.Allocator) void {
+    if (comptime info.edges.len == 0) return;
+    inline for (info.edges) |e| {
+        const target_info = comptime findTypeInfo(infos, e.target_name);
+        const EdgeFieldType = @TypeOf(@field(self.edges, e.name));
+        const EdgeArrType = @typeInfo(EdgeFieldType).optional.child;
+        const ItemType = @typeInfo(EdgeArrType).pointer.child;
+        const edges_ptr: *?[]ItemType = &@field(self.edges, e.name);
+        if (edges_ptr.*) |arr| {
+            for (arr) |*item| {
+                // Eager-loaded targets carry their own JSON arena (see
+                // loadEdgePath); release it before the owning fields.
+                if (comptime @hasField(ItemType, "json_arena")) {
+                    if (item.json_arena) |arena| {
+                        arena.deinit();
+                        allocator.destroy(arena);
+                        item.json_arena = null;
+                    }
+                }
+                inline for (target_info.fields) |tf| {
+                    if (!comptime isOwningField(tf.zig_type)) continue;
+                    const item_field_type = if (tf.optional) ?tf.zig_type else tf.zig_type;
+                    const item_fp: *item_field_type = &@field(item, tf.name);
+                    FreeField(item_field_type, item_fp, allocator);
+                }
+                // Terminal targets (PlainFields) carry no edges container;
+                // the comptime guard stops that instantiation from being
+                // analyzed.
+                if (comptime @hasField(ItemType, "edges")) {
+                    deinitEntityEdges(infos, target_info, item, allocator);
+                }
+            }
+            allocator.free(arr);
+        }
+    }
+}
+
+/// Write an entity to the given writer. Non-sensitive fields are formatted
+/// normally; sensitive fields are masked as "***".
+///
+/// Usage:
+///   try formatEntity(info, e, writer);
+pub fn formatEntity(
+    comptime info: TypeInfo,
+    self: anytype,
+    writer: anytype,
+) !void {
+    try writer.writeAll(info.table_name);
+    try writer.writeAll("{");
+    inline for (info.fields, 0..) |f, i| {
+        if (i > 0) try writer.writeAll(", ");
+        try writer.print("{s}=", .{f.name});
+        if (f.sensitive) {
+            try writer.writeAll("***");
+        } else {
+            const field_type = if (f.optional) ?f.zig_type else f.zig_type;
+            const value: field_type = @field(self, f.name);
+            try writer.print("{any}", .{value});
+        }
+    }
+    try writer.writeAll("}");
+}
+
+fn isOwningField(comptime T: type) bool {
+    const info = @typeInfo(T);
+    switch (info) {
+        .pointer => |p| return p.size == .slice, // includes []const u8
+        .optional => |opt| return isOwningField(opt.child),
+        else => return false,
+    }
+}
+
+/// Serialize an entity to JSON with `sensitive` fields masked as "***".
+/// The generated entity struct cannot carry a `jsonStringify` method (the
+/// @Struct builtin has no decls slot), so APIs must use this helper instead
+/// of serializing the raw entity (std.json would leak sensitive fields).
+/// Non-sensitive values are emitted through std.json (safe escaping).
+pub fn toMaskedJson(
+    allocator: std.mem.Allocator,
+    comptime infos: []const TypeInfo,
+    comptime info: TypeInfo,
+    entity: anytype,
+) ![]u8 {
+    _ = infos;
+    var buf = std.ArrayList(u8).empty;
+    errdefer buf.deinit(allocator);
+    try buf.append(allocator, '{');
+    inline for (info.fields, 0..) |f, i| {
+        // json_arena is an injected bookkeeping field (entity struct only),
+        // never business data — skip it defensively in case TypeInfo ever
+        // carries injected fields (serializing it would walk into
+        // std.mem.Allocator's fn-pointer vtable, rejected as comptime-only
+        // by newer zig dev). Must be skipped before the comma logic.
+        if (comptime std.mem.eql(u8, f.name, "json_arena")) continue;
+        if (i > 0) try buf.appendSlice(allocator, ",");
+        try buf.appendSlice(allocator, "\"");
+        try buf.appendSlice(allocator, f.name);
+        try buf.appendSlice(allocator, "\":");
+        if (f.sensitive) {
+            try buf.appendSlice(allocator, "\"***\"");
+        } else {
+            const value = @field(entity, f.name);
+            const piece = try std.json.Stringify.valueAlloc(allocator, value, .{});
+            defer allocator.free(piece);
+            try buf.appendSlice(allocator, piece);
+        }
+    }
+    try buf.append(allocator, '}');
+    return buf.toOwnedSlice(allocator);
+}
+
+// ------------------------------------------------------------------
+// ManagedEntity + arena dupe (HTTP-handler ergonomics)
+// ------------------------------------------------------------------
+
+/// Owning wrapper that bundles an entity with the allocator it was
+/// allocated with, so teardown cannot pick the wrong allocator:
+///
+///   var m = managedEntity(infos, UserInfo, user, client.allocator);
+///   defer m.deinit();
+///   use(m.get().name);
+pub fn ManagedEntity(comptime infos: []const TypeInfo, comptime info: TypeInfo) type {
+    return struct {
+        entity: Entity(infos, info),
+        allocator: std.mem.Allocator,
+
+        const Self = @This();
+
+        pub fn get(self: *Self) *Entity(infos, info) {
+            return &self.entity;
+        }
+
+        pub fn deinit(self: *Self) void {
+            deinitEntity(infos, info, &self.entity, self.allocator);
+        }
+    };
+}
+
+/// Wrap an entity with its owning allocator. See `ManagedEntity`.
+pub fn managedEntity(
+    comptime infos: []const TypeInfo,
+    comptime info: TypeInfo,
+    entity: Entity(infos, info),
+    allocator: std.mem.Allocator,
+) ManagedEntity(infos, info) {
+    return .{ .entity = entity, .allocator = allocator };
+}
+
+fn dupeDeep(comptime T: type, v: T, arena: std.mem.Allocator) std.mem.Allocator.Error!T {
+    switch (@typeInfo(T)) {
+        .pointer => |p| {
+            if (p.size != .slice) return v;
+            if (p.child == u8) return try arena.dupe(u8, v);
+            const new_slice = try arena.alloc(p.child, v.len);
+            for (v, 0..) |item, i| new_slice[i] = try dupeDeep(p.child, item, arena);
+            return new_slice;
+        },
+        .optional => |opt| {
+            if (v) |inner| return @as(T, try dupeDeep(opt.child, inner, arena));
+            return null;
+        },
+        .@"struct" => |s| {
+            var out = v;
+            inline for (s.field_names, s.field_types) |fname, ftype| {
+                @field(out, fname) = try dupeDeep(ftype, @field(v, fname), arena);
+            }
+            return out;
+        },
+        .array => |a| {
+            var out: T = undefined;
+            for (v, 0..) |item, i| out[i] = try dupeDeep(a.child, item, arena);
+            return out;
+        },
+        // Tagged unions (e.g. untyped std.json.Value documents) are copied
+        // shallowly — their payloads stay in the source entity's json_arena.
+        else => return v,
+    }
+}
+
+fn dupeItem(
+    comptime infos: []const TypeInfo,
+    comptime info: TypeInfo,
+    comptime T: type,
+    item: T,
+    arena: std.mem.Allocator,
+) std.mem.Allocator.Error!T {
+    var out = item;
+    // JSON payloads are re-duped field-by-field below; the arena pointer
+    // itself is bookkeeping and must not survive the copy.
+    if (comptime @hasField(T, "json_arena")) out.json_arena = null;
+    inline for (info.fields) |f| {
+        const field_type = if (f.optional) ?f.zig_type else f.zig_type;
+        @field(out, f.name) = try dupeDeep(field_type, @field(out, f.name), arena);
+    }
+    if (comptime @hasField(T, "edges") and info.edges.len > 0) {
+        inline for (info.edges) |e| {
+            const target_info = comptime findTypeInfo(infos, e.target_name);
+            const EdgeFieldType = @TypeOf(@field(out.edges, e.name));
+            const ArrType = @typeInfo(EdgeFieldType).optional.child;
+            const ItemType = @typeInfo(ArrType).pointer.child;
+            if (@field(out.edges, e.name)) |arr| {
+                const new_arr = try arena.alloc(ItemType, arr.len);
+                for (arr, 0..) |it, i| {
+                    new_arr[i] = try dupeItem(infos, target_info, ItemType, it, arena);
+                }
+                @field(out.edges, e.name) = new_arr;
+            }
+        }
+    }
+    return out;
+}
+
+/// Deep-copy an entity (scalar fields, string/slice fields, typed JSON
+/// structs and up to two levels of eager-loaded edges) into `arena`.
+///
+/// The returned entity borrows everything from the arena: pass it to
+/// request-scoped code and free it all at once with `arena.deinit()`.
+/// Do NOT pass the copy to `deinitEntity` — that would double-free into
+/// the wrong allocator.
+pub fn dupeEntityTo(
+    comptime infos: []const TypeInfo,
+    comptime info: TypeInfo,
+    self: anytype,
+    arena: std.mem.Allocator,
+) std.mem.Allocator.Error!@TypeOf(self.*) {
+    return dupeItem(infos, info, @TypeOf(self.*), self.*, arena);
+}
+
+// ------------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------------
+
+test "toMaskedJson masks sensitive fields" {
+    const allocator = std.testing.allocator;
+    const field = @import("../core/field.zig");
+    const Schema = @import("../core/schema.zig").Schema;
+    const fromSchema = @import("graph.zig").fromSchema;
+
+    const Account = Schema("Account2", .{
+        .fields = &.{
+            field.String("name"),
+            field.String("api_key").Sensitive(),
+        },
+    });
+    const info = comptime fromSchema(Account);
+    const infos = &[_]TypeInfo{info};
+    const AccountEntity = Entity(infos, info);
+
+    const a = AccountEntity{ .id = 1, .name = "alice", .api_key = "sk-secret-123" };
+    const json = try toMaskedJson(allocator, infos, info, a);
+    defer allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"api_key\":\"***\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"alice\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "sk-secret-123") == null);
+}
+
+test "ManagedEntity deinit frees with the bound allocator" {
+    const allocator = std.testing.allocator;
+    const field = @import("../core/field.zig");
+    const Schema = @import("../core/schema.zig").Schema;
+    const fromSchema = @import("graph.zig").fromSchema;
+
+    const User = Schema("ManagedUser", .{
+        .fields = &.{field.String("name")},
+    });
+    const info = comptime fromSchema(User);
+    const infos = &[_]TypeInfo{info};
+
+    var m = managedEntity(infos, info, .{
+        .id = 1,
+        .name = try allocator.dupe(u8, "alice"),
+    }, allocator);
+    defer m.deinit(); // leak-checker validates the free
+    try std.testing.expectEqualStrings("alice", m.get().name);
+}
+
+test "dupeEntityTo deep-copies strings, JSON payloads and edges into an arena" {
+    const allocator = std.testing.allocator;
+    const field = @import("../core/field.zig");
+    const edge = @import("../core/edge.zig");
+    const Schema = @import("../core/schema.zig").Schema;
+    const buildGraph = @import("graph.zig").buildGraph;
+
+    const Settings = struct { theme: []const u8 };
+    const Post = Schema("DupePost", .{
+        .fields = &.{field.String("title")},
+    });
+    const Blog = Schema("DupeBlog", .{
+        .fields = &.{
+            field.String("name"),
+            field.String("note").Optional(),
+            field.JSON("settings", Settings),
+        },
+        .edges = &.{edge.To("posts", Post)},
+    });
+    const graph = comptime buildGraph(&.{ Blog, Post });
+    const infos = graph.types;
+    const blog_info = infos[0];
+    const post_info = infos[1];
+    const BlogEntity = Entity(infos, blog_info);
+    const PostLight = LightEntity(infos, post_info);
+
+    const posts = try allocator.alloc(PostLight, 1);
+    posts[0] = .{ .id = 7, .dupe_blog_id = 1, .title = try allocator.dupe(u8, "hello"), .json_arena = null, .edges = .{} };
+    // Real entities carry JSON payloads in a per-entity arena.
+    const src_json_arena = try allocator.create(std.heap.ArenaAllocator);
+    src_json_arena.* = std.heap.ArenaAllocator.init(allocator);
+    var src = BlogEntity{
+        .id = 1,
+        .name = try allocator.dupe(u8, "tech"),
+        .note = try allocator.dupe(u8, "draft"),
+        .settings = .{ .theme = try src_json_arena.allocator().dupe(u8, "dark") },
+        .json_arena = src_json_arena,
+        .edges = .{ .posts = posts },
+    };
+
+    var arena_state = std.heap.ArenaAllocator.init(allocator);
+    defer arena_state.deinit(); // frees the whole copy at once
+    const arena = arena_state.allocator();
+
+    const copy = try dupeEntityTo(infos, blog_info, &src, arena);
+    // Contents equal, storage independent.
+    try std.testing.expectEqualStrings("tech", copy.name);
+    try std.testing.expect(copy.name.ptr != src.name.ptr);
+    try std.testing.expectEqualStrings("dark", copy.settings.theme);
+    try std.testing.expect(copy.settings.theme.ptr != src.settings.theme.ptr);
+    try std.testing.expectEqualStrings("hello", copy.edges.posts.?[0].title);
+    try std.testing.expect(copy.edges.posts.?.ptr != src.edges.posts.?.ptr);
+    try std.testing.expect(copy.json_arena == null);
+
+    // Freeing the source must not invalidate the arena copy.
+    deinitEntity(infos, blog_info, &src, allocator);
+    try std.testing.expectEqualStrings("tech", copy.name);
+    try std.testing.expectEqualStrings("draft", copy.note.?);
+    try std.testing.expectEqualStrings("hello", copy.edges.posts.?[0].title);
+    // `copy` must NOT be deinitEntity'd — the arena owns it.
+}
+
+test "toMaskedJson on JSON-field entity never emits json_arena" {
+    const allocator = std.testing.allocator;
+    const field = @import("../core/field.zig");
+    const Schema = @import("../core/schema.zig").Schema;
+    const buildGraph = @import("graph.zig").buildGraph;
+
+    const Settings = struct { theme: []const u8 };
+    const User = Schema("MaskedJsonUser", .{
+        .fields = &.{ field.String("name"), field.JSON("settings", Settings) },
+    });
+    const graph = comptime buildGraph(&.{User});
+    const infos = graph.types;
+    const UserEntity = Entity(infos, infos[0]);
+
+    var u = UserEntity{ .id = 1, .name = "alice", .settings = .{ .theme = "dark" }, .json_arena = null };
+    const json = try toMaskedJson(allocator, infos, infos[0], &u);
+    defer allocator.free(json);
+    // The injected arena field must never appear in masked output, and the
+    // JSON business field must serialize normally.
+    try std.testing.expect(std.mem.indexOf(u8, json, "json_arena") == null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"settings\":{\"theme\":\"dark\"}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"name\":\"alice\"") != null);
+}
+
+test "Entity struct generation" {
+    const field = @import("../core/field.zig");
+    const schema = @import("../core/schema.zig").Schema;
+    const fromSchema = @import("graph.zig").fromSchema;
+
+    const User = schema("User", .{
+        .fields = &.{
+            field.String("name"),
+            field.Int("age"),
+        },
+    });
+
+    const info = comptime fromSchema(User);
+    const infos = &[_]TypeInfo{info};
+    const UserEntity = comptime Entity(infos, info);
+
+    var u: UserEntity = undefined;
+    u.id = 1;
+    u.name = "alice";
+    u.age = 30;
+
+    try std.testing.expectEqual(@as(i64, 1), u.id);
+    try std.testing.expectEqualStrings("alice", u.name);
+    try std.testing.expectEqual(@as(i64, 30), u.age);
+}
+
+test "formatEntity masks sensitive fields" {
+    // The formatEntity function exists and accepts any writer. Callers can
+    // provide their own. We do not assert output here because std.ArrayList.writer()
+    // is not available in Zig 0.17-dev; formatEntityToString is intentionally
+    // omitted to avoid depending on std.io APIs that have been removed.
+    // Manual smoke-test: call formatEntity with a custom writer.
+    const field = @import("../core/field.zig");
+    const schema = @import("../core/schema.zig").Schema;
+    const fromSchema = @import("graph.zig").fromSchema;
+
+    const User = schema("User", .{
+        .fields = &.{
+            field.String("name"),
+            field.String("password").Sensitive(),
+        },
+    });
+
+    const info = comptime fromSchema(User);
+    const UserEntity = comptime Entity(&[_]TypeInfo{info}, info);
+
+    var u: UserEntity = undefined;
+    u.id = 1;
+    u.name = "alice";
+    u.password = "hunter2";
+
+    // Use a stub writer that just discards bytes.
+    const StubWriter = struct {
+        fn writeAll(_: @This(), _: []const u8) !void {}
+        fn print(_: @This(), comptime _: []const u8, _: anytype) !void {}
+    };
+    try formatEntity(info, u, StubWriter{});
+}
+
+test "fromSchema copies annotations" {
+    const field = @import("../core/field.zig");
+    const schema = @import("../core/schema.zig").Schema;
+    const Annotation = @import("../core/schema.zig").Annotation;
+    const fromSchema = @import("graph.zig").fromSchema;
+
+    const User = schema("User", .{
+        .fields = &.{field.String("name")},
+        .annotations = &.{
+            Annotation{ .key = "owner", .value = "platform" },
+            Annotation{ .key = "retention_days", .value = "30" },
+        },
+    });
+
+    const info = comptime fromSchema(User);
+    try std.testing.expectEqual(@as(usize, 2), info.annotations.len);
+    try std.testing.expectEqualStrings("owner", info.annotations[0].key);
+    try std.testing.expectEqualStrings("platform", info.annotations[0].value);
+    try std.testing.expectEqualStrings("retention_days", info.annotations[1].key);
+    try std.testing.expectEqualStrings("30", info.annotations[1].value);
+}
+
+test "fromSchema annotations default to empty" {
+    const field = @import("../core/field.zig");
+    const schema = @import("../core/schema.zig").Schema;
+    const fromSchema = @import("graph.zig").fromSchema;
+
+    const Pet = schema("Pet", .{
+        .fields = &.{field.String("name")},
+    });
+
+    const info = comptime fromSchema(Pet);
+    try std.testing.expectEqual(@as(usize, 0), info.annotations.len);
+}

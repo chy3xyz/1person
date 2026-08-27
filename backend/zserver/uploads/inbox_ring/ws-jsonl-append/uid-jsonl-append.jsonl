@@ -1,0 +1,3 @@
+{"seq":1,"type":"inbox_updated","inbox_id":"j1","workspace_id":"ws-jsonl-append","user_id":"uid-jsonl-append","action":"read","count":1}
+{"seq":2,"type":"inbox_updated","inbox_id":"j1","workspace_id":"ws-jsonl-append","user_id":"uid-jsonl-append","action":"read","count":1}
+{"seq":3,"type":"inbox_updated","inbox_id":"j1","workspace_id":"ws-jsonl-append","user_id":"uid-jsonl-append","action":"read","count":1}

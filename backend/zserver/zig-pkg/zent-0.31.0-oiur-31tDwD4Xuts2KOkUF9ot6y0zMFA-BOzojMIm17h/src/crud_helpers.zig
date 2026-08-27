@@ -1,0 +1,1549 @@
+//! Ergonomic CRUD sugar over the typed entity accessors.
+//!
+//! These helpers exist so consumers can write terse, correct persistence
+//! code without hand-rolling the Query/Create/Update/Delete lifecycle every
+//! time. They are schema-agnostic: they derive everything from the accessor's
+//! type (`client.order` / `client.user` / ...) and the `values` / `predicates`
+//! structs passed in.
+//!
+//! Examples:
+//! ```zig
+//! // one row by id (returns !?Order)
+//! var e = try zent.crud_helpers.first(client.order, .{ client.order.predicates.order_idEQ(.{ .int = id }) });
+//! if (e) |*ent| { defer zent.codegen.deinitEntity(infos, ORDER_INFO, ent, alloc); ... }
+//!
+//! // insert from a field-value struct
+//! var created = try zent.crud_helpers.create(client.coupon, .{ .name = n, .status = 20 });
+//!
+//! // partial update (rows affected)
+//! const n = try zent.crud_helpers.update(client.coupon, .{ .status = 20 }, .{ preds.coupon_idEQ(...) });
+//!
+//! // delete / soft-delete (rows affected)
+//! const m = try zent.crud_helpers.delete(client.coupon, .{ preds.coupon_idEQ(...) });
+//! ```
+//!
+//! Memory contract: `first` returns an owned entity (free with
+//! `zent.codegen.deinitEntity(infos, info, &e, alloc)`); `create` returns an
+//! owned entity (free the same way); `update`/`delete` return rows affected.
+
+const std = @import("std");
+const graph_mod = @import("codegen/graph.zig");
+const client_mod = @import("codegen/client.zig");
+const sql_driver = @import("sql/driver.zig");
+const Value = @import("sql/builder.zig").Value;
+const deinitEntity = @import("codegen/entity.zig").deinitEntity;
+
+/// Resolve the `QueryError!?Entity` result type of an entity accessor's
+/// `Query()` builder via its `First()` method signature.
+fn FirstResult(comptime Accessor: type) type {
+    const QB = @TypeOf(@as(Accessor, undefined).Query());
+    return @TypeOf(@as(*QB, undefined).First());
+}
+
+/// Resolve the `QueryError![]Entity` result type of an entity accessor's
+/// `All()` builder.
+fn AllResult(comptime Accessor: type) type {
+    const QB = @TypeOf(@as(Accessor, undefined).Query());
+    return @TypeOf(@as(*QB, undefined).All());
+}
+
+/// One-row query on an entity accessor: adds `predicates`, runs `First()`,
+/// and hands back the owned entity or `null`. The query lifecycle is handled
+/// here; the caller frees the entity with `deinitEntity` and maps it (capture
+/// with `|*entity|` to avoid a copy).
+pub fn first(accessor: anytype, predicates: anytype) FirstResult(@TypeOf(accessor)) {
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+    return try q.First();
+}
+
+/// List query on an entity accessor: adds `predicates`, runs `All()`, hands
+/// back the owned row list. The query lifecycle is handled here; the caller
+/// frees with `deinitRows(infos, info, rows, alloc)`.
+pub fn all(accessor: anytype, predicates: anytype) AllResult(@TypeOf(accessor)) {
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+    return try q.All();
+}
+
+/// Row-count query on an entity accessor: adds `predicates`, runs `Count()`.
+pub fn count(accessor: anytype, predicates: anytype) CountResult(@TypeOf(accessor)) {
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+    return try q.Count();
+}
+
+/// Resolve the `QueryError!i64` result type of an entity accessor's `Count()`.
+fn CountResult(comptime Accessor: type) type {
+    const QB = @TypeOf(@as(Accessor, undefined).Query());
+    return @TypeOf(@as(*QB, undefined).Count());
+}
+
+/// Resolve the `SaveError!Entity` result type of an entity accessor's
+/// `Create()` builder.
+fn CreateResult(comptime Accessor: type) type {
+    const CB = @typeInfo(@TypeOf(@as(Accessor, undefined).Create())).error_union.payload;
+    return @TypeOf(@as(*CB, undefined).Save());
+}
+
+/// Create an entity from a struct of field values (`values`), e.g.
+/// `create(client.bargain_task_help, .{ .task_id = t, .user_id = u })`.
+/// Runs Create + setFieldValue for each field + Save. Returns the owned
+/// entity — free it with `deinitEntity`.
+pub fn create(accessor: anytype, values: anytype) CreateResult(@TypeOf(accessor)) {
+    var cb = try accessor.Create();
+    defer cb.deinit();
+    inline for (@typeInfo(@TypeOf(values)).@"struct".field_names) |name| {
+        _ = try cb.setFieldValue(name, @field(values, name));
+    }
+    return try cb.Save();
+}
+
+/// Update rows matching `predicates` from a struct of field values.
+/// Returns rows affected. Example:
+/// `update(client.coupon, .{ .status = 20 }, .{ preds.coupon_idEQ(...) })`.
+pub fn update(accessor: anytype, values: anytype, predicates: anytype) !usize {
+    var upd = accessor.Update();
+    defer upd.deinit();
+    inline for (@typeInfo(@TypeOf(values)).@"struct".field_names) |name| {
+        _ = try upd.setFieldValue(name, @field(values, name));
+    }
+    _ = try upd.Where(predicates);
+    return try upd.Save();
+}
+
+/// Owned row slice returned by raw-driver query helpers. Caller frees with
+/// `deinit()` — frees every `[]const u8` / `?[]const u8` field on each item
+/// (comptime reflection), then the slice itself.
+pub fn Rows(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        items: []T,
+        allocator: std.mem.Allocator,
+
+        pub fn deinit(self: *Self) void {
+            freeStrings(T, self.items, self.allocator);
+            self.allocator.free(self.items);
+        }
+    };
+}
+
+fn freeStrings(comptime T: type, items: []T, allocator: std.mem.Allocator) void {
+    inline for (@typeInfo(T).@"struct".field_names, @typeInfo(T).@"struct".field_types) |name, ft| {
+        if (ft == []const u8) {
+            for (items) |*it| allocator.free(@field(it, name));
+        } else if (ft == ?[]const u8) {
+            for (items) |*it| if (@field(it, name)) |s| allocator.free(s);
+        }
+    }
+}
+
+/// Free owned `[]const u8` / `?[]const u8` fields on a single DTO.
+/// Drop-in replacement for `sqlx.freeScanned` in zent-only apps.
+pub fn freeOwnedStrings(allocator: std.mem.Allocator, comptime T: type, val: T) void {
+    const info = @typeInfo(T);
+    if (info != .@"struct") return;
+    inline for (info.@"struct".field_names, info.@"struct".field_types) |name, ft| {
+        if (ft == []const u8) {
+            allocator.free(@field(val, name));
+        } else if (ft == ?[]const u8) {
+            if (@field(val, name)) |s| allocator.free(s);
+        }
+    }
+}
+
+/// Run a raw driver query and collect the rows into an owned `Rows(T)` slice.
+/// `mapRow(allocator, row)` returns one `T` per result row and MAY return an
+/// error union (`!T`). Contract: every string field of the returned `T` must
+/// be allocated with the passed `allocator` (dupe borrowed row text) so
+/// `Rows(T).deinit()` can free it exactly once. Example:
+/// ```zig
+/// const r = try zent.crud_helpers.queryRows(ProductRow, driver, sql, args, alloc,
+///     struct { fn f(a: std.mem.Allocator, row: sql_driver.Row) !ProductRow {
+///         return .{ .id = row.getInt(0) orelse 0, .name = try a.dupe(u8, row.getText(1) orelse "") };
+///     } }.f);
+/// defer r.deinit();
+/// ```
+pub fn queryRows(
+    comptime T: type,
+    driver: anytype,
+    sql: []const u8,
+    args: []const Value,
+    allocator: std.mem.Allocator,
+    comptime mapRow: anytype,
+) !Rows(T) {
+    var rows = try driver.query(sql, args);
+    defer rows.deinit();
+    var list = std.array_list.Managed(T).init(allocator);
+    errdefer {
+        // Free owned strings of any rows appended before the failure, then the
+        // backing buffer — Managed.deinit alone would leak the duped strings.
+        freeStrings(T, list.items, allocator);
+        list.deinit();
+    }
+    while (rows.next()) |row| {
+        try list.append(try mapRow(allocator, row));
+    }
+    // toOwnedSlice detaches the backing; errdefer is skipped on success, so the
+    // caller owns every string + the slice via Rows(T).deinit().
+    return .{ .items = try list.toOwnedSlice(), .allocator = allocator };
+}
+
+/// Delete (or soft-delete) rows matching `predicates`. Returns rows affected.
+pub fn delete(accessor: anytype, predicates: anytype) !usize {
+    var del = accessor.Delete();
+    defer del.deinit();
+    _ = try del.Where(predicates);
+    return try del.Exec();
+}
+
+/// Check if any row matches the specified `predicates`.
+/// Returns `true` if at least 1 record exists, `false` otherwise.
+pub fn exists(accessor: anytype, predicates: anytype) !bool {
+    return (try count(accessor, predicates)) > 0;
+}
+
+/// Finds the first matching entity. If none matches, creates and returns a new entity with `create_values`.
+/// Returns owned Entity — free with `deinitEntity`.
+pub fn findOrStore(accessor: anytype, create_values: anytype, predicates: anytype) !@typeInfo(CreateResult(@TypeOf(accessor))).error_union.payload {
+    const existing = try first(accessor, predicates);
+    if (existing) |e| {
+        return e;
+    }
+    return try create(accessor, create_values);
+}
+
+/// Pagination result struct containing total row count, page details, and row items.
+pub fn PageResult(comptime Accessor: type) type {
+    const ItemsList = @typeInfo(AllResult(Accessor)).error_union.payload;
+    return struct {
+        const Self = @This();
+        items: ItemsList,
+        total: i64,
+        page: usize,
+        page_size: usize,
+        total_pages: usize,
+
+        pub fn deinit(self: *Self, comptime infos: []const graph_mod.TypeInfo, comptime info: graph_mod.TypeInfo, allocator: std.mem.Allocator) void {
+            deinitRows(infos, info, self.items, allocator);
+        }
+    };
+}
+
+/// Paginated list query on an entity accessor:
+/// Queries total count and limit/offset slice of items for the requested page.
+pub fn paginated(
+    accessor: anytype,
+    predicates: anytype,
+    page: usize,
+    page_size: usize,
+) !PageResult(@TypeOf(accessor)) {
+    const total_rows = try count(accessor, predicates);
+    const safe_page = if (page == 0) 1 else page;
+    const safe_size = if (page_size == 0) 10 else page_size;
+    const offset = (safe_page - 1) * safe_size;
+
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+    _ = q.Limit(safe_size);
+    _ = q.Offset(offset);
+
+    const items = try q.All();
+    const total_pages = if (total_rows == 0) 0 else @as(usize, @intCast(@divFloor(total_rows + @as(i64, @intCast(safe_size)) - 1, @as(i64, @intCast(safe_size)))));
+
+    return .{
+        .items = items,
+        .total = total_rows,
+        .page = safe_page,
+        .page_size = safe_size,
+        .total_pages = total_pages,
+    };
+}
+
+/// Options for sorting paginated or list queries.
+pub const SortOptions = struct {
+    sort_col: ?[]const u8 = null,
+    desc: bool = false,
+};
+
+/// Check if `field_name` is a valid field defined on entity schema `info`.
+pub fn isValidField(comptime info: graph_mod.TypeInfo, field_name: []const u8) bool {
+    inline for (info.fields) |f| {
+        if (std.mem.eql(u8, f.name, field_name)) return true;
+    }
+    return false;
+}
+
+fn parseSortOptions(opts: anytype) !SortOptions {
+    const T = @TypeOf(opts);
+    if (T == SortOptions) return opts;
+    if (T == []const u8 or T == [:0]const u8) return .{ .sort_col = opts, .desc = false };
+    if (@typeInfo(T) == .null) return .{};
+    if (@typeInfo(T) == .@"struct") {
+        var res = SortOptions{};
+        if (@hasField(T, "sort_col")) {
+            const val = @field(opts, "sort_col");
+            if (@typeInfo(@TypeOf(val)) == .optional) {
+                res.sort_col = val;
+            } else {
+                res.sort_col = val;
+            }
+        }
+        if (@hasField(T, "desc")) {
+            res.desc = @field(opts, "desc");
+        }
+        return res;
+    }
+    return error.InvalidSortOptions;
+}
+
+/// Paginated list query on an entity accessor with sorting options.
+/// Validates `options.sort_col` against entity schema fields to prevent SQL injection.
+pub fn paginatedWithOptions(
+    accessor: anytype,
+    predicates: anytype,
+    options: anytype,
+    page: usize,
+    page_size: usize,
+) !PageResult(@TypeOf(accessor)) {
+    const opts = try parseSortOptions(options);
+    const total_rows = try count(accessor, predicates);
+    const safe_page = if (page == 0) 1 else page;
+    const safe_size = if (page_size == 0) 10 else page_size;
+    const offset = (safe_page - 1) * safe_size;
+
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+
+    if (opts.sort_col) |col| {
+        if (!isValidField(@TypeOf(accessor).entity_info, col)) {
+            return error.InvalidSortColumn;
+        }
+        const sql_builder = @import("sql/builder.zig");
+        if (opts.desc) {
+            _ = try q.OrderBy(&.{sql_builder.OrderDesc(col)});
+        } else {
+            _ = try q.OrderBy(&.{sql_builder.OrderAsc(col)});
+        }
+    }
+
+    _ = q.Limit(safe_size);
+    _ = q.Offset(offset);
+
+    const items = try q.All();
+    const total_pages = if (total_rows == 0) 0 else @as(usize, @intCast(@divFloor(total_rows + @as(i64, @intCast(safe_size)) - 1, @as(i64, @intCast(safe_size)))));
+
+    return .{
+        .items = items,
+        .total = total_rows,
+        .page = safe_page,
+        .page_size = safe_size,
+        .total_pages = total_pages,
+    };
+}
+
+fn LatestResult(comptime Accessor: type) type {
+    const FR = FirstResult(Accessor);
+    return (error{InvalidSortColumn} || @typeInfo(FR).error_union.error_set)!@typeInfo(FR).error_union.payload;
+}
+
+/// Query the single latest entity matching `predicates` ordered by `sort_col` DESC.
+/// Whitelist-checks `sort_col` against entity schema fields.
+/// Returns owned entity or `null` — caller frees non-null result with `deinitEntity`.
+pub fn latest(
+    accessor: anytype,
+    predicates: anytype,
+    sort_col: []const u8,
+) LatestResult(@TypeOf(accessor)) {
+    if (!isValidField(@TypeOf(accessor).entity_info, sort_col)) {
+        return error.InvalidSortColumn;
+    }
+    const sql_builder = @import("sql/builder.zig");
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+    _ = try q.OrderBy(&.{sql_builder.OrderDesc(sort_col)});
+    return try q.First();
+}
+
+fn getInfos(comptime T: type) []const graph_mod.TypeInfo {
+    if (@hasDecl(T, "entity_infos")) return T.entity_infos;
+    inline for (@typeInfo(T).@"struct".field_names, @typeInfo(T).@"struct".field_types) |_, FieldT| {
+        if (@hasDecl(FieldT, "entity_infos")) {
+            return FieldT.entity_infos;
+        }
+    }
+    @compileError("Cannot resolve entity_infos from type " ++ @typeName(T));
+}
+
+fn RootClientType(comptime T: type) type {
+    if (@typeInfo(T) == .pointer) {
+        const Child = @typeInfo(T).pointer.child;
+        if (@hasField(Child, "client")) {
+            return @TypeOf(@as(Child, undefined).client);
+        }
+    }
+    if (@hasField(T, "client")) {
+        return @TypeOf(@as(T, undefined).client);
+    }
+    if (!@hasDecl(T, "entity_info") and @hasField(T, "driver") and @hasField(T, "allocator")) {
+        return T;
+    }
+    if (@hasDecl(T, "entity_info")) {
+        return client_mod.Client(T.entity_infos);
+    }
+    @compileError("Cannot resolve Root Client from type " ++ @typeName(T));
+}
+
+fn getRootClient(client_or_accessor: anytype) RootClientType(@TypeOf(client_or_accessor)) {
+    const T = @TypeOf(client_or_accessor);
+    if (@typeInfo(T) == .pointer) {
+        const Child = @typeInfo(T).pointer.child;
+        if (@hasField(Child, "client")) {
+            return client_or_accessor.client;
+        }
+    }
+    if (@hasField(T, "client")) {
+        return client_or_accessor.client;
+    }
+    if (!@hasDecl(T, "entity_info") and @hasField(T, "driver") and @hasField(T, "allocator")) {
+        return client_or_accessor;
+    }
+    if (@hasDecl(T, "entity_info") and @hasField(T, "driver") and @hasField(T, "allocator")) {
+        const infos = getInfos(T);
+        return client_mod.makeClient(infos, client_or_accessor.allocator, client_or_accessor.driver);
+    }
+    @compileError("Cannot resolve Root Client from type " ++ @typeName(T));
+}
+
+fn execTxCallback(tx_fn: anytype, tx_ptr: anytype) !void {
+    const F = @TypeOf(tx_fn);
+    const info = @typeInfo(F);
+    if (info == .@"fn" or (info == .pointer and @typeInfo(info.pointer.child) == .@"fn")) {
+        return try tx_fn(tx_ptr);
+    } else if (info == .@"struct" and @hasDecl(F, "exec")) {
+        return try tx_fn.exec(tx_ptr);
+    } else if (info == .@"struct" and @hasDecl(F, "run")) {
+        return try tx_fn.run(tx_ptr);
+    } else {
+        @compileError("Unsupported callback type for withTx: " ++ @typeName(F));
+    }
+}
+
+/// Execute a transaction callback within an automatically managed transaction lifecycle.
+/// Resolves root client/driver from `client_or_accessor`.
+/// Automatically commits on success and rolls back on error. `tx.deinit()` is always called.
+pub fn withTx(
+    client_or_accessor: anytype,
+    tx_fn: anytype,
+) anyerror!void {
+    const infos = comptime getInfos(@TypeOf(client_or_accessor));
+    const root_client = getRootClient(client_or_accessor);
+
+    var tx = try client_mod.beginTx(infos, root_client);
+    defer tx.deinit();
+
+    execTxCallback(tx_fn, &tx) catch |err| {
+        _ = tx.rollback() catch {};
+        return err;
+    };
+    try tx.commit();
+}
+
+/// Atomically increment (or decrement if delta < 0) a numeric field for rows matching `predicates`.
+/// Returns rows affected.
+pub fn increment(
+    accessor: anytype,
+    comptime field_name: []const u8,
+    delta: i64,
+    predicates: anytype,
+) !usize {
+    var upd = accessor.Update();
+    defer upd.deinit();
+    const expr = comptime field_name ++ " + ?";
+    _ = try upd.setExprArgs(field_name, expr, &.{.{ .int = delta }});
+    _ = try upd.Where(predicates);
+    return try upd.Save();
+}
+
+fn ScopedAllResult(comptime Accessor: type) type {
+    const AR = AllResult(Accessor);
+    return (error{ InvalidTenantColumn, EmptyInValues } || @typeInfo(AR).error_union.error_set)!@typeInfo(AR).error_union.payload;
+}
+
+fn ScopedFirstResult(comptime Accessor: type) type {
+    const FR = FirstResult(Accessor);
+    return (error{ InvalidTenantColumn, EmptyInValues } || @typeInfo(FR).error_union.error_set)!@typeInfo(FR).error_union.payload;
+}
+
+/// Query all entities matching `predicates` scoped to a tenant ID on `tenant_col`.
+/// Validates `tenant_col` against entity schema fields.
+pub fn scopedBy(
+    accessor: anytype,
+    comptime tenant_col: []const u8,
+    tenant_id: i64,
+    predicates: anytype,
+) ScopedAllResult(@TypeOf(accessor)) {
+    if (!isValidField(@TypeOf(accessor).entity_info, tenant_col)) {
+        return error.InvalidTenantColumn;
+    }
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+
+    const val_buf = try q.allocator.alloc(Value, 1);
+    defer q.allocator.free(val_buf);
+    val_buf[0] = .{ .int = tenant_id };
+    _ = try q.WhereIn(tenant_col, val_buf);
+
+    return try q.All();
+}
+
+/// Query all entities matching `predicates` scoped to `tenant_id` on default column "tenant_id".
+pub fn scoped(
+    accessor: anytype,
+    tenant_id: i64,
+    predicates: anytype,
+) ScopedAllResult(@TypeOf(accessor)) {
+    return scopedBy(accessor, "tenant_id", tenant_id, predicates);
+}
+
+/// Query the first entity matching `predicates` scoped to a tenant ID on `tenant_col`.
+pub fn scopedFirstBy(
+    accessor: anytype,
+    comptime tenant_col: []const u8,
+    tenant_id: i64,
+    predicates: anytype,
+) ScopedFirstResult(@TypeOf(accessor)) {
+    if (!isValidField(@TypeOf(accessor).entity_info, tenant_col)) {
+        return error.InvalidTenantColumn;
+    }
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+
+    const val_buf = try q.allocator.alloc(Value, 1);
+    defer q.allocator.free(val_buf);
+    val_buf[0] = .{ .int = tenant_id };
+    _ = try q.WhereIn(tenant_col, val_buf);
+
+    return try q.First();
+}
+
+/// Query the first entity matching `predicates` scoped to `tenant_id` on default column "tenant_id".
+pub fn scopedFirst(
+    accessor: anytype,
+    tenant_id: i64,
+    predicates: anytype,
+) ScopedFirstResult(@TypeOf(accessor)) {
+    return scopedFirstBy(accessor, "tenant_id", tenant_id, predicates);
+}
+
+/// Options for cursor-based keyset pagination.
+pub const CursorOptions = struct {
+    cursor_col: []const u8 = "id",
+    after: ?i64 = null,
+    before: ?i64 = null,
+    desc: bool = false,
+};
+
+/// Result of a cursor-based pagination query containing row items, next_cursor, and has_more flag.
+pub fn CursorResult(comptime Accessor: type) type {
+    const ItemsList = @typeInfo(AllResult(Accessor)).error_union.payload;
+    return struct {
+        const Self = @This();
+        items: ItemsList,
+        next_cursor: ?i64,
+        has_more: bool,
+
+        pub fn deinit(self: *Self, comptime infos: []const graph_mod.TypeInfo, comptime info: graph_mod.TypeInfo, allocator: std.mem.Allocator) void {
+            deinitRows(infos, info, self.items, allocator);
+        }
+    };
+}
+
+fn CursorPageResult(comptime Accessor: type) type {
+    const CR = CursorResult(Accessor);
+    return (error{InvalidCursorColumn} || @typeInfo(AllResult(Accessor)).error_union.error_set)!CR;
+}
+
+fn parseCursorOptions(opts: anytype) !CursorOptions {
+    const T = @TypeOf(opts);
+    if (T == CursorOptions) return opts;
+    if (@typeInfo(T) == .null) return .{};
+    if (@typeInfo(T) == .@"struct") {
+        var res = CursorOptions{};
+        if (@hasField(T, "cursor_col")) {
+            res.cursor_col = @field(opts, "cursor_col");
+        }
+        if (@hasField(T, "after")) {
+            const val = @field(opts, "after");
+            if (@typeInfo(@TypeOf(val)) == .optional) {
+                res.after = val;
+            } else {
+                res.after = val;
+            }
+        }
+        if (@hasField(T, "before")) {
+            const val = @field(opts, "before");
+            if (@typeInfo(@TypeOf(val)) == .optional) {
+                res.before = val;
+            } else {
+                res.before = val;
+            }
+        }
+        if (@hasField(T, "desc")) {
+            res.desc = @field(opts, "desc");
+        }
+        return res;
+    }
+    return error.InvalidCursorOptions;
+}
+
+fn getEntityCursorVal(comptime Entity: type, entity: *const Entity, col_name: []const u8) ?i64 {
+    inline for (@typeInfo(Entity).@"struct".field_names, @typeInfo(Entity).@"struct".field_types) |fname, FType| {
+        if (std.mem.eql(u8, fname, col_name)) {
+            const val = @field(entity, fname);
+            if (FType == i64 or FType == i32 or FType == u32 or FType == usize) {
+                return @intCast(val);
+            } else if (@typeInfo(FType) == .optional) {
+                if (val) |v| return @intCast(v);
+                return null;
+            }
+        }
+    }
+    return null;
+}
+
+/// Keyset cursor-based pagination helper.
+/// Performs fast cursor pagination without OFFSET overhead.
+/// Whitelist-checks `options.cursor_col` against entity schema fields.
+pub fn cursorPage(
+    accessor: anytype,
+    predicates: anytype,
+    options: anytype,
+    limit: usize,
+) CursorPageResult(@TypeOf(accessor)) {
+    const opts = try parseCursorOptions(options);
+    if (!isValidField(@TypeOf(accessor).entity_info, opts.cursor_col)) {
+        return error.InvalidCursorColumn;
+    }
+
+    const safe_limit = if (limit == 0) 10 else limit;
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.Where(predicates);
+
+    const sql_builder = @import("sql/builder.zig");
+    if (opts.after) |after_val| {
+        const p = if (opts.desc)
+            sql_builder.LT(opts.cursor_col, .{ .int = after_val })
+        else
+            sql_builder.GT(opts.cursor_col, .{ .int = after_val });
+        _ = try q.Where(.{p});
+    }
+
+    if (opts.before) |before_val| {
+        const p = if (opts.desc)
+            sql_builder.GT(opts.cursor_col, .{ .int = before_val })
+        else
+            sql_builder.LT(opts.cursor_col, .{ .int = before_val });
+        _ = try q.Where(.{p});
+    }
+
+    if (opts.desc) {
+        _ = try q.OrderBy(&.{sql_builder.OrderDesc(opts.cursor_col)});
+    } else {
+        _ = try q.OrderBy(&.{sql_builder.OrderAsc(opts.cursor_col)});
+    }
+
+    _ = q.Limit(safe_limit + 1);
+
+    var items = try q.All();
+    var has_more = false;
+    var next_cursor: ?i64 = null;
+
+    const Entity = @typeInfo(CreateResult(@TypeOf(accessor))).error_union.payload;
+    if (items.items.len > safe_limit) {
+        has_more = true;
+        const pop_idx = safe_limit;
+        const last_entity = &items.items[pop_idx];
+        deinitEntity(@TypeOf(accessor).entity_infos, @TypeOf(accessor).entity_info, last_entity, accessor.allocator);
+        items.items.len = safe_limit;
+    }
+
+    if (items.items.len > 0) {
+        next_cursor = getEntityCursorVal(Entity, &items.items[items.items.len - 1], opts.cursor_col);
+    }
+
+    return .{
+        .items = items,
+        .next_cursor = next_cursor,
+        .has_more = has_more,
+    };
+}
+
+/// Batch create entities from a slice of struct values (`items`).
+/// Returns an owned Managed list of created Entities. Caller frees with `deinitRows`.
+pub fn batchCreate(
+    accessor: anytype,
+    allocator: std.mem.Allocator,
+    items: anytype,
+) !@typeInfo(AllResult(@TypeOf(accessor))).error_union.payload {
+    const Entity = @typeInfo(CreateResult(@TypeOf(accessor))).error_union.payload;
+    // The accessor's client allocator owns created entities' strings; the list
+    // backing uses the passed allocator. Free both on any mid-loop failure.
+    const client_alloc = accessor.allocator;
+    const client_infos = @TypeOf(accessor).entity_infos;
+    const client_info = @TypeOf(accessor).entity_info;
+    var list = std.array_list.Managed(Entity).init(allocator);
+    errdefer {
+        for (list.items) |*e| deinitEntity(client_infos, client_info, e, client_alloc);
+        list.deinit();
+    }
+
+    for (items) |item| {
+        const entity = try create(accessor, item);
+        try list.append(entity);
+    }
+    return list;
+}
+
+/// Query a single entity by its primary key integer ID.
+/// Returns owned Entity or null — free non-null result with `deinitEntity`.
+pub fn get(accessor: anytype, id_val: i64) !@typeInfo(FirstResult(@TypeOf(accessor))).error_union.payload {
+    var q = accessor.Query();
+    defer q.deinit();
+    const val_buf = try q.allocator.alloc(Value, 1);
+    defer q.allocator.free(val_buf);
+    val_buf[0] = .{ .int = id_val };
+    _ = try q.WhereIn(@TypeOf(accessor).meta.FieldID, val_buf);
+    return try q.First();
+}
+
+/// Query entities matching a list of integer IDs.
+/// Returns owned Managed list of entities — caller frees with `deinitRows`.
+pub fn findByIds(accessor: anytype, allocator: std.mem.Allocator, ids: []const i64) !@typeInfo(AllResult(@TypeOf(accessor))).error_union.payload {
+    const val_buf = try allocator.alloc(Value, ids.len);
+    defer allocator.free(val_buf);
+    for (ids, 0..) |id, i| {
+        val_buf[i] = .{ .int = id };
+    }
+    var q = accessor.Query();
+    defer q.deinit();
+    _ = try q.WhereIn(@TypeOf(accessor).meta.FieldID, val_buf);
+    return try q.All();
+}
+
+/// Result enum returned by `saveOrUpdate`.
+pub fn SaveOrUpdateResult(comptime Accessor: type) type {
+    const Entity = @typeInfo(CreateResult(Accessor)).error_union.payload;
+    return union(enum) {
+        created: Entity,
+        updated: usize,
+    };
+}
+
+/// Save or update helper:
+/// Checks if records matching `predicates` exist.
+/// If matched, performs `update(accessor, values, predicates)` returning `.updated = rows_affected`.
+/// If no match, performs `create(accessor, values)` returning `.created = entity`.
+pub fn saveOrUpdate(accessor: anytype, values: anytype, predicates: anytype) !SaveOrUpdateResult(@TypeOf(accessor)) {
+    if (try exists(accessor, predicates)) {
+        const n = try update(accessor, values, predicates);
+        return .{ .updated = n };
+    } else {
+        const ent = try create(accessor, values);
+        return .{ .created = ent };
+    }
+}
+
+/// Update rows matching `predicates` with optimistic concurrency locking on `version_field`.
+/// Validates `version_field` against schema metadata.
+/// Increments `version_field` by 1 and enforces `version_field = expected_version` in SQL.
+/// Returns rows affected, or `error.OptimisticLockConflict` if version mismatch occurs on an existing record.
+pub fn updateWithVersion(
+    accessor: anytype,
+    values: anytype,
+    predicates: anytype,
+    comptime version_field: []const u8,
+    expected_version: i64,
+) !usize {
+    if (!isValidField(@TypeOf(accessor).entity_info, version_field)) {
+        return error.InvalidVersionColumn;
+    }
+    var upd = accessor.Update();
+    defer upd.deinit();
+
+    inline for (@typeInfo(@TypeOf(values)).@"struct".field_names) |name| {
+        _ = try upd.setFieldValue(name, @field(values, name));
+    }
+
+    const expr = comptime version_field ++ " + ?";
+    _ = try upd.setExprArgs(version_field, expr, &.{.{ .int = 1 }});
+
+    _ = try upd.Where(predicates);
+    const sql_builder = @import("sql/builder.zig");
+    _ = try upd.Where(.{sql_builder.EQ(version_field, .{ .int = expected_version })});
+
+    const affected = try upd.Save();
+    if (affected == 0) {
+        if (try exists(accessor, predicates)) {
+            return error.OptimisticLockConflict;
+        }
+    }
+    return affected;
+}
+
+/// Batch save or update a slice of struct items (`items`) matching a business key field `match_field`.
+/// For each item, checks if a matching record exists on `match_field`, updating if found or creating if new.
+pub fn batchSaveOrUpdate(
+    accessor: anytype,
+    items: anytype,
+    comptime match_field: []const u8,
+) !struct { created_count: usize, updated_count: usize } {
+    if (!isValidField(@TypeOf(accessor).entity_info, match_field)) {
+        return error.InvalidMatchColumn;
+    }
+
+    var created_count: usize = 0;
+    var updated_count: usize = 0;
+
+    for (items) |item| {
+        const val = @field(item, match_field);
+        const sql_builder = @import("sql/builder.zig");
+        const match_pred = sql_builder.EQ(match_field, switch (@typeInfo(@TypeOf(val))) {
+            .int, .comptime_int => .{ .int = @intCast(val) },
+            else => .{ .string = val },
+        });
+
+        var res = try saveOrUpdate(accessor, item, .{match_pred});
+        switch (res) {
+            .created => |*ent| {
+                deinitEntity(@TypeOf(accessor).entity_infos, @TypeOf(accessor).entity_info, ent, accessor.allocator);
+                created_count += 1;
+            },
+            .updated => |cnt| {
+                updated_count += cnt;
+            },
+        }
+    }
+    return .{ .created_count = created_count, .updated_count = updated_count };
+}
+
+/// Free every row of an `All()` result plus the list itself. Centralizes the
+/// memory contract so persistence code is terse: map each `rows.items[i]`,
+/// then `deinitRows(infos, info, rows, alloc)` in one call.
+pub fn deinitRows(
+    comptime infos: []const graph_mod.TypeInfo,
+    comptime info: graph_mod.TypeInfo,
+    rows: anytype,
+    allocator: std.mem.Allocator,
+) void {
+    for (rows.items) |*e| deinitEntity(infos, info, e, allocator);
+    rows.deinit();
+}
+
+// ── Tests ────────────────────────────────────────────────────
+
+test "crud_helpers: first/create/update/delete round-trip on sqlite" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+    const Product = Schema("Product", .{
+        .table_name = "zigshop_product",
+        .pk = "product_id",
+        .fields = &.{
+            field.Int("product_id"),
+            field.String("name"),
+            field.Int("stock"),
+            field.Int("is_delete").Default(0),
+        },
+    });
+
+    const info = comptime fromSchema(Product);
+    const infos = &[_]graph_mod.TypeInfo{info};
+    const PRODUCT_INFO = infos[0];
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+
+    var client = client_mod.makeClient(infos, allocator, driver);
+
+    // create
+    var created = try create(client.product, .{ .name = "coffee", .stock = 10 });
+    defer deinitEntity(infos, PRODUCT_INFO, &created, allocator);
+    try std.testing.expect(created.product_id > 0);
+    try std.testing.expectEqualStrings("coffee", created.name);
+
+    // first by id
+    var fetched = try first(client.product, .{client.product.predicates.product_idEQ(.{ .int = created.product_id })});
+    defer if (fetched) |*e| deinitEntity(infos, PRODUCT_INFO, e, allocator);
+    try std.testing.expect(fetched != null);
+    try std.testing.expectEqual(created.product_id, fetched.?.product_id);
+    try std.testing.expectEqual(@as(i64, 10), fetched.?.stock);
+
+    // update
+    const affected = try update(client.product, .{ .stock = 5 }, .{client.product.predicates.product_idEQ(.{ .int = created.product_id })});
+    try std.testing.expectEqual(@as(usize, 1), affected);
+
+    var after = try first(client.product, .{client.product.predicates.product_idEQ(.{ .int = created.product_id })});
+    defer if (after) |*e| deinitEntity(infos, PRODUCT_INFO, e, allocator);
+    try std.testing.expectEqual(@as(i64, 5), after.?.stock);
+
+    // delete
+    const deleted = try delete(client.product, .{client.product.predicates.product_idEQ(.{ .int = created.product_id })});
+    try std.testing.expectEqual(@as(usize, 1), deleted);
+
+    // deinitRows over an All() result frees items + list
+    var all_q = client.product.Query();
+    defer all_q.deinit();
+    const all_rows = try all_q.All();
+    defer deinitRows(infos, PRODUCT_INFO, all_rows, allocator);
+    _ = all_rows.items.len;
+
+    var gone = try first(client.product, .{client.product.predicates.product_idEQ(.{ .int = created.product_id })});
+    defer if (gone) |*e| deinitEntity(infos, PRODUCT_INFO, e, allocator);
+    try std.testing.expect(gone == null);
+}
+
+test "crud_helpers: queryRows collects mapped rows into owned Rows(T)" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Item = Schema("Item", .{
+        .table_name = "zigshop_item",
+        .pk = "item_id",
+        .fields = &.{
+            field.Int("item_id"),
+            field.String("name"),
+        },
+    });
+
+    const info = comptime fromSchema(Item);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    _ = try driver.exec("INSERT INTO zigshop_item (item_id, name) VALUES (1, 'a'), (2, 'b')", &.{});
+
+    const RowT = struct { item_id: i64, name: []const u8 };
+    const Mapper = struct {
+        fn map(a: std.mem.Allocator, row: sql_driver.Row) !RowT {
+            return .{ .item_id = row.getInt(0) orelse 0, .name = try a.dupe(u8, row.getText(1) orelse "") };
+        }
+    };
+
+    var result = try queryRows(RowT, driver, "SELECT item_id, name FROM zigshop_item ORDER BY item_id", &.{}, allocator, Mapper.map);
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 2), result.items.len);
+    try std.testing.expectEqual(@as(i64, 1), result.items[0].item_id);
+    try std.testing.expectEqualStrings("a", result.items[0].name);
+    try std.testing.expectEqualStrings("b", result.items[1].name);
+}
+
+test "crud_helpers: queryRows error mid-collection leaks no strings" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Item = Schema("Item", .{
+        .table_name = "zigshop_item",
+        .pk = "item_id",
+        .fields = &.{ field.Int("item_id"), field.String("name") },
+    });
+    const info = comptime fromSchema(Item);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    _ = try driver.exec("INSERT INTO zigshop_item (item_id, name) VALUES (1, 'a'), (2, 'b'), (3, 'c')", &.{});
+
+    const RowT = struct { item_id: i64, name: []const u8 };
+    const FailingMapper = struct {
+        fn map(a: std.mem.Allocator, row: sql_driver.Row) !RowT {
+            if ((row.getInt(0) orelse 0) == 2) return error.Stop;
+            return .{ .item_id = row.getInt(0) orelse 0, .name = try a.dupe(u8, row.getText(1) orelse "") };
+        }
+    };
+
+    // First row's string is duped, then row 2 errors -> the partial row's
+    // string must be freed by the errdefer (std.testing.allocator detects leaks).
+    try std.testing.expectError(error.Stop, queryRows(RowT, driver, "SELECT item_id, name FROM zigshop_item ORDER BY item_id", &.{}, allocator, FailingMapper.map));
+}
+
+test "crud_helpers: first with no match returns null (not error)" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+    const Tag = Schema("Tag", .{
+        .table_name = "zigshop_tag",
+        .pk = "tag_id",
+        .fields = &.{
+            field.Int("tag_id"),
+            field.String("name"),
+        },
+    });
+
+    const info = comptime fromSchema(Tag);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+
+    var client = client_mod.makeClient(infos, allocator, driver);
+
+    var missing = try first(client.tag, .{client.tag.predicates.tag_idEQ(.{ .int = 999 })});
+    defer if (missing) |*e| deinitEntity(infos, infos[0], e, allocator);
+    try std.testing.expect(missing == null);
+}
+
+test "crud_helpers: all + count over predicates" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Tag = Schema("Tag", .{
+        .table_name = "zigshop_tag",
+        .pk = "tag_id",
+        .fields = &.{ field.Int("tag_id"), field.String("name"), field.Int("is_delete").Default(0) },
+    });
+    const info = comptime fromSchema(Tag);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    var client = client_mod.makeClient(infos, allocator, driver);
+
+    var c1 = try create(client.tag, .{ .name = "a" });
+    defer deinitEntity(infos, info, &c1, allocator);
+    var c2 = try create(client.tag, .{ .name = "b" });
+    defer deinitEntity(infos, info, &c2, allocator);
+    var c3 = try create(client.tag, .{ .name = "c" });
+    defer deinitEntity(infos, info, &c3, allocator);
+    const total = try count(client.tag, .{client.tag.predicates.is_deleteEQ(.{ .int = 0 })});
+    try std.testing.expectEqual(@as(i64, 3), total);
+
+    const preds = client.tag.predicates;
+    const rows = try all(client.tag, .{preds.is_deleteEQ(.{ .int = 0 })});
+    defer deinitRows(infos, info, rows, allocator);
+    try std.testing.expectEqual(@as(usize, 3), rows.items.len);
+}
+
+test "crud_helpers: batchCreate error path frees created entities (no leak)" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Category = Schema("Category", .{
+        .table_name = "zigshop_category",
+        .pk = "category_id",
+        .fields = &.{ field.Int("category_id"), field.String("name").Unique(), field.Int("status").Default(1) },
+    });
+    const info = comptime fromSchema(Category);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+
+    // Second item repeats the first's unique name -> create fails mid-loop;
+    // the first entity's owned strings must be freed by the errdefer.
+    const items = [_]struct { name: []const u8, status: i64 }{
+        .{ .name = "dup", .status = 1 },
+        .{ .name = "dup", .status = 1 },
+    };
+    try std.testing.expectError(error.UniqueViolation, batchCreate(client.category, allocator, items));
+}
+
+test "crud_helpers: exists, findOrStore, paginated, and batchCreate" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Category = Schema("Category", .{
+        .table_name = "zigshop_category",
+        .pk = "category_id",
+        .fields = &.{
+            field.Int("category_id"),
+            field.String("name").Unique(),
+            field.Int("status").Default(1),
+        },
+    });
+    const info = comptime fromSchema(Category);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+    const preds = client.category.predicates;
+
+    // 1. exists before insertion
+    try std.testing.expect(!(try exists(client.category, .{preds.nameEQ(.{ .string = "electronics" })})));
+
+    // 2. findOrStore (stores missing entity)
+    var stored = try findOrStore(client.category, .{ .name = "electronics", .status = 1 }, .{preds.nameEQ(.{ .string = "electronics" })});
+    defer deinitEntity(infos, info, &stored, allocator);
+    try std.testing.expectEqualStrings("electronics", stored.name);
+
+    // 3. exists after insertion
+    try std.testing.expect(try exists(client.category, .{preds.nameEQ(.{ .string = "electronics" })}));
+
+    // 4. findOrStore (finds existing entity)
+    var fetched = try findOrStore(client.category, .{ .name = "electronics", .status = 99 }, .{preds.nameEQ(.{ .string = "electronics" })});
+    defer deinitEntity(infos, info, &fetched, allocator);
+    try std.testing.expectEqual(stored.category_id, fetched.category_id);
+    try std.testing.expectEqual(@as(i64, 1), fetched.status); // original status preserved
+
+    // 5. batchCreate
+    const batch_items = &[_]struct { name: []const u8, status: i64 }{
+        .{ .name = "books", .status = 1 },
+        .{ .name = "clothing", .status = 1 },
+        .{ .name = "sports", .status = 1 },
+    };
+    const created_list = try batchCreate(client.category, allocator, batch_items);
+    defer deinitRows(infos, info, created_list, allocator);
+    try std.testing.expectEqual(@as(usize, 3), created_list.items.len);
+
+    // 6. paginated (total = 4, page 1, size 2)
+    var p1 = try paginated(client.category, .{preds.statusEQ(.{ .int = 1 })}, 1, 2);
+    defer p1.deinit(infos, info, allocator);
+    try std.testing.expectEqual(@as(i64, 4), p1.total);
+    try std.testing.expectEqual(@as(usize, 2), p1.items.items.len);
+    try std.testing.expectEqual(@as(usize, 2), p1.total_pages);
+}
+
+test "crud_helpers: get, findByIds, and saveOrUpdate" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Account = Schema("Account", .{
+        .table_name = "zigshop_account",
+        .pk = "account_id",
+        .fields = &.{
+            field.Int("account_id"),
+            field.String("username").Unique(),
+            field.Int("balance"),
+        },
+    });
+    const info = comptime fromSchema(Account);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+    const preds = client.account.predicates;
+
+    // 1. saveOrUpdate -> created
+    var res1 = try saveOrUpdate(client.account, .{ .username = "alice", .balance = 100 }, .{preds.usernameEQ(.{ .string = "alice" })});
+    switch (res1) {
+        .created => |*ent| {
+            defer deinitEntity(infos, info, ent, allocator);
+            try std.testing.expect(ent.account_id > 0);
+            try std.testing.expectEqualStrings("alice", ent.username);
+
+            // 2. get by ID
+            var got = try get(client.account, ent.account_id);
+            defer if (got) |*e| deinitEntity(infos, info, e, allocator);
+            try std.testing.expect(got != null);
+            try std.testing.expectEqual(ent.account_id, got.?.account_id);
+        },
+        .updated => @panic("expected created"),
+    }
+
+    // 3. saveOrUpdate -> updated
+    const res2 = try saveOrUpdate(client.account, .{ .balance = 200 }, .{preds.usernameEQ(.{ .string = "alice" })});
+    switch (res2) {
+        .updated => |affected| try std.testing.expectEqual(@as(usize, 1), affected),
+        .created => @panic("expected updated"),
+    }
+
+    // 4. findByIds
+    const batch_res = try batchCreate(client.account, allocator, &[_]struct { username: []const u8, balance: i64 }{
+        .{ .username = "bob", .balance = 50 },
+        .{ .username = "charlie", .balance = 75 },
+    });
+    defer deinitRows(infos, info, batch_res, allocator);
+
+    const ids = &[_]i64{ batch_res.items[0].account_id, batch_res.items[1].account_id };
+    const found_list = try findByIds(client.account, allocator, ids);
+    defer deinitRows(infos, info, found_list, allocator);
+    try std.testing.expectEqual(@as(usize, 2), found_list.items.len);
+}
+
+test "crud_helpers: paginatedWithOptions, latest, and withTx" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Article = Schema("Article", .{
+        .table_name = "zigshop_article",
+        .pk = "article_id",
+        .fields = &.{
+            field.Int("article_id"),
+            field.String("title"),
+            field.Int("created_at"),
+        },
+    });
+    const info = comptime fromSchema(Article);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+
+    // Seed articles with different timestamps
+    var a1 = try create(client.article, .{ .title = "first", .created_at = 100 });
+    deinitEntity(infos, info, &a1, allocator);
+    var a2 = try create(client.article, .{ .title = "second", .created_at = 200 });
+    deinitEntity(infos, info, &a2, allocator);
+    var a3 = try create(client.article, .{ .title = "third", .created_at = 300 });
+    deinitEntity(infos, info, &a3, allocator);
+
+    // 1. paginatedWithOptions desc
+    var p_desc = try paginatedWithOptions(client.article, .{}, .{ .sort_col = "created_at", .desc = true }, 1, 2);
+    defer p_desc.deinit(infos, info, allocator);
+    try std.testing.expectEqual(@as(i64, 3), p_desc.total);
+    try std.testing.expectEqual(@as(usize, 2), p_desc.items.items.len);
+    try std.testing.expectEqualStrings("third", p_desc.items.items[0].title);
+    try std.testing.expectEqualStrings("second", p_desc.items.items[1].title);
+
+    // 2. paginatedWithOptions invalid column error
+    try std.testing.expectError(error.InvalidSortColumn, paginatedWithOptions(client.article, .{}, .{ .sort_col = "non_existent" }, 1, 2));
+
+    // 3. latest helper
+    var lat = try latest(client.article, .{}, "created_at");
+    defer if (lat) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(lat != null);
+    try std.testing.expectEqualStrings("third", lat.?.title);
+
+    // 4. latest invalid column error
+    try std.testing.expectError(error.InvalidSortColumn, latest(client.article, .{}, "malicious_injection; DROP TABLE--"));
+
+    // 5. withTx commit path
+    try withTx(client, struct {
+        fn run(tx: anytype) !void {
+            var created = try create(tx.client.article, .{ .title = "tx_fourth", .created_at = 400 });
+            deinitEntity(infos, info, &created, allocator);
+        }
+    }.run);
+
+    var lat2 = try latest(client.article, .{}, "created_at");
+    defer if (lat2) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(lat2 != null);
+    try std.testing.expectEqualStrings("tx_fourth", lat2.?.title);
+
+    // 6. withTx rollback path
+    const RollbackError = error{IntentionalFailure};
+    const res = withTx(client, struct {
+        fn run(tx: anytype) !void {
+            var created = try create(tx.client.article, .{ .title = "tx_fifth_failed", .created_at = 500 });
+            deinitEntity(infos, info, &created, allocator);
+            return RollbackError.IntentionalFailure;
+        }
+    }.run);
+    try std.testing.expectError(RollbackError.IntentionalFailure, res);
+
+    var lat3 = try latest(client.article, .{}, "created_at");
+    defer if (lat3) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(lat3 != null);
+    try std.testing.expectEqualStrings("tx_fourth", lat3.?.title); // 500 was rolled back
+}
+
+test "crud_helpers: increment and scoped tenant queries" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Inventory = Schema("Inventory", .{
+        .table_name = "zigshop_inventory",
+        .pk = "inventory_id",
+        .fields = &.{
+            field.Int("inventory_id"),
+            field.Int("tenant_id"),
+            field.String("item_code"),
+            field.Int("stock"),
+        },
+    });
+    const info = comptime fromSchema(Inventory);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+    const preds = client.inventory.predicates;
+
+    // Seed data for tenant 1 and tenant 2
+    var inv1 = try create(client.inventory, .{ .tenant_id = 1, .item_code = "ITEM_A", .stock = 100 });
+    deinitEntity(infos, info, &inv1, allocator);
+    var inv2 = try create(client.inventory, .{ .tenant_id = 1, .item_code = "ITEM_B", .stock = 50 });
+    deinitEntity(infos, info, &inv2, allocator);
+    var inv3 = try create(client.inventory, .{ .tenant_id = 2, .item_code = "ITEM_C", .stock = 200 });
+    deinitEntity(infos, info, &inv3, allocator);
+
+    // 1. increment (+10 stock for ITEM_A)
+    const affected1 = try increment(client.inventory, "stock", 10, .{preds.item_codeEQ(.{ .string = "ITEM_A" })});
+    try std.testing.expectEqual(@as(usize, 1), affected1);
+
+    var item_a = try first(client.inventory, .{preds.item_codeEQ(.{ .string = "ITEM_A" })});
+    defer if (item_a) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(item_a != null);
+    try std.testing.expectEqual(@as(i64, 110), item_a.?.stock);
+
+    // 2. decrement (-20 stock for ITEM_A)
+    const affected2 = try increment(client.inventory, "stock", -20, .{preds.item_codeEQ(.{ .string = "ITEM_A" })});
+    try std.testing.expectEqual(@as(usize, 1), affected2);
+
+    var item_a2 = try first(client.inventory, .{preds.item_codeEQ(.{ .string = "ITEM_A" })});
+    defer if (item_a2) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(item_a2 != null);
+    try std.testing.expectEqual(@as(i64, 90), item_a2.?.stock);
+
+    // 3. scoped queries for tenant 1
+    const t1_list = try scoped(client.inventory, 1, .{});
+    defer deinitRows(infos, info, t1_list, allocator);
+    try std.testing.expectEqual(@as(usize, 2), t1_list.items.len);
+
+    // 4. scopedFirst for tenant 2
+    var t2_first = try scopedFirst(client.inventory, 2, .{});
+    defer if (t2_first) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(t2_first != null);
+    try std.testing.expectEqualStrings("ITEM_C", t2_first.?.item_code);
+
+    // 5. invalid tenant column error
+    try std.testing.expectError(error.InvalidTenantColumn, scopedBy(client.inventory, "non_existent_tenant_col", 1, .{}));
+}
+
+test "crud_helpers: cursorPage keyset pagination" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const FeedItem = Schema("FeedItem", .{
+        .table_name = "zigshop_feed_item",
+        .pk = "feed_id",
+        .fields = &.{
+            field.Int("feed_id"),
+            field.String("content"),
+        },
+    });
+    const info = comptime fromSchema(FeedItem);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+
+    // Seed 5 feed items
+    inline for (1..6) |idx| {
+        var item = try create(client.feed_item, .{ .feed_id = @as(i64, @intCast(idx)), .content = "msg" });
+        deinitEntity(infos, info, &item, allocator);
+    }
+
+    // Page 1: limit 2, after null -> items 1, 2, has_more = true, next_cursor = 2
+    var cp1 = try cursorPage(client.feed_item, .{}, .{ .cursor_col = "feed_id" }, 2);
+    defer cp1.deinit(infos, info, allocator);
+    try std.testing.expectEqual(@as(usize, 2), cp1.items.items.len);
+    try std.testing.expect(cp1.has_more);
+    try std.testing.expectEqual(@as(?i64, 2), cp1.next_cursor);
+
+    // Page 2: limit 2, after 2 -> items 3, 4, has_more = true, next_cursor = 4
+    var cp2 = try cursorPage(client.feed_item, .{}, .{ .cursor_col = "feed_id", .after = cp1.next_cursor }, 2);
+    defer cp2.deinit(infos, info, allocator);
+    try std.testing.expectEqual(@as(usize, 2), cp2.items.items.len);
+    try std.testing.expect(cp2.has_more);
+    try std.testing.expectEqual(@as(?i64, 4), cp2.next_cursor);
+    try std.testing.expectEqual(@as(i64, 3), cp2.items.items[0].feed_id);
+
+    // Page 3: limit 2, after 4 -> item 5, has_more = false, next_cursor = 5
+    var cp3 = try cursorPage(client.feed_item, .{}, .{ .cursor_col = "feed_id", .after = cp2.next_cursor }, 2);
+    defer cp3.deinit(infos, info, allocator);
+    try std.testing.expectEqual(@as(usize, 1), cp3.items.items.len);
+    try std.testing.expect(!cp3.has_more);
+    try std.testing.expectEqual(@as(?i64, 5), cp3.next_cursor);
+
+    // Invalid cursor col error
+    try std.testing.expectError(error.InvalidCursorColumn, cursorPage(client.feed_item, .{}, .{ .cursor_col = "invalid_col" }, 2));
+}
+
+test "crud_helpers: updateWithVersion optimistic locking and batchSaveOrUpdate" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+
+    const Document = Schema("Document", .{
+        .table_name = "zigshop_document",
+        .pk = "doc_id",
+        .fields = &.{
+            field.Int("doc_id"),
+            field.String("doc_code").Unique(),
+            field.String("title"),
+            field.Int("version").Default(1),
+        },
+    });
+    const info = comptime fromSchema(Document);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+    const preds = client.document.predicates;
+
+    // 1. Create document
+    var d1 = try create(client.document, .{ .doc_code = "DOC_01", .title = "v1 title", .version = 1 });
+    deinitEntity(infos, info, &d1, allocator);
+
+    // 2. updateWithVersion success (expected version = 1)
+    const affected = try updateWithVersion(client.document, .{ .title = "v2 title" }, .{preds.doc_codeEQ(.{ .string = "DOC_01" })}, "version", 1);
+    try std.testing.expectEqual(@as(usize, 1), affected);
+
+    var d_v2 = try first(client.document, .{preds.doc_codeEQ(.{ .string = "DOC_01" })});
+    defer if (d_v2) |*e| deinitEntity(infos, info, e, allocator);
+    try std.testing.expect(d_v2 != null);
+    try std.testing.expectEqualStrings("v2 title", d_v2.?.title);
+    try std.testing.expectEqual(@as(i64, 2), d_v2.?.version); // Version incremented to 2
+
+    // 3. updateWithVersion conflict (expected version = 1, but db version is 2)
+    try std.testing.expectError(error.OptimisticLockConflict, updateWithVersion(client.document, .{ .title = "stale edit" }, .{preds.doc_codeEQ(.{ .string = "DOC_01" })}, "version", 1));
+
+    // 4. batchSaveOrUpdate by business key "doc_code"
+    const batch_items = &[_]struct { doc_code: []const u8, title: []const u8 }{
+        .{ .doc_code = "DOC_01", .title = "v3 title" }, // existing -> updated
+        .{ .doc_code = "DOC_02", .title = "new doc" }, // new -> created
+    };
+    const res = try batchSaveOrUpdate(client.document, batch_items, "doc_code");
+    try std.testing.expectEqual(@as(usize, 1), res.created_count);
+    try std.testing.expectEqual(@as(usize, 1), res.updated_count);
+}
+
+test "Where and crud_helpers support dynamic []sql.Predicate slices and single predicates" {
+    const allocator = std.testing.allocator;
+    const field = @import("core/field.zig");
+    const Schema = @import("core/schema.zig").Schema;
+    const fromSchema = @import("codegen/graph.zig").fromSchema;
+    const migrate = @import("sql/schema/migrate.zig");
+    const sqlite_driver = @import("sql/sqlite.zig");
+    const sql_mod = @import("sql/builder.zig");
+
+    const TaskItem = Schema("TaskItem", .{
+        .table_name = "zigshop_task_item",
+        .pk = "task_id",
+        .fields = &.{
+            field.Int("task_id"),
+            field.String("status"),
+            field.Int("user_id"),
+        },
+    });
+    const info = comptime fromSchema(TaskItem);
+    const infos = &[_]graph_mod.TypeInfo{info};
+
+    var drv = try sqlite_driver.SQLiteDriver.open(allocator, ":memory:");
+    defer drv.close();
+    const driver = drv.asDriver();
+    try migrate.migrateSchema(allocator, driver, infos);
+    const client = client_mod.makeClient(infos, allocator, driver);
+    const preds = client.task_item.predicates;
+
+    // Seed data
+    var t1 = try create(client.task_item, .{ .status = "pending", .user_id = 10 });
+    deinitEntity(infos, info, &t1, allocator);
+    var t2 = try create(client.task_item, .{ .status = "completed", .user_id = 10 });
+    deinitEntity(infos, info, &t2, allocator);
+    var t3 = try create(client.task_item, .{ .status = "pending", .user_id = 20 });
+    deinitEntity(infos, info, &t3, allocator);
+
+    // 1. Dynamic ArrayList of predicates
+    var dyn_preds = std.array_list.Managed(sql_mod.Predicate).init(allocator);
+    defer dyn_preds.deinit();
+
+    // Dynamically append status = "pending"
+    try dyn_preds.append(preds.statusEQ(.{ .string = "pending" }));
+    // Dynamically append user_id = 10
+    try dyn_preds.append(preds.user_idEQ(.{ .int = 10 }));
+
+    // Test QueryBuilder.Where with dynamic slice []const sql.Predicate
+    var q = client.task_item.Query();
+    defer q.deinit();
+    _ = try q.Where(dyn_preds.items);
+    const rows = try q.All();
+    defer deinitRows(infos, info, rows, allocator);
+    try std.testing.expectEqual(@as(usize, 1), rows.items.len);
+
+    // Test crud_helpers.paginatedWithOptions with dynamic slice []const sql.Predicate
+    var page_res = try paginatedWithOptions(client.task_item, dyn_preds.items, .{}, 1, 10);
+    defer page_res.deinit(infos, info, allocator);
+    try std.testing.expectEqual(@as(usize, 1), page_res.items.items.len);
+    try std.testing.expectEqual(@as(i64, 1), page_res.total);
+
+    // 2. Single predicate directly passed to Where
+    const single_res = try all(client.task_item, preds.statusEQ(.{ .string = "completed" }));
+    defer deinitRows(infos, info, single_res, allocator);
+    try std.testing.expectEqual(@as(usize, 1), single_res.items.len);
+}

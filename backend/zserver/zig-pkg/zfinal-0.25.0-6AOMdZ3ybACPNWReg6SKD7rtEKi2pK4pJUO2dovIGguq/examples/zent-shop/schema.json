@@ -1,0 +1,275 @@
+{
+  "module": "shop",
+  "api_prefix": "/api/v1",
+  "entities": [
+    {
+      "name": "User",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "handle",
+          "type": "string",
+          "index": true,
+          "unique": true
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "unique": true,
+          "email": true
+        }
+      ]
+    },
+    {
+      "name": "Product",
+      "fields": [
+        {
+          "name": "seller_id",
+          "type": "int"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "name": "price_cents",
+          "type": "int",
+          "positive": true
+        },
+        {
+          "name": "stock",
+          "type": "int",
+          "default": "0",
+          "positive": true
+        }
+      ],
+      "list_by": "seller_id",
+      "refs": [
+        {
+          "name": "seller",
+          "target": "User",
+          "field": "seller_id"
+        }
+      ]
+    },
+    {
+      "name": "CartItem",
+      "fields": [
+        {
+          "name": "user_id",
+          "type": "int"
+        },
+        {
+          "name": "product_id",
+          "type": "int"
+        },
+        {
+          "name": "qty",
+          "type": "int",
+          "default": "1",
+          "positive": true
+        }
+      ],
+      "list_by": "user_id",
+      "refs": [
+        {
+          "name": "user",
+          "target": "User",
+          "field": "user_id"
+        },
+        {
+          "name": "product",
+          "target": "Product",
+          "field": "product_id"
+        }
+      ]
+    },
+    {
+      "name": "Order",
+      "fields": [
+        {
+          "name": "buyer_id",
+          "type": "int"
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "default": "pending",
+          "enum_values": [
+            "pending",
+            "paid",
+            "canceled"
+          ]
+        },
+        {
+          "name": "total_cents",
+          "type": "int",
+          "default": "0",
+          "positive": true
+        }
+      ],
+      "refs": [
+        {
+          "name": "buyer",
+          "target": "User",
+          "field": "buyer_id"
+        }
+      ],
+      "policy": true
+    },
+    {
+      "name": "OrderItem",
+      "fields": [
+        {
+          "name": "order_id",
+          "type": "int"
+        },
+        {
+          "name": "product_id",
+          "type": "int"
+        },
+        {
+          "name": "qty",
+          "type": "int",
+          "positive": true
+        },
+        {
+          "name": "price_cents",
+          "type": "int",
+          "positive": true
+        }
+      ],
+      "list_by": "order_id",
+      "refs": [
+        {
+          "name": "order",
+          "target": "Order",
+          "field": "order_id"
+        },
+        {
+          "name": "product",
+          "target": "Product",
+          "field": "product_id"
+        }
+      ]
+    },
+    {
+      "name": "Follow",
+      "fields": [
+        {
+          "name": "follower_id",
+          "type": "int"
+        },
+        {
+          "name": "followee_id",
+          "type": "int"
+        }
+      ],
+      "list_by": "follower_id",
+      "refs": [
+        {
+          "name": "follower",
+          "target": "User",
+          "field": "follower_id"
+        },
+        {
+          "name": "followee",
+          "target": "User",
+          "field": "followee_id"
+        }
+      ],
+      "unique_fields": [
+        "follower_id",
+        "followee_id"
+      ]
+    },
+    {
+      "name": "Like",
+      "fields": [
+        {
+          "name": "user_id",
+          "type": "int"
+        },
+        {
+          "name": "post_id",
+          "type": "int"
+        }
+      ],
+      "list_by": "post_id",
+      "refs": [
+        {
+          "name": "user",
+          "target": "User",
+          "field": "user_id"
+        },
+        {
+          "name": "post",
+          "target": "Post",
+          "field": "post_id"
+        }
+      ],
+      "unique_fields": [
+        "user_id",
+        "post_id"
+      ]
+    },
+    {
+      "name": "Post",
+      "fields": [
+        {
+          "name": "author_id",
+          "type": "int"
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "list_by": "author_id",
+      "refs": [
+        {
+          "name": "author",
+          "target": "User",
+          "field": "author_id"
+        }
+      ]
+    },
+    {
+      "name": "Comment",
+      "fields": [
+        {
+          "name": "post_id",
+          "type": "int"
+        },
+        {
+          "name": "author_id",
+          "type": "int"
+        },
+        {
+          "name": "body",
+          "type": "text",
+          "required": true
+        }
+      ],
+      "list_by": "post_id",
+      "refs": [
+        {
+          "name": "post",
+          "target": "Post",
+          "field": "post_id"
+        },
+        {
+          "name": "author",
+          "target": "User",
+          "field": "author_id"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+# HTTP ergonomics (Axum-inspired)
+
+> **版本**：对齐 v0.20.9+ · ADR-012  
+> Related: [best_practices.md](best_practices.md) · [smart_routing.md](smart_routing.md) · [api_envelope.md](api_envelope.md) · [progressive_architecture.md](progressive_architecture.md) · ADR-011
+
+## Layer order
+
+```
+global interceptors → route interceptors → handler → after (reverse)
+```
+
+- Prefer `return error.Unauthorized` (etc.) from `before` — `dispatch` maps to JSON.
+- `return false` only when you **already** wrote a response (e.g. CORS preflight).
+- Do not mix: never `renderJson` then `return error.*` (double-write guarded by `response_started`).
+- Rate limit / demo Auth / `ParamExt` also return `HttpError` (no hand-rolled body).
+- After any successful `respond` (`render*`, `renderFile`, `renderCsv`, `redirect`, SSE start), `markResponded()` sets `response_started` so a second render is a no-op.
+- Interceptor factories take **caller-owned** `*const Cfg` (no `heapCfg` / no static `var`):
+  `JwtAuthConfig`, `TokenInterceptorConfig`, `CorsAllowlistConfig`, `SecurityHeadersConfig`,
+  `stock.BodyLimitConfig`, …
+  **Never** `createX(&.{ … })` — the temporary dies and `userdata` becomes UAF. Hold cfg on
+  `App` / `main` stack (or heap) for the process lifetime. `zf check` WARNs on temporary `&.{`.
+- Prefer `before_ud` + `userdata` for **all** interceptors (zero-config factories pass `_`);
+  plain `before`/`after` are a compatibility fallback. Dispatch uses `runBefore`/`runAfter`
+  on match **and** 404/405/fallback paths.
+- Migrate old generated handlers: `zf check --heal` injects `failHttp` / `extract.requireParamInt`
+  (or regenerate with `zf crud:sql`).
+
+```zig
+// OK — cfg outlives the interceptor
+var jwt_cfg: zfinal.JwtAuthConfig = .{ .secret = secret, .opts = .{ .leeway_sec = 30 } };
+try app.addGlobalInterceptor(zfinal.createJwtAuthInterceptorWithOptions(&jwt_cfg));
+
+// BAD — temporary literal (UAF)
+// try app.addGlobalInterceptor(zfinal.createJwtAuthInterceptor(&.{ .secret = secret }));
+```
+
+## State (app-wide)
+
+```zig
+app.setState(App, &app_state);
+const st = try ctx.state(App);
+```
+
+One type per app. Ports examples: `examples/ports-l2`, `ports-l3`.
+
+## Extension (request-scoped)
+
+```zig
+try ctx.setExt(zfinal.extension.JwtIdentity, .{ .sub = "u", .role = "admin" });
+if (ctx.ext(zfinal.extension.JwtIdentity)) |jwt| { _ = jwt.sub; }
+```
+
+JWT interceptor sets `JwtIdentity` after attrs. ≠ State.
+
+## Extractors / HttpError / Tenant
+
+- Prefer `return error.NotFound` (etc.); `dispatch` maps via `http_error.render`.
+- Default JSON failure body: `{ "err": "<code>", "msg": "<message>", "detail"?: "…" }` —
+  see [api_envelope.md](api_envelope.md). Do **not** switch only errors to zapi `{code,msg,data}`
+  while successes stay `{ok}` / `{data}`.
+- Extractors: `extract.requireParamInt`, headers, etc.; set `http_error.setDetail` before return.
+- Tenant field naming is **comptime** (`tenant.app_id`).
+
+## Stock layers (`zfinal.stock`)
+
+| Helper | Role |
+|--------|------|
+| `createBodyLimitInterceptor(*BodyLimitConfig)` | Cap `ctx.max_body_size` |
+| `createTimeoutInterceptor(*TimeoutConfig)` | `ctx.setTimeoutMs` |
+| `createCompressionInterceptor(*CompressionConfig)` | Per-request gzip on/off |
+| `createTraceInterceptor()` | Access log after handler |
+
+```zig
+var bl: zfinal.stock.BodyLimitConfig = .{ .max_bytes = 1024 * 1024 };
+try app.addGlobalInterceptor(zfinal.stock.createBodyLimitInterceptor(&bl));
+```
+
+Server default: `ServerConfig.compress_responses` (default true).
+
+### Cache interceptor (GET hit-only)
+
+`createCacheInterceptor(*CacheInterceptorConfig)` short-circuits on GET **hit**.
+
+| Mode | Before (hit) | After (store) |
+|------|--------------|---------------|
+| `oneshot.capture` | yes | yes (if `auto_store`) |
+| Live TCP | yes (if key pre-filled) | **no** — body not buffered |
+
+Production: write with `CacheKit` in the handler, or put a reverse-proxy cache in front.
+`zf check --prod` WARNs when this interceptor is registered.
+
+## Fallback / merge
+
+```zig
+try app.setFallback(spaHandler);           // unmatched path (not 405)
+try app.merge(&.{ users.register, orders.register });
+```
+
+## SSE + client gone
+
+```zig
+var bw = try ctx.renderSSE();
+defer bw.end() catch {};
+ctx.sseWrite(&bw, chunk) catch |err| {
+    if (err == error.WriteFailed or ctx.isClientGone()) return; // stop
+    return err;
+};
+```
+
+`WriteFailed` in `dispatch` does **not** attempt a 500 body.
+
+## Oneshot
+
+| API | Transport | Use when |
+|-----|-----------|----------|
+| `oneshot.capture(...)` | **None** (capture buffer) | Handler only `render*` + path params / State |
+| `oneshot.captureWith(..., headers, body)` | **None** + mock headers/body | JWT/CSRF/extract needing `Authorization` / JSON body |
+| `oneshot.against` / `fetch` | TCP | Full `std.http.Server.Request` (multipart, etc.) |
+
+```zig
+var res = try zfinal.oneshot.capture(a, &router, .GET, "/ping", .{});
+defer res.deinit();
+
+var auth = try zfinal.oneshot.captureWith(a, &router, .GET, "/me", .{}, &.{
+    .{ .name = "Authorization", .value = "Bearer …" },
+}, null);
+defer auth.deinit();
+```
+
+**Keep-alive:** production still defaults `force_connection_close=true` until zig#25017 is fixed — see `doc/reverse_proxy.md` §9.
+
+`zf openapi` emits `components.schemas.HttpError`, `JsonObject`, `JsonOk`, plus
+per-entity DTOs from:
+- ORM `pub const Name = struct { … }` → `Name` / `NameInput`
+- zent `Schema("Name", .{ .fields = &.{ field.String("…"), … } })` → same
+
+Routes under `/users` / `/products` `$ref` those DTOs when names match.
+
+## DI boundary
+
+- **Do:** `ports` + adapters + `setState` / Extension  
+- **Don't:** global service locator, handler → DB skip service, runtime plugin bag as DI

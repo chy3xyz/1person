@@ -1,0 +1,3 @@
+{"seq":1,"type":"inbox_updated","inbox_id":"i1","workspace_id":"ws-parsed-shape","user_id":"uid-parsed-shape","action":"read","count":1}
+{"seq":2,"type":"inbox_updated","inbox_id":"i2","workspace_id":"ws-parsed-shape","user_id":"uid-parsed-shape","action":"archive","count":1}
+{"seq":3,"type":"inbox_updated","inbox_id":"i3","workspace_id":"ws-parsed-shape","user_id":"uid-parsed-shape","action":"read","count":1}

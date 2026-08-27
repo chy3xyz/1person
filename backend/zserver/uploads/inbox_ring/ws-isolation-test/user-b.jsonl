@@ -1,0 +1,2 @@
+{"seq":1,"type":"inbox_updated","inbox_id":"b1","workspace_id":"ws-isolation-test","user_id":"user-b","action":"read","count":1}
+{"seq":2,"type":"inbox_updated","inbox_id":"b2","workspace_id":"ws-isolation-test","user_id":"user-b","action":"read","count":1}

@@ -1,0 +1,29 @@
+.{
+    .name = .zserver,
+    .version = "0.1.0",
+    .fingerprint = 0x3edb244e41e6b5dc,
+    .minimum_zig_version = "0.17.0",
+
+    .dependencies = .{
+        // Framework deps via Zig package manager (git URL + content hash).
+        // Bump with:
+        //   zig fetch 'git+https://github.com/chy3xyz/<repo>?ref=<tag>#<commit>'
+        // then paste .url / .hash below (avoid --save: it may write .path by mistake).
+        .zfinal = .{
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.25.0#fa9d4c509eb06224cba18d83250a14ff88ccd843",
+            .hash = "zfinal-0.25.0-6AOMdZ3ybACPNWReg6SKD7rtEKi2pK4pJUO2dovIGguq",
+        },
+        // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
+        .zcli = .{
+            .url = "git+https://github.com/chy3xyz/zcli#3c466eeb4c5c4644e2f96db124235e3e79fd04d5",
+            .hash = "zcli-0.2.0-CR5cGSiNAACHeulKURcsDqFP7ce0T4In4oInViqE-Ps2",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "README.md",
+    },
+}
