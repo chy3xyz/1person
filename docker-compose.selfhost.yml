@@ -6,7 +6,7 @@
 # Do NOT change these bindings to 0.0.0.0 — Docker bypasses host firewalls
 # (UFW/iptables) by default, so the raw ports would be exposed to the internet
 # with the default JWT_SECRET and Postgres credentials. See:
-#   apps/docs/content/docs/self-host-quickstart.mdx
+#   frontend/apps/docs/content/docs/self-host-quickstart.mdx
 #
 # Usage:
 #   cp .env.example .env
