@@ -1,7 +1,8 @@
 #!/bin/bash
 # Generate the inline-switch block for router.zig.
 set -euo pipefail
-cd /Users/n0x/w4_proj/dev_machine/1person/zserver
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "${SCRIPT_DIR}/../zserver"
 MODULES=(
   config auth realtime attachment user workspace invitation lark token
   billing assignee_frequency issue task label project squad autopilot pin

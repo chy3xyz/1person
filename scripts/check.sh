@@ -2,11 +2,13 @@
 set -euo pipefail
 
 # ==========================================================================
-# Full verification pipeline: typecheck → unit tests → Go tests → E2E
+# Full verification pipeline: typecheck → unit tests → zserver tests → E2E
 # Usage: bash scripts/check.sh
 # ==========================================================================
 
 ENV_FILE="${ENV_FILE:-.env}"
+FRONTEND_DIR="${FRONTEND_DIR:-frontend}"
+BACKEND_DIR="${BACKEND_DIR:-backend/zserver}"
 if [ ! -f "$ENV_FILE" ]; then
   echo "Missing env file: $ENV_FILE"
   echo "Create .env from .env.example, or run 'make worktree-env' and use .env.worktree."
@@ -81,23 +83,23 @@ bash scripts/ensure-postgres.sh "$ENV_FILE"
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [1/5] TypeScript typecheck..."
-pnpm typecheck || { EXIT_CODE=1; exit 1; }
+pnpm --dir "$FRONTEND_DIR" typecheck || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 2: TypeScript unit tests (Vitest)
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [2/5] TypeScript unit tests..."
-pnpm test || { EXIT_CODE=1; exit 1; }
+pnpm --dir "$FRONTEND_DIR" test || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
-# Step 3: Go tests
+# Step 3: zserver (Zig) tests
 # --------------------------------------------------------------------------
 echo ""
-echo "==> [3/5] Go tests..."
+echo "==> [3/5] zserver Zig tests..."
 echo "==> Running database migrations..."
-(cd zserver && zig build && ./zig-out/bin/zserver migrate) || { EXIT_CODE=1; exit 1; }
-(cd zserver && zig build test) || { EXIT_CODE=1; exit 1; }
+(cd "$BACKEND_DIR" && zig build && ./zig-out/bin/zserver migrate) || { EXIT_CODE=1; exit 1; }
+(cd "$BACKEND_DIR" && zig build test) || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 4: Start services for E2E (only if not already running)
@@ -109,7 +111,7 @@ if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   echo "    Backend already running on :$PORT"
 else
   echo "    Starting backend..."
-  (cd zserver && ./zig-out/bin/zserver server) > /tmp/multica-check-backend.log 2>&1 &
+  (cd "$BACKEND_DIR" && ./zig-out/bin/zserver server) > /tmp/multica-check-backend.log 2>&1 &
   BACKEND_PID=$!
   STARTED_BACKEND=true
   wait_for_port "$PORT" "Backend" 90 "/health"
@@ -119,7 +121,7 @@ if curl -sf "http://localhost:${FRONTEND_PORT}" > /dev/null 2>&1; then
   echo "    Frontend already running on :$FRONTEND_PORT"
 else
   echo "    Starting frontend..."
-  pnpm dev:web > /tmp/multica-check-frontend.log 2>&1 &
+  pnpm --dir "$FRONTEND_DIR" run dev:web > /tmp/multica-check-frontend.log 2>&1 &
   FRONTEND_PID=$!
   STARTED_FRONTEND=true
   wait_for_port "$FRONTEND_PORT" "Frontend" 120 "/"
@@ -130,4 +132,4 @@ fi
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [5/5] E2E tests (Playwright)..."
-pnpm exec playwright test || { EXIT_CODE=1; exit 1; }
+pnpm --dir "$FRONTEND_DIR" exec playwright test || { EXIT_CODE=1; exit 1; }

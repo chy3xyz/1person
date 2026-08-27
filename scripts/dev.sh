@@ -4,16 +4,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
+FRONTEND_DIR="${FRONTEND_DIR:-frontend}"
+BACKEND_DIR="${BACKEND_DIR:-backend/zserver}"
+
 # ---------- Check prerequisites ----------
 missing=()
 command -v node >/dev/null 2>&1 || missing+=("node")
 command -v pnpm >/dev/null 2>&1 || missing+=("pnpm")
-command -v go >/dev/null 2>&1 || missing+=("go")
+command -v zig >/dev/null 2>&1 || missing+=("zig")
 command -v docker >/dev/null 2>&1 || missing+=("docker")
 
 if [ ${#missing[@]} -gt 0 ]; then
   echo "✗ Missing prerequisites: ${missing[*]}"
-  echo "  Please install: Node.js v20+, pnpm v10.28+, Go v1.26+, Docker"
+  echo "  Please install: Node.js v20+, pnpm v10.28+, Zig 0.17, Docker"
   exit 1
 fi
 
@@ -44,16 +47,16 @@ set +a
 . scripts/local-env.sh
 
 # ---------- Install dependencies ----------
-if [ ! -d node_modules ]; then
+if [ ! -d "${FRONTEND_DIR}/node_modules" ] && [ ! -d node_modules ]; then
   echo "==> Installing dependencies..."
-  pnpm install
+  pnpm --dir "$FRONTEND_DIR" install
 fi
 
 # ---------- Database ----------
 bash scripts/ensure-postgres.sh "$ENV_FILE"
 
 echo "==> Running migrations..."
-(cd zserver && zig build && ./zig-out/bin/zserver migrate)
+(cd "$BACKEND_DIR" && zig build && ./zig-out/bin/zserver migrate)
 
 # ---------- Start services ----------
 echo ""
@@ -63,6 +66,6 @@ echo "  Frontend: http://localhost:${FRONTEND_PORT:-3000}"
 echo ""
 
 trap 'kill 0' EXIT
-(cd zserver && ./zig-out/bin/zserver server) &
-pnpm dev:web &
+(cd "$BACKEND_DIR" && ./zig-out/bin/zserver server) &
+pnpm --dir "$FRONTEND_DIR" run dev:web &
 wait
