@@ -326,7 +326,7 @@ jobs:
       group: release-helm-chart-${{ github.ref }}
       cancel-in-progress: true
     env:
-      CHART_DIR: deploy/helm/multica
+      CHART_DIR: backend/deploy/helm/1person
       OCI_REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
     steps:
       - name: Checkout
