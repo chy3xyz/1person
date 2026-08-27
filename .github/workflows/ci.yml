@@ -13,6 +13,9 @@ concurrency:
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -25,39 +28,35 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install
 
       - name: Test self-host env derivation
-        run: bash scripts/selfhost-config.test.sh
+        working-directory: ${{ github.workspace }}
+        run: bash backend/scripts/selfhost-config.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the
-        # checked-in TypeScript output. The Go side embeds the JSON
+        # checked-in TypeScript output. The Zig backend embeds the JSON
         # source directly, so a passing diff here proves both sides
         # share one source of truth.
+        working-directory: ${{ github.workspace }}
         run: |
           pnpm generate:reserved-slugs
-          git diff --exit-code -- packages/core/paths/reserved-slugs.ts
+          git diff --exit-code -- frontend/packages/core/paths/reserved-slugs.ts
 
       - name: Build, type check, lint, and test
         # Mobile lives in a parallel mobile-verify workflow (path-filtered
-        # to apps/mobile/** + packages/core/types/**) so it doesn't add
-        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
-        # filter in sync with the root package.json scripts, which also
-        # exclude @1person/mobile and @1person/docs.
+        # to frontend/apps/mobile/** + frontend/packages/core/**) so it
+        # doesn't add ~50s of expo-lint + tsc to every web/desktop PR.
         run: pnpm exec turbo build typecheck lint test --filter='!@1person/docs' --filter='!@1person/mobile'
 
   # Backend (zserver) build/test/migrate/e2e coverage lives in
-  # .github/workflows/zserver-ci.yml — the previous Go `backend` job here was
-  # removed because the Go backend sources are gitignored (repo is
-  # zserver-centric), so it could never run on a fresh checkout.
+  # .github/workflows/zserver-ci.yml.
   installer:
-    # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
-    # backend job so installer regressions surface independently, and
-    # exercised on macOS too because the installer targets macOS/Homebrew
-    # and `tar` / `sed` / `mktemp` differ between BSD and GNU userlands.
+    # Stub-driven shell tests for backend/scripts/install.sh.
     strategy:
       fail-fast: false
       matrix:
@@ -68,4 +67,4 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Test shell installers
-        run: bash scripts/install.test.sh
+        run: bash backend/scripts/install.test.sh

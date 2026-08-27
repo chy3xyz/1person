@@ -8,10 +8,8 @@ on:
 
 jobs:
   migrate:
-    # Verifies that `zserver migrate` applies every zserver/migrations/*.up.sql
-    # against a fresh Postgres and stays idempotent on a second run. This
-    # exercises the same code path CI uses for the Go server, but for the Zig
-    # rewrite that depends on zfinal/zcli via zig_ws/zfinal.
+    # Verifies that `zserver migrate` applies every backend/zserver/migrations/*.up.sql
+    # against a fresh Postgres and stays idempotent on a second run.
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -36,29 +34,25 @@ jobs:
       - name: Install Zig (pinned 0.17.0-dev.1567)
         run: |
           set -euo pipefail
-          bash zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"
+          bash backend/zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"
           echo "${GITHUB_WORKSPACE}/.zig" >> "${GITHUB_PATH}"
 
       - name: Show Zig version
         run: zig version
 
-      - name: Provision zig deps (pinned zfinal + zcli)
-        # build.zig.zon resolves zfinal/zcli to <repo>/zig_ws; a clean
-        # checkout has neither, so provision them before building.
-        run: bash zserver/scripts/provision-zig-deps.sh
-
       - name: Build
         # libpq headers are required by build.zig (pq C shim).
+        # zfinal/zcli are fetched by zig from build.zig.zon git URLs.
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libpq-dev
-          cd zserver
+          cd backend/zserver
           zig build
 
       - name: Run migrations
-        working-directory: zserver
+        working-directory: backend/zserver
         run: ./scripts/db-migrate.sh
 
       - name: Re-run migrations (idempotency check)
-        working-directory: zserver
+        working-directory: backend/zserver
         run: ./scripts/db-migrate.sh

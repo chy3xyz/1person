@@ -35,12 +35,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm --dir frontend install --frozen-lockfile
 
       - name: Package Desktop installers (${{ matrix.target }})
-        working-directory: apps/desktop
+        working-directory: frontend/apps/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish never
@@ -49,5 +50,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.target }}
-          path: apps/desktop/dist
+          path: frontend/apps/desktop/dist
           if-no-files-found: error

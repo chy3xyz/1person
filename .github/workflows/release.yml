@@ -47,12 +47,14 @@ jobs:
 
       - name: Verify backend (zserver) builds and tests pass
         # The Go backend sources are gitignored (zserver-centric repo), so
-        # release verification now runs the Zig backend: provision deps,
-        # build, unit tests. Mirrors .github/workflows/zserver-ci.yml.
+        # release verification now runs the Zig backend: build + unit tests.
+        # Mirrors .github/workflows/zserver-ci.yml. zfinal/zcli come from
+        # build.zig.zon git deps (no local zig_ws provision).
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq libpq-dev
-          bash zserver/scripts/provision-zig-deps.sh
-          cd zserver && zig build && zig build test
+          bash backend/zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"
+          echo "${GITHUB_WORKSPACE}/.zig" >> "${GITHUB_PATH}"
+          cd backend/zserver && zig build && zig build test
 
   release:
     needs: verify
@@ -390,12 +392,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm --dir frontend install --frozen-lockfile
 
       - name: Package Desktop installers (${{ matrix.target }})
-        working-directory: apps/desktop
+        working-directory: frontend/apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # electron-builder's GitHub publisher reads this:

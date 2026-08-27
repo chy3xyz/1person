@@ -1,42 +1,39 @@
 name: Mobile Verify
 
-# Runs lint + typecheck for apps/mobile only, parallel to the main CI
+# Runs lint + typecheck for frontend/apps/mobile only, parallel to the main CI
 # workflow. Path-filtered so PRs that don't touch mobile (or anything
 # mobile transitively depends on) pay zero cost.
 #
 # Path scope rationale — mobile transitively depends on:
-# - apps/mobile/**                — the app itself
-# - packages/core/**              — mobile imports types AND pure functions
-#                                   (agents, markdown, permissions, api/schemas, …),
-#                                   not only @1person/core/types
-# - package.json / pnpm-lock.yaml — install graph
-# - pnpm-workspace.yaml           — catalog versions
-# - turbo.json                    — turbo task pipeline
+# - frontend/apps/mobile/**       — the app itself
+# - frontend/packages/core/**     — mobile imports types AND pure functions
+# - frontend/package.json / pnpm-lock.yaml — install graph
+# - frontend/pnpm-workspace.yaml  — catalog versions
+# - frontend/turbo.json           — turbo task pipeline
 #
 # Mobile's vitest suite is intentionally narrow (Node env, pure-function
-# tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
-# RN component-level rendering is not exercised here.
+# tests under frontend/apps/mobile/lib/*.test.ts).
 
 on:
   push:
     branches: [main]
     paths:
-      - "apps/mobile/**"
-      - "packages/core/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "turbo.json"
+      - "frontend/apps/mobile/**"
+      - "frontend/packages/core/**"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/pnpm-workspace.yaml"
+      - "frontend/turbo.json"
       - ".github/workflows/mobile-verify.yml"
   pull_request:
     branches: [main]
     paths:
-      - "apps/mobile/**"
-      - "packages/core/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - "turbo.json"
+      - "frontend/apps/mobile/**"
+      - "frontend/packages/core/**"
+      - "frontend/package.json"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/pnpm-workspace.yaml"
+      - "frontend/turbo.json"
       - ".github/workflows/mobile-verify.yml"
 
 concurrency:
@@ -46,6 +43,9 @@ concurrency:
 jobs:
   mobile:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -58,6 +58,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install
