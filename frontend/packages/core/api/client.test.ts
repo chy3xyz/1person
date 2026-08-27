@@ -435,8 +435,8 @@ describe("ApiClient", () => {
 
     it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
       const legacy = [
-        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
-        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+        { id: "m1", chat_session_id: "session-1", role: "user", content: "hi", task_id: null, created_at: "2026-06-01T00:00:00Z" },
+        { id: "m2", chat_session_id: "session-1", role: "assistant", content: "yo", task_id: null, created_at: "2026-06-01T00:00:01Z" },
       ];
       const fetchMock = vi
         .fn()

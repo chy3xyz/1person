@@ -1,54 +1,29 @@
 {
-  "name": "multica",
-  "version": "0.2.0",
+  "name": "1person",
   "private": true,
-  "type": "module",
   "scripts": {
-    "dev:web": "turbo dev --filter=@1person/web",
-    "dev:docs": "turbo dev --filter=@1person/docs",
-    "dev:desktop": "turbo dev --filter=@1person/desktop",
-    "dev:desktop:staging": "turbo dev:staging --filter=@1person/desktop",
-    "dev:mobile": "pnpm -C apps/mobile dev",
-    "dev:mobile:staging": "pnpm -C apps/mobile dev:staging",
-    "dev:mobile:prod": "pnpm -C apps/mobile dev:prod",
-    "ios:mobile": "pnpm -C apps/mobile ios",
-    "ios:mobile:staging": "pnpm -C apps/mobile ios:staging",
-    "ios:mobile:prod": "pnpm -C apps/mobile ios:prod",
-    "ios:mobile:device": "pnpm -C apps/mobile ios:device",
-    "ios:mobile:device:staging": "pnpm -C apps/mobile ios:device:staging",
-    "ios:mobile:device:staging:release": "pnpm -C apps/mobile ios:device:staging:release",
-    "ios:mobile:device:prod": "pnpm -C apps/mobile ios:device:prod",
-    "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
-    "build": "turbo build --filter=!@1person/mobile",
-    "typecheck": "turbo typecheck --filter=!@1person/mobile",
-    "test": "turbo test --filter=!@1person/mobile",
-    "lint": "turbo lint --filter=!@1person/mobile",
-    "clean": "turbo clean && rm -rf node_modules",
-    "ui:add": "cd packages/ui && npx shadcn@latest add",
+    "dev:web": "pnpm --dir frontend run dev:web",
+    "dev:docs": "pnpm --dir frontend run dev:docs",
+    "dev:desktop": "pnpm --dir frontend run dev:desktop",
+    "dev:desktop:staging": "pnpm --dir frontend run dev:desktop:staging",
+    "dev:mobile": "pnpm --dir frontend run dev:mobile",
+    "dev:mobile:staging": "pnpm --dir frontend run dev:mobile:staging",
+    "dev:mobile:prod": "pnpm --dir frontend run dev:mobile:prod",
+    "ios:mobile": "pnpm --dir frontend run ios:mobile",
+    "ios:mobile:staging": "pnpm --dir frontend run ios:mobile:staging",
+    "ios:mobile:prod": "pnpm --dir frontend run ios:mobile:prod",
+    "ios:mobile:device": "pnpm --dir frontend run ios:mobile:device",
+    "ios:mobile:device:staging": "pnpm --dir frontend run ios:mobile:device:staging",
+    "ios:mobile:device:staging:release": "pnpm --dir frontend run ios:mobile:device:staging:release",
+    "ios:mobile:device:prod": "pnpm --dir frontend run ios:mobile:device:prod",
+    "ios:mobile:device:prod:release": "pnpm --dir frontend run ios:mobile:device:prod:release",
+    "build": "pnpm --dir frontend run build",
+    "typecheck": "pnpm --dir frontend run typecheck",
+    "test": "pnpm --dir frontend run test",
+    "lint": "pnpm --dir frontend run lint",
+    "clean": "pnpm --dir frontend run clean",
+    "ui:add": "pnpm --dir frontend run ui:add",
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
   },
-  "packageManager": "pnpm@10.28.2",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "electron"
-    ],
-    "overrides": {
-      "@types/react": "catalog:",
-      "@types/react-dom": "catalog:",
-      "@xmldom/xmldom": "^0.8.13"
-    }
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "@types/node": "catalog:",
-    "@types/pg": "^8.20.0",
-    "pg": "^8.20.0",
-    "turbo": "^2.5.4",
-    "typescript": "catalog:"
-  },
-  "engines": {
-    "node": ">=24",
-    "pnpm": ">=9"
-  }
+  "packageManager": "pnpm@10.28.2"
 }

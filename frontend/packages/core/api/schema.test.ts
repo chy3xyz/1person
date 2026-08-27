@@ -395,6 +395,423 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listChatSessions", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const sessions = await client.listChatSessions();
+      expect(sessions).toEqual([]);
+    });
+
+    it("accepts a new session status rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "s-1",
+          workspace_id: "ws-1",
+          agent_id: "a-1",
+          creator_id: "u-1",
+          title: "Chat",
+          status: "pinned",
+          has_unread: true,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const sessions = await client.listChatSessions();
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]?.status).toBe("pinned");
+    });
+  });
+
+  describe("listChatMessages", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const messages = await client.listChatMessages("s-1");
+      expect(messages).toEqual([]);
+    });
+
+    it("accepts a new message role rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "m-1",
+          chat_session_id: "s-1",
+          role: "tool",
+          content: "ran",
+          task_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const messages = await client.listChatMessages("s-1");
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.role).toBe("tool");
+    });
+  });
+
+  describe("listProjects", () => {
+    it("falls back to an empty result when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProjects();
+      expect(res).toEqual({ projects: [], total: 0 });
+    });
+  });
+
+  describe("getProject", () => {
+    it("falls back to an empty project when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const project = await client.getProject("p-1");
+      expect(project.id).toBe("");
+      expect(project.title).toBe("");
+    });
+  });
+
+  describe("listAutopilots", () => {
+    it("falls back to an empty result when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res).toEqual({ autopilots: [], total: 0 });
+    });
+  });
+
+  describe("getAutopilot", () => {
+    it("falls back when the response body is malformed", async () => {
+      stubFetchJson({ autopilot: "not-an-object" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getAutopilot("ap-1");
+      expect(res.autopilot.id).toBe("");
+      expect(res.triggers).toEqual([]);
+    });
+  });
+
+  describe("listAutopilotRuns", () => {
+    it("accepts a new run status rather than over-dropping the row", async () => {
+      stubFetchJson({
+        runs: [
+          {
+            id: "r-1",
+            autopilot_id: "ap-1",
+            trigger_id: null,
+            source: "api",
+            status: "blocked",
+            issue_id: null,
+            task_id: null,
+            triggered_at: "2026-01-01T00:00:00Z",
+            completed_at: null,
+            failure_reason: null,
+            trigger_payload: {},
+            result: null,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilotRuns("ap-1");
+      expect(res.runs).toHaveLength(1);
+      expect(res.runs[0]?.status).toBe("blocked");
+    });
+  });
+
+  describe("listWorkspaces", () => {
+    it("falls back to an empty list when the body is not an array", async () => {
+      stubFetchJson({ workspaces: "nope" });
+      const client = new ApiClient("https://api.example.test");
+      const workspaces = await client.listWorkspaces();
+      expect(workspaces).toEqual([]);
+    });
+
+    it("preserves a new workspace settings key rather than stripping it", async () => {
+      stubFetchJson([
+        {
+          id: "ws-1",
+          name: "Workspace",
+          slug: "ws",
+          description: null,
+          context: null,
+          settings: { theme: "dark", some_future_flag: true },
+          repos: [],
+          issue_prefix: "WS-",
+          avatar_url: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const workspaces = await client.listWorkspaces();
+      expect(workspaces).toHaveLength(1);
+      expect(workspaces[0]?.settings.some_future_flag).toBe(true);
+    });
+  });
+
+  describe("getWorkspace", () => {
+    it("falls back to an empty workspace when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const ws = await client.getWorkspace("ws-1");
+      expect(ws.id).toBe("");
+      expect(ws.name).toBe("");
+    });
+  });
+
+  describe("listMembers", () => {
+    it("accepts a new member role rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "m-1",
+          workspace_id: "ws-1",
+          user_id: "u-1",
+          role: "auditor",
+          created_at: "2026-01-01T00:00:00Z",
+          name: "A",
+          email: "a@x.io",
+          avatar_url: null,
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const members = await client.listMembers("ws-1");
+      expect(members).toHaveLength(1);
+      expect(members[0]?.role).toBe("auditor");
+    });
+  });
+
+  describe("listMyInvitations", () => {
+    it("accepts an unknown invitation status and keeps the row", async () => {
+      stubFetchJson([
+        {
+          id: "inv-1",
+          workspace_id: "ws-1",
+          inviter_id: "u-1",
+          invitee_email: "b@x.io",
+          invitee_user_id: null,
+          role: "member",
+          status: "mostly-declined",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          expires_at: "2026-02-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const inv = await client.listMyInvitations();
+      expect(inv).toHaveLength(1);
+      expect(inv[0]?.status).toBe("mostly-declined");
+    });
+  });
+
+  describe("listRuntimes", () => {
+    it("accepts a new runtime status rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "rt-1",
+          workspace_id: "ws-1",
+          daemon_id: null,
+          name: "Claude",
+          runtime_mode: "local",
+          provider: "anthropic",
+          launch_header: "claude",
+          status: "degraded",
+          device_info: "{}",
+          metadata: {},
+          owner_id: null,
+          visibility: "private",
+          last_seen_at: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const runtimes = await client.listRuntimes();
+      expect(runtimes).toHaveLength(1);
+      expect(runtimes[0]?.status).toBe("degraded");
+    });
+  });
+
+  describe("listPins", () => {
+    it("accepts an unknown pin item_type rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "pin-1",
+          workspace_id: "ws-1",
+          user_id: "u-1",
+          item_type: "dashboard",
+          item_id: "d-1",
+          position: 0,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const pins = await client.listPins();
+      expect(pins).toHaveLength(1);
+      expect(pins[0]?.item_type).toBe("dashboard");
+    });
+  });
+
+  describe("listAttachments", () => {
+    it("falls back to an empty list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const attachments = await client.listAttachments("i-1");
+      expect(attachments).toEqual([]);
+    });
+  });
+
+  describe("getPendingChatTask", () => {
+    it("returns an empty task when the body is malformed", async () => {
+      stubFetchJson({ task_id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      const task = await client.getPendingChatTask("s-1");
+      expect(task.task_id).toBeUndefined();
+      expect(task.status).toBeUndefined();
+    });
+  });
+
+  describe("listTaskMessages", () => {
+    it("accepts a new message type rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          task_id: "t-1",
+          issue_id: "i-1",
+          seq: 3,
+          type: "thinking_delta",
+          tool: "bash",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const messages = await client.listTaskMessages("t-1");
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.type).toBe("thinking_delta");
+    });
+  });
+
+  describe("getTasksByIssue", () => {
+    it("accepts a new task status rather than over-dropping the row", async () => {
+      stubFetchJson([
+        {
+          id: "t-1",
+          agent_id: "a-1",
+          runtime_id: "r-1",
+          issue_id: "i-1",
+          status: "interrupted",
+          priority: 1,
+          dispatched_at: null,
+          started_at: null,
+          completed_at: null,
+          result: null,
+          error: null,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const tasks = await client.listTasksByIssue("i-1");
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]?.status).toBe("interrupted");
+    });
+  });
+
+  describe("listPendingChatTasks", () => {
+    it("falls back to an empty tasks list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listPendingChatTasks();
+      expect(res).toEqual({ tasks: [] });
+    });
+  });
+
+  describe("listLabelsForIssue", () => {
+    it("falls back to an empty labels list when the body is null", async () => {
+      stubFetchJson(null);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listLabelsForIssue("i-1");
+      expect(res).toEqual({ labels: [] });
+    });
+  });
+
+  describe("getIssueUsage", () => {
+    it("falls back to zeroed totals when the body is malformed", async () => {
+      stubFetchJson({ total_input_tokens: "lots" });
+      const client = new ApiClient("https://api.example.test");
+      const usage = await client.getIssueUsage("i-1");
+      expect(usage).toEqual({
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        total_cache_read_tokens: 0,
+        total_cache_write_tokens: 0,
+        task_count: 0,
+      });
+    });
+  });
+
+  describe("listProjectResources", () => {
+    it("accepts a new resource type rather than over-dropping the row", async () => {
+      stubFetchJson({
+        resources: [
+          {
+            id: "pr-1",
+            project_id: "p-1",
+            workspace_id: "ws-1",
+            resource_type: "slack_channel",
+            resource_ref: { channel: "#eng" },
+            label: "eng",
+            position: 0,
+            created_at: "2026-01-01T00:00:00Z",
+            created_by: null,
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProjectResources("p-1");
+      expect(res.resources).toHaveLength(1);
+      expect(res.resources[0]?.resource_type).toBe("slack_channel");
+    });
+  });
+
+  describe("getNotificationPreferences", () => {
+    it("keeps a new preference group rather than dropping it", async () => {
+      stubFetchJson({ workspace_id: "ws-1", preferences: { digests: "all" } });
+      const client = new ApiClient("https://api.example.test");
+      const prefs = await client.getNotificationPreferences("ws-1");
+      expect((prefs.preferences as Record<string, string>).digests).toBe("all");
+    });
+  });
+
+  describe("getAgentEnv", () => {
+    it("falls back to an empty env map when the body is malformed", async () => {
+      stubFetchJson({ agent_id: "a-1", custom_env: 42 });
+      const client = new ApiClient("https://api.example.test");
+      const env = await client.getAgentEnv("a-1");
+      expect(env.custom_env).toEqual({});
+    });
+  });
+
+  describe("listGitHubInstallations", () => {
+    it("accepts a new account_type rather than over-dropping the row", async () => {
+      stubFetchJson({
+        installations: [
+          {
+            id: "gh-1",
+            workspace_id: "ws-1",
+            installation_id: 12,
+            account_login: "acme",
+            account_type: "Enterprise",
+            account_avatar_url: null,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        configured: true,
+        can_manage: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listGitHubInstallations("ws-1");
+      expect(res.installations).toHaveLength(1);
+      expect(res.installations[0]?.account_type).toBe("Enterprise");
+    });
+  });
+
   describe("listGroupedIssues", () => {
     it("falls back to empty groups when the response is malformed", async () => {
       stubFetchJson({ groups: "not-an-array" });

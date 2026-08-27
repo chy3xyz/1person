@@ -14,23 +14,23 @@ dist-electron
 *.tsbuildinfo
 # ...except electron-builder's source resources dir, which holds tracked
 # config files (entitlements, icons) — not build output.
-!apps/desktop/build/
-!apps/desktop/build/**
+!frontend/apps/desktop/build/
+!frontend/apps/desktop/build/**
 
 # env
 .env*
 !.env.example
 # Desktop production config is public (backend URL, etc.) — track it so
 # `pnpm package` produces a release-ready build without extra setup.
-!apps/desktop/.env.production
+!frontend/apps/desktop/.env.production
 # Mobile staging config is public (staging API URL) — track it so a fresh
 # checkout can run `pnpm dev:mobile:staging` / `ios:mobile*:staging` without
 # the user having to copy `.env.example` first.
-!apps/mobile/.env.staging
+!frontend/apps/mobile/.env.staging
 # Mobile production config is public (production API URL) — track it so
 # external users can run `pnpm ios:mobile:device:prod:release` against
 # multica.ai's production backend without copying templates first.
-!apps/mobile/.env.production
+!frontend/apps/mobile/.env.production
 
 # test coverage
 coverage
@@ -44,7 +44,8 @@ server/multica
 
 # Test artifacts
 test-results/
-apps/web/test-results/
+frontend/apps/web/test-results/
+frontend/e2e/test-results/
 
 # context (agent workspace)
 .context
@@ -72,19 +73,19 @@ data/
 # ──────────────────────────────────────────────────────────────────────
 # Go backend excluded — this repo is zserver-centric. Only the SQL
 # migrations survive because `zserver migrate` reads them from
-# server/migrations/ (see zserver/src/migrate.zig).
+# server/migrations/ (see backend/zserver/src/migrate.zig).
 server/*
 !server/migrations/
 
 # zserver (Zig) build artifacts
-zserver/.zig-cache/
-zserver/zig-out/
-zserver/zig-pkg/
-zserver/uploads/
-zserver/ci-timings.log
-zserver/main.o
-zserver/mutex_test
+backend/zserver/.zig-cache/
+backend/zserver/zig-out/
+backend/zserver/zig-pkg/
+backend/zserver/uploads/
+backend/zserver/ci-timings.log
+backend/zserver/main.o
+backend/zserver/mutex_test
 
-# Zig framework deps — provisioned by zserver/scripts/provision-zig-deps.sh
-# (pinned zfinal + zcli checkouts). Never commit these.
+# Optional local clones of Zig framework deps (build uses git deps in
+# build.zig.zon). Never commit these.
 zig_ws/

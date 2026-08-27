@@ -1,8 +1,12 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentEnvResponse,
+  AgentRuntime,
+  AgentTask,
   AgentTemplate,
   AgentTemplateSummary,
+  AssigneeFrequencyEntry,
   Attachment,
   Autopilot,
   AutopilotRun,
@@ -13,13 +17,22 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CancelTaskResponse,
+  ChatPendingTask,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  GitHubPullRequest,
   GroupedIssuesResponse,
   GetAutopilotResponse,
   InboxItem,
+  Invitation,
   Issue,
+  IssueLabelsResponse,
+  IssueUsageSummary,
+  Label,
+  ListGitHubInstallationsResponse,
+  ListLabelsResponse,
+  ListProjectResourcesResponse,
   ChatMessage,
   ChatMessagesPage,
   ChatSession,
@@ -28,13 +41,23 @@ import type {
   ListIssuesResponse,
   ListProjectsResponse,
   ListWebhookDeliveriesResponse,
+  MemberWithUser,
+  NotificationPreferenceResponse,
+  PendingChatTasksResponse,
+  PinnedItem,
   Project,
+  ProjectResource,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  Skill,
+  SkillSummary,
+  SquadMember,
+  TaskMessagePayload,
   Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
+  Workspace,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
@@ -439,6 +462,518 @@ export const EMPTY_AGENT: Agent = {
 };
 
 export const EMPTY_AGENT_LIST: Agent[] = [];
+
+// ---------------------------------------------------------------------------
+// Organizational schemas. These back the workspace switcher, member list,
+// invitations, pinned sidebar, labels, and per-agent skills — surfaces the
+// app renders on almost every load. Roles / statuses / item-types stay
+// lenient (`z.string()`) and the workspace `settings` / repo `repos` maps are
+// opaque so a new settings key or repo shape can't white-screen the shell.
+// ---------------------------------------------------------------------------
+const WorkspaceRepoSchema = z.object({
+  url: z.string(),
+  description: z.string().optional(),
+}).loose();
+
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  description: z.string().nullable(),
+  context: z.string().nullable(),
+  settings: z.record(z.string(), z.unknown()),
+  repos: z.array(WorkspaceRepoSchema).default([]),
+  issue_prefix: z.string(),
+  avatar_url: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_WORKSPACE: Workspace = {
+  id: "",
+  name: "",
+  slug: "",
+  description: null,
+  context: null,
+  settings: {},
+  repos: [],
+  issue_prefix: "",
+  avatar_url: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const WorkspaceListSchema = z.array(WorkspaceSchema);
+
+export const EMPTY_WORKSPACE_LIST: Workspace[] = [];
+
+export const MemberSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  user_id: z.string(),
+  role: z.string(),
+  created_at: z.string(),
+  name: z.string(),
+  email: z.string(),
+  avatar_url: z.string().nullable(),
+}).loose();
+
+export const EMPTY_MEMBER: MemberWithUser = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  role: "member",
+  created_at: "",
+  name: "",
+  email: "",
+  avatar_url: null,
+};
+
+export const MemberListSchema = z.array(MemberSchema);
+
+export const EMPTY_MEMBER_LIST: MemberWithUser[] = [];
+
+export const InvitationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  inviter_id: z.string(),
+  invitee_email: z.string(),
+  invitee_user_id: z.string().nullable(),
+  role: z.string(),
+  status: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  expires_at: z.string(),
+  inviter_name: z.string().optional(),
+  inviter_email: z.string().optional(),
+  workspace_name: z.string().optional(),
+}).loose();
+
+export const EMPTY_INVITATION: Invitation = {
+  id: "",
+  workspace_id: "",
+  inviter_id: "",
+  invitee_email: "",
+  invitee_user_id: null,
+  role: "member",
+  status: "pending",
+  created_at: "",
+  updated_at: "",
+  expires_at: "",
+};
+
+export const InvitationListSchema = z.array(InvitationSchema);
+
+export const EMPTY_INVITATION_LIST: Invitation[] = [];
+
+export const RuntimeSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  daemon_id: z.string().nullable(),
+  name: z.string(),
+  runtime_mode: z.string(),
+  provider: z.string(),
+  launch_header: z.string(),
+  status: z.string(),
+  device_info: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  owner_id: z.string().nullable(),
+  visibility: z.string(),
+  last_seen_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_RUNTIME: AgentRuntime = {
+  id: "",
+  workspace_id: "",
+  daemon_id: null,
+  name: "",
+  runtime_mode: "local",
+  provider: "",
+  launch_header: "",
+  status: "offline",
+  device_info: "",
+  metadata: {},
+  owner_id: null,
+  visibility: "private",
+  last_seen_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const RuntimeListSchema = z.array(RuntimeSchema);
+
+export const EMPTY_RUNTIME_LIST: AgentRuntime[] = [];
+
+const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const SkillSummarySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string(),
+  config: z.record(z.string(), z.unknown()),
+  created_by: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_SKILL_SUMMARY: SkillSummary = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  config: {},
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const SkillSummaryListSchema = z.array(SkillSummarySchema);
+
+export const EMPTY_SKILL_SUMMARY_LIST: SkillSummary[] = [];
+
+export const SkillSchema = SkillSummarySchema.extend({
+  content: z.string(),
+  files: z.array(SkillFileSchema).default([]),
+}).loose();
+
+export const EMPTY_SKILL: Skill = {
+  ...EMPTY_SKILL_SUMMARY,
+  content: "",
+  files: [],
+};
+
+export const LabelSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  color: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_LABEL: Label = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  color: "#000000",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_LABELS_RESPONSE: ListLabelsResponse = {
+  labels: [],
+  total: 0,
+};
+
+export const PinnedItemSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  user_id: z.string(),
+  item_type: z.string(),
+  item_id: z.string(),
+  position: z.number(),
+  created_at: z.string(),
+}).loose();
+
+export const EMPTY_PIN: PinnedItem = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  item_type: "issue",
+  item_id: "",
+  position: 0,
+  created_at: "",
+};
+
+export const PinnedItemListSchema = z.array(PinnedItemSchema);
+
+export const EMPTY_PIN_LIST: PinnedItem[] = [];
+
+export const SquadMemberSchema = z.object({
+  id: z.string(),
+  squad_id: z.string(),
+  member_type: z.string(),
+  member_id: z.string(),
+  role: z.string(),
+  created_at: z.string(),
+}).loose();
+
+export const EMPTY_SQUAD_MEMBER: SquadMember = {
+  id: "",
+  squad_id: "",
+  member_type: "member",
+  member_id: "",
+  role: "",
+  created_at: "",
+};
+
+export const SquadMemberListSchema = z.array(SquadMemberSchema);
+
+export const EMPTY_SQUAD_MEMBER_LIST: SquadMember[] = [];
+
+export const GitHubPullRequestSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  repo_owner: z.string(),
+  repo_name: z.string(),
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  html_url: z.string(),
+  branch: z.string().nullable(),
+  author_login: z.string().nullable(),
+  author_avatar_url: z.string().nullable(),
+  merged_at: z.string().nullable(),
+  closed_at: z.string().nullable(),
+  pr_created_at: z.string(),
+  pr_updated_at: z.string(),
+  mergeable_state: z.string().nullable().optional(),
+  checks_conclusion: z.string().nullable().optional(),
+  checks_passed: z.number().optional(),
+  checks_failed: z.number().optional(),
+  checks_pending: z.number().optional(),
+  additions: z.number().optional(),
+  deletions: z.number().optional(),
+  changed_files: z.number().optional(),
+}).loose();
+
+export const IssuePullRequestsResponseSchema = z.object({
+  pull_requests: z.array(GitHubPullRequestSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE = {
+  pull_requests: [] as GitHubPullRequest[],
+};
+
+export const AttachmentListSchema = z.array(AttachmentSchema);
+
+export const EMPTY_ATTACHMENT_LIST: Attachment[] = [];
+
+export const ChatPendingTaskSchema = z.object({
+  task_id: z.string().optional(),
+  status: z.string().optional(),
+  created_at: z.string().optional(),
+}).loose();
+
+export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
+
+// ---------------------------------------------------------------------------
+// Task / resource / notification schemas. These cover the task feed (chat +
+// issue + agent task lists), project resources, the issue usage panel, and
+// notification preferences. Enums (task `status`, message `type`, resource
+// `resource_type`) stay lenient (`z.string()`) and opaque bags (`result`,
+// `input`, `resource_ref`) pass through untouched so a new backend variant
+// can't take the panel down.
+// ---------------------------------------------------------------------------
+
+export const AgentTaskSchema = z.object({
+  id: z.string(),
+  agent_id: z.string(),
+  runtime_id: z.string(),
+  issue_id: z.string(),
+  status: z.string(),
+  priority: z.number(),
+  dispatched_at: z.string().nullable(),
+  started_at: z.string().nullable(),
+  completed_at: z.string().nullable(),
+  result: z.unknown(),
+  error: z.string().nullable(),
+  failure_reason: z.string().optional(),
+  created_at: z.string(),
+  chat_session_id: z.string().optional(),
+  autopilot_run_id: z.string().optional(),
+  parent_task_id: z.string().optional(),
+  attempt: z.number().optional(),
+  trigger_comment_id: z.string().optional(),
+  trigger_summary: z.string().optional(),
+  kind: z.string().optional(),
+  work_dir: z.string().optional(),
+  relative_work_dir: z.string().optional(),
+}).loose();
+
+export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+export const EMPTY_AGENT_TASK: AgentTask = {
+  id: "",
+  agent_id: "",
+  runtime_id: "",
+  issue_id: "",
+  status: "queued",
+  priority: 0,
+  dispatched_at: null,
+  started_at: null,
+  completed_at: null,
+  result: null,
+  error: null,
+  created_at: "",
+};
+
+export const EMPTY_AGENT_TASK_LIST: AgentTask[] = [];
+
+export const TaskMessagePayloadSchema = z.object({
+  task_id: z.string(),
+  issue_id: z.string(),
+  chat_session_id: z.string().optional(),
+  seq: z.number(),
+  type: z.string(),
+  tool: z.string().optional(),
+  content: z.string().optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
+  output: z.string().optional(),
+  created_at: z.string().optional(),
+}).loose();
+
+export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema);
+
+export const EMPTY_TASK_MESSAGE_LIST: TaskMessagePayload[] = [];
+
+export const ChildIssueProgressSchema = z.object({
+  progress: z
+    .array(
+      z.object({
+        parent_issue_id: z.string(),
+        child_issue_id: z.string().optional(),
+        total: z.number(),
+        done: z.number(),
+      }),
+    )
+    .default([]),
+}).loose();
+
+export const EMPTY_CHILD_ISSUE_PROGRESS = { progress: [] };
+
+export const AssigneeFrequencyEntrySchema = z.object({
+  assignee_type: z.string(),
+  assignee_id: z.string(),
+  frequency: z.number(),
+}).loose();
+
+export const AssigneeFrequencyListSchema = z.array(AssigneeFrequencyEntrySchema);
+
+export const EMPTY_ASSIGNEE_FREQUENCY_LIST: AssigneeFrequencyEntry[] = [];
+
+export const IssueUsageSummarySchema = z.object({
+  total_input_tokens: z.number(),
+  total_output_tokens: z.number(),
+  total_cache_read_tokens: z.number(),
+  total_cache_write_tokens: z.number(),
+  task_count: z.number(),
+}).loose();
+
+export const EMPTY_ISSUE_USAGE_SUMMARY: IssueUsageSummary = {
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
+  task_count: 0,
+};
+
+export const NotificationPreferenceResponseSchema = z.object({
+  workspace_id: z.string(),
+  preferences: z.record(z.string(), z.string()),
+}).loose();
+
+export const EMPTY_NOTIFICATION_PREFERENCE_RESPONSE: NotificationPreferenceResponse = {
+  workspace_id: "",
+  preferences: {},
+};
+
+export const ProjectResourceSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  workspace_id: z.string(),
+  resource_type: z.string(),
+  resource_ref: z.unknown(),
+  label: z.string().nullable(),
+  position: z.number(),
+  created_at: z.string(),
+  created_by: z.string().nullable(),
+}).loose();
+
+export const ProjectResourceListSchema = z.array(ProjectResourceSchema);
+
+export const EMPTY_PROJECT_RESOURCE_LIST: ProjectResource[] = [];
+
+export const ListProjectResourcesResponseSchema = z.object({
+  resources: z.array(ProjectResourceSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROJECT_RESOURCES_RESPONSE: ListProjectResourcesResponse = {
+  resources: [],
+  total: 0,
+};
+
+export const AgentEnvResponseSchema = z.object({
+  agent_id: z.string(),
+  custom_env: z.record(z.string(), z.string()),
+}).loose();
+
+export const EMPTY_AGENT_ENV_RESPONSE: AgentEnvResponse = {
+  agent_id: "",
+  custom_env: {},
+};
+
+export const PendingChatTasksResponseSchema = z.object({
+  tasks: z
+    .array(
+      z.object({
+        task_id: z.string(),
+        status: z.string(),
+        chat_session_id: z.string(),
+      }),
+    )
+    .default([]),
+}).loose();
+
+export const EMPTY_PENDING_CHAT_TASKS_RESPONSE: PendingChatTasksResponse = {
+  tasks: [],
+};
+
+export const ListLabelsForIssueResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_LABELS_RESPONSE: IssueLabelsResponse = {
+  labels: [],
+};
+
+const GitHubInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  installation_id: z.number().optional(),
+  account_login: z.string(),
+  account_type: z.string(),
+  account_avatar_url: z.string().nullable(),
+  created_at: z.string(),
+  connected_by: z.string().optional(),
+}).loose();
+
+export const ListGitHubInstallationsResponseSchema = z.object({
+  installations: z.array(GitHubInstallationSchema).default([]),
+  configured: z.boolean(),
+  can_manage: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
 
 // ---------------------------------------------------------------------------
 // Chat schemas. `listChatSessions` / `getChatSession` / `listChatMessages` /

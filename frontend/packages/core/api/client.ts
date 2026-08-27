@@ -148,27 +148,56 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
   EMPTY_AGENT,
+  EMPTY_AGENT_ENV_RESPONSE,
   EMPTY_AGENT_LIST,
+  EMPTY_AGENT_TASK_LIST,
+  EMPTY_ASSIGNEE_FREQUENCY_LIST,
+  EMPTY_AUTOPILOT_RUN,
   EMPTY_ATTACHMENT,
+  EMPTY_ATTACHMENT_LIST,
+  EMPTY_CHILD_ISSUE_PROGRESS,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_MESSAGES_PAGE,
+  EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION,
   EMPTY_CHAT_SESSION_LIST,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_INBOX_ITEM,
   EMPTY_INBOX_LIST,
   EMPTY_ISSUE,
+  EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
+  EMPTY_INVITATION,
+  EMPTY_INVITATION_LIST,
+  EMPTY_ISSUE_LABELS_RESPONSE,
+  EMPTY_ISSUE_USAGE_SUMMARY,
+  EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_LABELS_RESPONSE,
+  EMPTY_LIST_PROJECT_RESOURCES_RESPONSE,
   EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_LIST_AUTOPILOTS_RESPONSE,
+  EMPTY_LIST_AUTOPILOT_RUNS_RESPONSE,
+  EMPTY_MEMBER_LIST,
+  EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+  EMPTY_PENDING_CHAT_TASKS_RESPONSE,
+  EMPTY_PIN_LIST,
   EMPTY_PROJECT,
+  EMPTY_RUNTIME_LIST,
+  EMPTY_SKILL,
+  EMPTY_SKILL_SUMMARY_LIST,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
+  EMPTY_SQUAD_MEMBER_LIST,
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
+  EMPTY_TASK_MESSAGE_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
+  EMPTY_WORKSPACE,
+  EMPTY_WORKSPACE_LIST,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   EMPTY_SEARCH_ISSUES_RESPONSE,
@@ -177,31 +206,60 @@ import {
   type AppConfigResponse,
   AgentListSchema,
   AgentSchema,
+  AgentEnvResponseSchema,
+  AgentTaskListSchema,
+  AssigneeFrequencyListSchema,
+  AttachmentListSchema,
+  AutopilotRunSchema,
   ChatMessageListSchema,
   ChatMessagesPageSchema,
+  ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
+  ChildIssueProgressSchema,
+  GetAutopilotResponseSchema,
   GroupedIssuesResponseSchema,
   InboxItemListSchema,
   InboxItemSchema,
+  InvitationListSchema,
+  InvitationSchema,
+  IssuePullRequestsResponseSchema,
   IssueSchema,
+  IssueUsageSummarySchema,
+  ListGitHubInstallationsResponseSchema,
+  ListLabelsForIssueResponseSchema,
+  ListLabelsResponseSchema,
   ListIssuesResponseSchema,
+  ListProjectResourcesResponseSchema,
+  ListAutopilotRunsResponseSchema,
+  ListAutopilotsResponseSchema,
   ListProjectsResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  MemberListSchema,
+  NotificationPreferenceResponseSchema,
+  PendingChatTasksResponseSchema,
+  PinnedItemListSchema,
   ProjectSchema,
+  RuntimeListSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
+  SkillSchema,
+  SkillSummaryListSchema,
   SquadSchema,
   SquadListSchema,
+  SquadMemberListSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
+  TaskMessageListSchema,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
+  WorkspaceListSchema,
+  WorkspaceSchema,
   BillingBalanceSchema,
   BillingTransactionsPageSchema,
   BillingBatchesPageSchema,
@@ -663,7 +721,10 @@ export class ApiClient {
   }
 
   async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
-    return this.fetch("/api/issues/child-progress");
+    const raw = await this.fetch<unknown>("/api/issues/child-progress");
+    return parseWithFallback(raw, ChildIssueProgressSchema, EMPTY_CHILD_ISSUE_PROGRESS, {
+      endpoint: "GET /api/issues/child-progress",
+    });
   }
 
   async deleteIssue(id: string): Promise<void> {
@@ -735,7 +796,10 @@ export class ApiClient {
   }
 
   async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
-    return this.fetch("/api/assignee-frequency");
+    const raw = await this.fetch<unknown>("/api/assignee-frequency");
+    return parseWithFallback(raw, AssigneeFrequencyListSchema, EMPTY_ASSIGNEE_FREQUENCY_LIST, {
+      endpoint: "GET /api/assignee-frequency",
+    });
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[]): Promise<Comment> {
@@ -901,7 +965,10 @@ export class ApiClient {
    * MUL-2600.
    */
   async getAgentEnv(id: string): Promise<AgentEnvResponse> {
-    return this.fetch(`/api/agents/${id}/env`);
+    const raw = await this.fetch<unknown>(`/api/agents/${id}/env`);
+    return parseWithFallback(raw, AgentEnvResponseSchema, EMPTY_AGENT_ENV_RESPONSE, {
+      endpoint: "GET /api/agents/:id/env",
+    });
   }
 
   /**
@@ -935,7 +1002,10 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.owner) search.set("owner", params.owner);
-    return this.fetch(`/api/runtimes?${search}`);
+    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`);
+    return parseWithFallback(raw, RuntimeListSchema, EMPTY_RUNTIME_LIST, {
+      endpoint: "GET /api/runtimes",
+    });
   }
 
   async listCloudRuntimeNodes(
@@ -1360,7 +1430,10 @@ export class ApiClient {
   // derivation; one fetch backs every per-agent presence read in the app.
   // Workspace is resolved server-side from the X-Workspace-Slug header.
   async getAgentTaskSnapshot(): Promise<AgentTask[]> {
-    return this.fetch(`/api/agent-task-snapshot`);
+    const raw = await this.fetch<unknown>(`/api/agent-task-snapshot`);
+    return parseWithFallback(raw, AgentTaskListSchema, EMPTY_AGENT_TASK_LIST, {
+      endpoint: "GET /api/agent-task-snapshot",
+    });
   }
 
   // Per-agent daily activity for the last 30 days, anchored on
@@ -1381,15 +1454,24 @@ export class ApiClient {
   }
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
-    return this.fetch(`/api/tasks/${taskId}/messages`);
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/messages`);
+    return parseWithFallback(raw, TaskMessageListSchema, EMPTY_TASK_MESSAGE_LIST, {
+      endpoint: "GET /api/tasks/:id/messages",
+    });
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
-    return this.fetch(`/api/issues/${issueId}/task-runs`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/task-runs`);
+    return parseWithFallback(raw, AgentTaskListSchema, EMPTY_AGENT_TASK_LIST, {
+      endpoint: "GET /api/issues/:id/task-runs",
+    });
   }
 
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
-    return this.fetch(`/api/issues/${issueId}/usage`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/usage`);
+    return parseWithFallback(raw, IssueUsageSummarySchema, EMPTY_ISSUE_USAGE_SUMMARY, {
+      endpoint: "GET /api/issues/:id/usage",
+    });
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
@@ -1458,10 +1540,13 @@ export class ApiClient {
   // preferences — e.g. honoring the mute setting of the workspace an inbox
   // notification came from while the user is viewing a different one (#3766).
   async getNotificationPreferences(workspaceSlug?: string): Promise<NotificationPreferenceResponse> {
-    return this.fetch(
+    const raw = await this.fetch<unknown>(
       "/api/notification-preferences",
       workspaceSlug ? { headers: { "X-Workspace-Slug": workspaceSlug } } : undefined,
     );
+    return parseWithFallback(raw, NotificationPreferenceResponseSchema, EMPTY_NOTIFICATION_PREFERENCE_RESPONSE, {
+      endpoint: "GET /api/notification-preferences",
+    });
   }
 
   async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
@@ -1481,11 +1566,17 @@ export class ApiClient {
 
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
-    return this.fetch("/api/workspaces");
+    const raw = await this.fetch<unknown>("/api/workspaces");
+    return parseWithFallback(raw, WorkspaceListSchema, EMPTY_WORKSPACE_LIST, {
+      endpoint: "GET /api/workspaces",
+    });
   }
 
   async getWorkspace(id: string): Promise<Workspace> {
-    return this.fetch(`/api/workspaces/${id}`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${id}`);
+    return parseWithFallback(raw, WorkspaceSchema, EMPTY_WORKSPACE, {
+      endpoint: "GET /api/workspaces/:id",
+    });
   }
 
   async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
@@ -1504,7 +1595,10 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members`);
+    return parseWithFallback(raw, MemberListSchema, EMPTY_MEMBER_LIST, {
+      endpoint: "GET /api/workspaces/:id/members",
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
@@ -1535,7 +1629,10 @@ export class ApiClient {
 
   // Invitations
   async listWorkspaceInvitations(workspaceId: string): Promise<Invitation[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/invitations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/invitations`);
+    return parseWithFallback(raw, InvitationListSchema, EMPTY_INVITATION_LIST, {
+      endpoint: "GET /api/workspaces/:id/invitations",
+    });
   }
 
   async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
@@ -1545,11 +1642,17 @@ export class ApiClient {
   }
 
   async listMyInvitations(): Promise<Invitation[]> {
-    return this.fetch("/api/invitations");
+    const raw = await this.fetch<unknown>("/api/invitations");
+    return parseWithFallback(raw, InvitationListSchema, EMPTY_INVITATION_LIST, {
+      endpoint: "GET /api/invitations",
+    });
   }
 
   async getInvitation(invitationId: string): Promise<Invitation> {
-    return this.fetch(`/api/invitations/${invitationId}`);
+    const raw = await this.fetch<unknown>(`/api/invitations/${invitationId}`);
+    return parseWithFallback(raw, InvitationSchema, EMPTY_INVITATION, {
+      endpoint: "GET /api/invitations/:id",
+    });
   }
 
   async acceptInvitation(invitationId: string): Promise<MemberWithUser> {
@@ -1634,11 +1737,17 @@ export class ApiClient {
 
   // Skills
   async listSkills(): Promise<SkillSummary[]> {
-    return this.fetch("/api/skills");
+    const raw = await this.fetch<unknown>("/api/skills");
+    return parseWithFallback(raw, SkillSummaryListSchema, EMPTY_SKILL_SUMMARY_LIST, {
+      endpoint: "GET /api/skills",
+    });
   }
 
   async getSkill(id: string): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`);
+    const raw = await this.fetch<unknown>(`/api/skills/${id}`);
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "GET /api/skills/:id",
+    });
   }
 
   async createSkill(data: CreateSkillRequest): Promise<Skill> {
@@ -1667,7 +1776,10 @@ export class ApiClient {
   }
 
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
-    return this.fetch(`/api/agents/${agentId}/skills`);
+    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/skills`);
+    return parseWithFallback(raw, SkillSummaryListSchema, EMPTY_SKILL_SUMMARY_LIST, {
+      endpoint: "GET /api/agents/:id/skills",
+    });
   }
 
   async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
@@ -1820,11 +1932,17 @@ export class ApiClient {
   }
 
   async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/pending-task`);
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/pending-task`);
+    return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
+      endpoint: "GET /api/chat/sessions/:id/pending-task",
+    });
   }
 
   async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
-    return this.fetch(`/api/chat/pending-tasks`);
+    const raw = await this.fetch<unknown>(`/api/chat/pending-tasks`);
+    return parseWithFallback(raw, PendingChatTasksResponseSchema, EMPTY_PENDING_CHAT_TASKS_RESPONSE, {
+      endpoint: "GET /api/chat/pending-tasks",
+    });
   }
 
   async markChatSessionRead(sessionId: string): Promise<void> {
@@ -1839,7 +1957,10 @@ export class ApiClient {
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
-    return this.fetch(`/api/issues/${issueId}/attachments`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/attachments`);
+    return parseWithFallback(raw, AttachmentListSchema, EMPTY_ATTACHMENT_LIST, {
+      endpoint: "GET /api/issues/:id/attachments",
+    });
   }
 
   // Fetches a fresh attachment metadata record. The server re-signs
@@ -1928,7 +2049,10 @@ export class ApiClient {
   async listProjectResources(
     projectId: string,
   ): Promise<ListProjectResourcesResponse> {
-    return this.fetch(`/api/projects/${projectId}/resources`);
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/resources`);
+    return parseWithFallback(raw, ListProjectResourcesResponseSchema, EMPTY_LIST_PROJECT_RESOURCES_RESPONSE, {
+      endpoint: "GET /api/projects/:id/resources",
+    });
   }
 
   async createProjectResource(
@@ -1963,7 +2087,10 @@ export class ApiClient {
 
   // Labels
   async listLabels(): Promise<ListLabelsResponse> {
-    return this.fetch(`/api/labels`);
+    const raw = await this.fetch<unknown>(`/api/labels`);
+    return parseWithFallback(raw, ListLabelsResponseSchema, EMPTY_LIST_LABELS_RESPONSE, {
+      endpoint: "GET /api/labels",
+    });
   }
 
   async getLabel(id: string): Promise<Label> {
@@ -1989,7 +2116,10 @@ export class ApiClient {
   }
 
   async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {
-    return this.fetch(`/api/issues/${issueId}/labels`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/labels`);
+    return parseWithFallback(raw, ListLabelsForIssueResponseSchema, EMPTY_ISSUE_LABELS_RESPONSE, {
+      endpoint: "GET /api/issues/:id/labels",
+    });
   }
 
   async attachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
@@ -2007,7 +2137,10 @@ export class ApiClient {
 
   // Pins
   async listPins(): Promise<PinnedItem[]> {
-    return this.fetch("/api/pins");
+    const raw = await this.fetch<unknown>("/api/pins");
+    return parseWithFallback(raw, PinnedItemListSchema, EMPTY_PIN_LIST, {
+      endpoint: "GET /api/pins",
+    });
   }
 
   async createPin(data: CreatePinRequest): Promise<PinnedItem> {
@@ -2062,7 +2195,10 @@ export class ApiClient {
   }
 
   async listSquadMembers(squadId: string): Promise<SquadMember[]> {
-    return this.fetch(`/api/squads/${squadId}/members`);
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/members`);
+    return parseWithFallback(raw, SquadMemberListSchema, EMPTY_SQUAD_MEMBER_LIST, {
+      endpoint: "GET /api/squads/:id/members",
+    });
   }
 
   async addSquadMember(squadId: string, data: { member_type: string; member_id: string; role?: string }): Promise<SquadMember> {
@@ -2239,7 +2375,10 @@ export class ApiClient {
   }
 
   async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/github/installations`);
+    return parseWithFallback(raw, ListGitHubInstallationsResponseSchema, EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/github/installations",
+    });
   }
 
   async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
@@ -2249,7 +2388,10 @@ export class ApiClient {
   }
 
   async listIssuePullRequests(issueId: string): Promise<{ pull_requests: GitHubPullRequest[] }> {
-    return this.fetch(`/api/issues/${issueId}/pull-requests`);
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/pull-requests`);
+    return parseWithFallback(raw, IssuePullRequestsResponseSchema, EMPTY_ISSUE_PULL_REQUESTS_RESPONSE, {
+      endpoint: "GET /api/issues/:id/pull-requests",
+    });
   }
 
   // Lark integration
