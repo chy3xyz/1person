@@ -9,12 +9,12 @@
 ## 架构
 
 ```
-apps/web (Next.js 16)
-  ├── packages/core    — 无头业务逻辑 (React Query hooks + Zustand + API client)
-  ├── packages/ui      — 原子 UI 组件 (shadcn/Base UI, 零业务逻辑)
-  └── packages/views   — 共享业务页面
+frontend/apps/web (Next.js 16)
+  ├── frontend/packages/core    — 无头业务逻辑 (React Query hooks + Zustand + API client)
+  ├── frontend/packages/ui      — 原子 UI 组件 (shadcn/Base UI, 零业务逻辑)
+  └── frontend/packages/views   — 共享业务页面
 
-zserver (Zig, zfinal)
+backend/zserver (Zig, zfinal)
   ├── 43 模块, 24 套 e2e (no-DB + PostgreSQL 双模式)
   ├── Redis pub/sub bridge (WS 多实例同步)
   └── 30 前端集成检查
@@ -73,7 +73,7 @@ server/ (Go, 生产用)
 ### 后端
 
 ```bash
-cd zserver
+cd backend/zserver
 zig build                        # 编译
 # 无 DB 模式 (内存存储)
 JWT_SECRET=my-secret MULTICA_DEV_VERIFICATION_CODE=000000 ./zig-out/bin/zserver server --port 8090
@@ -84,14 +84,14 @@ DATABASE_URL="postgres://user:pass@localhost/db?sslmode=disable" JWT_SECRET=my-s
 ### 运行所有测试
 
 ```bash
-cd zserver
+cd backend/zserver
 make ci                           # 24 e2e + 30 前端集成, 全部自动运行
 ```
 
 ### 前端
 
 ```bash
-cd apps/web
+cd frontend/apps/web
 pnpm dev                          # Next.js dev server
 pnpm typecheck                    # TypeScript 类型检查
 ```
@@ -121,13 +121,13 @@ pnpm typecheck                    # TypeScript 类型检查
 
 ```bash
 # 后端
-cd zserver && zig build test
+cd backend/zserver && zig build test
 
 # 前端
-cd apps/web && pnpm dev
+cd frontend/apps/web && pnpm dev
 
 # 全量验证
-cd zserver && make ci
+cd backend/zserver && make ci
 ```
 
 ## License

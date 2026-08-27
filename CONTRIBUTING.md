@@ -466,13 +466,13 @@ To test the Electron desktop app against a local backend:
 
 ```bash
 # After backend is running (make dev)
-pnpm dev:desktop
+pnpm --dir frontend dev:desktop
 ```
 
 This automatically:
 
-1. Compiles the `1person` CLI from `server/cmd/1person` into
-   `apps/desktop/resources/bin/1person`
+1. Compiles the `1p` CLI from `backend/zserver` (Zig build) into
+   `frontend/apps/desktop/resources/bin/1person`
 2. Creates an isolated profile named `desktop-localhost-<PORT>`
 3. Starts and manages its own daemon instance
 4. Connects to the local backend
@@ -482,7 +482,7 @@ backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
 the backend, you can use `888888` instead.
 
 If the backend runs on a non-default port (worktree), create
-`apps/desktop/.env.development.local`:
+`frontend/apps/desktop/.env.development.local`:
 
 ```bash
 VITE_API_URL=http://localhost:<backend-port>

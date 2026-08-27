@@ -2,7 +2,7 @@
 
 This is the zserver-specific overlay on top of the repository-wide
 `/AGENTS.md`. It captures the rules that only matter when editing
-files under `zserver/`.
+files under `backend/zserver/`.
 
 ## Source layout: zfinal `examples/ruoyi-gen/` convention
 
@@ -79,7 +79,7 @@ the driver for free — do not re-implement the libpq glue.
 ## Quick reference
 
 ```bash
-cd zserver
+cd backend/zserver
 zig build                    # Debug build, includes the HTTP server
 zig build test               # Unit tests (no DB required)
 make ci                      # Docker-up + migrate + build + test (CI)

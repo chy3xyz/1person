@@ -1,8 +1,8 @@
-# Mobile App Rules (apps/mobile/)
+# Mobile App Rules (frontend/apps/mobile/)
 
 For cross-app sharing rules, see the root `CLAUDE.md` *Sharing Principles* section. This file documents the locked tech-stack baseline and the few mobile-specific rules — so AI doesn't suggest outdated alternatives.
 
-## What mobile may import from `packages/`
+## What mobile may import from `frontend/packages/`
 
 - `import type` from `@multica/core/types/*` (zero runtime coupling)
 - Pure functions from `@multica/core/`
@@ -17,8 +17,8 @@ For any new mobile feature / screen / interaction, complete the three steps belo
 
 Until you can name the relevant code, don't reason from "general experience":
 
-- `packages/views/<feature>/` — UI shape, information density
-- `packages/core/<feature>/{queries,mutations,ws-updaters}.ts` — endpoints, cache key shapes, optimistic patches, WS event coverage
+- `frontend/packages/views/<feature>/` — UI shape, information density
+- `frontend/packages/core/<feature>/{queries,mutations,ws-updaters}.ts` — endpoints, cache key shapes, optimistic patches, WS event coverage
 - Anything matching `*-display.ts` / `dedupe*` / `coalesce*` / `useMemo(() => transform(raw))` — preprocessing between backend and JSX
 
 List the **must-agree points**: counts, enums, permissions, cross-cache side effects (e.g. a status change must also refresh inbox), navigation flow. Missing one of these is how the 2026-05-09 inbox duplicate-dot incident happened.
@@ -46,11 +46,11 @@ Mobile is allowed to differ in **UI and interaction** — it's a phone, not a po
 **The four things that must agree:**
 
 - **Counts / visibility** — same N for the same filter, under identical pagination / coalescing rules.
-- **Permissions / access** — mirror the same logic web uses (from `packages/core`); don't re-derive from feel.
+- **Permissions / access** — mirror the same logic web uses (from `frontend/packages/core`); don't re-derive from feel.
 - **State enums / transitions** — render every status / priority / inbox type / comment type, with a sensible fallback for unknown values (per "API Response Compatibility" in the root CLAUDE.md). Never silently drop a category.
 - **Data identity** — same `id`, same `slug`, same canonical fields. Don't invent ids or normalize differently.
 
-**When UI must diverge**, write at the divergence point what rule it's mirroring (point at the source function in `packages/core` or `packages/views`) and why mobile renders it differently. A future reader should be able to tell in 30 seconds that the divergence is intentional and find the web-side source of truth.
+**When UI must diverge**, write at the divergence point what rule it's mirroring (point at the source function in `frontend/packages/core` or `frontend/packages/views`) and why mobile renders it differently. A future reader should be able to tell in 30 seconds that the divergence is intentional and find the web-side source of truth.
 
 ### ⚠️ Incident (2026-05-09): inbox dedup missing — counts disagreed
 
@@ -60,18 +60,18 @@ Mobile is allowed to differ in **UI and interaction** — it's a phone, not a po
 1. archived items, and
 2. multiple inbox notifications per issue (a comment, a status change, and an assignment on the same issue each create one row).
 
-Web/desktop run those raw rows through `deduplicateInboxItems` (`packages/core/inbox/queries.ts`) before rendering and before counting unread:
+Web/desktop run those raw rows through `deduplicateInboxItems` (`frontend/packages/core/inbox/queries.ts`) before rendering and before counting unread:
 1. filter `archived = true` out
 2. group by `issue_id`, keep the newest in each group
 3. sort by `created_at` desc
 
 Mobile's first cut rendered the raw list directly. So a single issue with 3 notifications showed as 3 rows with 3 unread dots, while web showed 1.
 
-**Fix**: mirror `deduplicateInboxItems` into `apps/mobile/lib/inbox-display.ts`, run mobile's inbox tab through it before rendering and before any counting.
+**Fix**: mirror `deduplicateInboxItems` into `frontend/apps/mobile/lib/inbox-display.ts`, run mobile's inbox tab through it before rendering and before any counting.
 
 **Lesson — encode this into your reflexes when adding any new mobile screen that consumes a list endpoint**:
 
-> Before rendering an API list response, grep `packages/core/<domain>/queries.ts` and `packages/views/<domain>/components/*.tsx` for any preprocessing — `dedupe*`, `coalesce*`, `filter*`, `*-display.ts`, `useMemo(() => transform(raw))`. Mirror everything that runs between `useQuery` and the JSX in web/desktop. **Do not assume the backend returns "what should be displayed"** — it usually returns the raw cache shape, and the client is responsible for shaping it.
+> Before rendering an API list response, grep `frontend/packages/core/<domain>/queries.ts` and `frontend/packages/views/<domain>/components/*.tsx` for any preprocessing — `dedupe*`, `coalesce*`, `filter*`, `*-display.ts`, `useMemo(() => transform(raw))`. Mirror everything that runs between `useQuery` and the JSX in web/desktop. **Do not assume the backend returns "what should be displayed"** — it usually returns the raw cache shape, and the client is responsible for shaping it.
 
 This pattern repeats: timeline coalescing (`buildTimelineGroups`), inbox dedup, comment thread flattening, etc. Each one is a behavioral parity hazard if mobile skips it.
 
@@ -81,11 +81,11 @@ Start minimal. Add to this list when actually adopted — do NOT pre-list librar
 
 - **Expo SDK 55**
 - **React Native 0.82**
-- **React 19.1** — whatever Expo SDK 55 ships. Pinned in `apps/mobile/package.json` directly, NOT via root `catalog:`.
+- **React 19.1** — whatever Expo SDK 55 ships. Pinned in `frontend/apps/mobile/package.json` directly, NOT via root `catalog:`.
 - **TypeScript** strict
 - **Expo Router 55** (file-based routing — version aligns with Expo SDK)
 - **NativeWind 4** + **Tailwind 3.4** — NativeWind 5 is unstable; stay on v4. (Note: web/desktop use Tailwind v4 — versions intentionally differ.)
-- **react-native-reusables (RNR)** — the shadcn equivalent for React Native. Uses NativeWind + RN-Primitives + CVA. Component API mirrors shadcn. **Phased adoption in progress — see `apps/mobile/docs/rnr-migration.md` for the canonical plan, three-tier classification, and Phase 0/1/2/3 status.**
+- **react-native-reusables (RNR)** — the shadcn equivalent for React Native. Uses NativeWind + RN-Primitives + CVA. Component API mirrors shadcn. **Phased adoption in progress — see `frontend/apps/mobile/docs/rnr-migration.md` for the canonical plan, three-tier classification, and Phase 0/1/2/3 status.**
 - **TanStack Query 5** — mobile owns its `QueryClient` with `AppState` focus listener + `NetInfo` online listener.
 - **Zustand** — mobile-local state only.
 - **expo-secure-store** — auth token persistence + theme preference (`light` / `dark` / `system`).
@@ -94,7 +94,7 @@ When upgrading any of these, update this list.
 
 ## UI components & theming
 
-The full plan, file inventory, and migration phases live in `apps/mobile/docs/rnr-migration.md`. The rules below are the durable ones that must survive after the migration completes — read this section first when working on any UI.
+The full plan, file inventory, and migration phases live in `frontend/apps/mobile/docs/rnr-migration.md`. The rules below are the durable ones that must survive after the migration completes — read this section first when working on any UI.
 
 ### Hard rule — existing pattern first, defaults first, native waterfall
 
@@ -147,14 +147,14 @@ Never copy the visual shape of an existing hand-written `components/ui/` compone
 
 ### What this replaces (and what stays)
 
-- The old "Visual tokens" approach — hand-transcribed hex values in `tailwind.config.js` — is being **replaced** by the CSS-variable system above. Web tokens are still inspiration only; we do NOT import `packages/ui/styles/tokens.css` (Tailwind v3.4 vs v4 mismatch makes file sharing impractical; isolation is intentional).
+- The old "Visual tokens" approach — hand-transcribed hex values in `tailwind.config.js` — is being **replaced** by the CSS-variable system above. Web tokens are still inspiration only; we do NOT import `frontend/packages/ui/styles/tokens.css` (Tailwind v3.4 vs v4 mismatch makes file sharing impractical; isolation is intentional).
 - The `cn()` helper at `lib/utils.ts` stays — RNR uses the same one.
 - The sheet rule from Lesson 6 below still applies. RNR ships `Dialog` and other modal primitives; use them for **new** sheets. The legacy `sheet-shell.tsx` (RN `<Modal presentationStyle="pageSheet">`) has been deleted — every long-list / search / form sheet now uses an Expo Router `presentation: "formSheet"` route, which instantiates iOS' `UISheetPresentationController` for native grabber, detents, and spring drag physics.
 
 ## Build & release
 
 - **Main CI** (`.github/workflows/ci.yml`) excludes mobile via `--filter='!@multica/mobile'`. Mobile failures do NOT block web/desktop PRs.
-- **Mobile verify** (`.github/workflows/mobile-verify.yml`): triggered on `apps/mobile/**` or `packages/core/types/**` changes — runs typecheck/lint/test only, no IPA build.
+- **Mobile verify** (`.github/workflows/mobile-verify.yml`): triggered on `frontend/apps/mobile/**` or `frontend/packages/core/types/**` changes — runs typecheck/lint/test only, no IPA build.
 - **Mobile release** (`.github/workflows/mobile-release.yml`): triggered by `mobile-v*.*.*` tag → `eas build` + `eas submit`.
 - **OTA** — EAS Update for JS-only fixes that don't change the runtime version. Manual / on-demand push to preview/production channels.
 
@@ -184,7 +184,7 @@ Layer 3 is what changes per feature; layers 1 and 2 are infrastructure and shoul
 
 ### Mount strategy: list-level global, per-record per-screen
 
-Mobile **does NOT use a single centralized `useRealtimeSync` hook** like `packages/core/realtime/use-realtime-sync.ts`. That pattern is fine on web (one tab = one mount, lives forever) but on mobile it gets in the way: most events care about a single record (one issue's comments, one chat session's messages), and the hook needs to know which record without prop-drilling.
+Mobile **does NOT use a single centralized `useRealtimeSync` hook** like `frontend/packages/core/realtime/use-realtime-sync.ts`. That pattern is fine on web (one tab = one mount, lives forever) but on mobile it gets in the way: most events care about a single record (one issue's comments, one chat session's messages), and the hook needs to know which record without prop-drilling.
 
 Two mount tiers:
 
@@ -205,11 +205,11 @@ When a WS payload contains the full updated object, **patch** the cache (`setQue
 
 Web is fine to invalidate generously because most users are on broadband; mobile users on cellular pay for each refetch. A `setQueryData` is free; an `invalidateQueries` is a network roundtrip per affected query key.
 
-### Mobile-owned updaters (don't import `packages/core/issues/ws-updaters.ts`)
+### Mobile-owned updaters (don't import `frontend/packages/core/issues/ws-updaters.ts`)
 
-Mobile has its own `apps/mobile/data/realtime/issue-ws-updaters.ts` even though web has a near-identical file. **Do not import web's updaters into mobile.** Two reasons:
+Mobile has its own `frontend/apps/mobile/data/realtime/issue-ws-updaters.ts` even though web has a near-identical file. **Do not import web's updaters into mobile.** Two reasons:
 
-1. **Key-factory binding.** Web's updaters reference `issueKeys` from `packages/core/issues/queries.ts` — a different runtime instance from mobile's `apps/mobile/data/queries/issue-keys.ts`. TanStack Query compares keys structurally so it *appears* to work, but binding cache mutation to a foreign key factory invites silent drift the moment either side adjusts its key shape (renames a segment, adds a discriminator).
+1. **Key-factory binding.** Web's updaters reference `issueKeys` from `frontend/packages/core/issues/queries.ts` — a different runtime instance from mobile's `frontend/apps/mobile/data/queries/issue-keys.ts`. TanStack Query compares keys structurally so it *appears* to work, but binding cache mutation to a foreign key factory invites silent drift the moment either side adjusts its key shape (renames a segment, adds a discriminator).
 2. **Cache-shape divergence.** Mobile has simpler caches: flat `Issue[]` for my-issues (web has status-bucketed); no children subtree (web does); no label-byIssue cache (web does). Web's updaters carry conditional dead-code for paths mobile doesn't have, and mobile would silently no-op on web shapes that don't exist locally.
 
 When the same logic needs to exist on both sides, copy the design — not the import. Document the mirror at the top of the mobile file (see `issue-ws-updaters.ts` for the pattern).
@@ -242,14 +242,14 @@ must strip every inbox row pointing at the dead issue.
 The pattern:
 
 1. **The feature whose cache is being patched owns the updater.** Example:
-   `apps/mobile/data/realtime/inbox-ws-updaters.ts` exports
+   `frontend/apps/mobile/data/realtime/inbox-ws-updaters.ts` exports
    `patchInboxIssueStatus` and `dropInboxItemsByIssue` — they live with
    inbox, not with issues, because they read `inboxKeys.list(wsId)`.
 2. **That feature's realtime hook subscribes to the foreign event.**
    `use-inbox-realtime.ts` subscribes to `issue:updated` and `issue:deleted`
    alongside the `inbox:*` events. The issue-realtime hook does NOT know
    that inbox cares.
-3. **Mirror web's wiring.** Web's `packages/core/inbox/ws-updaters.ts` has
+3. **Mirror web's wiring.** Web's `frontend/packages/core/inbox/ws-updaters.ts` has
    the same handlers; mobile copies the design. Behavioral parity hazard:
    without these the mobile inbox row keeps showing the prior status (or
    404s on tap if the issue is gone) while web users see the change live.
@@ -261,7 +261,7 @@ patched feature and subscribe there.
 ### Adding new event coverage — recipe
 
 1. **Read the payload.** Find the event in `@multica/core/types/events.ts`. Note the fields; decide if patch is possible (full object) or invalidate is required (just an id).
-2. **Mirror, don't import.** If web has an updater for this event in `packages/core/<feature>/ws-updaters.ts`, copy the design into `apps/mobile/data/realtime/<feature>-ws-updaters.ts`. Adapt to mobile's actual cache shapes — don't carry web's bucket/children/childProgress dead-code if mobile doesn't have those caches.
+2. **Mirror, don't import.** If web has an updater for this event in `frontend/packages/core/<feature>/ws-updaters.ts`, copy the design into `frontend/apps/mobile/data/realtime/<feature>-ws-updaters.ts`. Adapt to mobile's actual cache shapes — don't carry web's bucket/children/childProgress dead-code if mobile doesn't have those caches.
 3. **Subscribe in a hook.** Either extend an existing `use-<feature>-realtime.ts` or create a new one. Filter by id at the top of each handler so per-record hooks ignore unrelated events.
 4. **Mount it.** Listing-level → add to `<RealtimeSubscriptions />` in workspace `_layout.tsx`. Per-record → add to the owning screen's body, parameterized by the route id.
 5. **Add reconnect invalidate.** Single `ws.onReconnect()` call scoped to the hook's own keys.
@@ -299,7 +299,7 @@ fallback, sync-before-await ordering, type-safe payloads).
 
 ### API client: `fetchValidated` + `fetchValidatedWith`
 
-`apps/mobile/data/api.ts` exposes two private helpers on `ApiClient` that
+`frontend/apps/mobile/data/api.ts` exposes two private helpers on `ApiClient` that
 collapse the fetch + parseWithFallback envelope. **Every new read-side
 method that returns a typed body must use them.**
 
@@ -312,7 +312,7 @@ method that returns a typed body must use them.**
 Rules:
 - The fallback object MUST match the success type exactly so downstream
   code never has a partial value (see `EMPTY_USER` / `EMPTY_INBOX_LIST`
-  pattern in `apps/mobile/data/schemas.ts`).
+  pattern in `frontend/apps/mobile/data/schemas.ts`).
 - The `endpoint` label is for telemetry — defaults to the path; override
   only when the path has dynamic segments and you want stable groupings
   (`GET /api/issues/:id` not `GET /api/issues/abc-123`).
@@ -323,7 +323,7 @@ Rules:
 ### Query / mutation factory pattern
 
 Every workspace-scoped feature exposes a key factory in
-`apps/mobile/data/queries/<feature>.ts`:
+`frontend/apps/mobile/data/queries/<feature>.ts`:
 
 ```ts
 export const inboxKeys = {
@@ -332,7 +332,7 @@ export const inboxKeys = {
 };
 ```
 
-Three-segment shape matches web (`packages/core/inbox/queries.ts`).
+Three-segment shape matches web (`frontend/packages/core/inbox/queries.ts`).
 Reasons:
 
 - TQ does prefix matching by default — `invalidateQueries({ queryKey:
@@ -359,12 +359,12 @@ Two helpers replace ~20 lines of boilerplate per realtime hook:
    that don't share a typed common ancestor (see `onTaskEvent` in
    `use-issue-realtime.ts` — `task:progress` has no formal payload).
 2. **`useWSSubscriptions(setup, deps)`** in
-   `apps/mobile/lib/use-ws-subscriptions.ts` — wraps the
+   `frontend/apps/mobile/lib/use-ws-subscriptions.ts` — wraps the
    `if (!ws || !wsId) return; useEffect + cleanup` template. Setup
    callback receives `(ws, wsId)`, returns the unsub array (or
    `undefined` to short-circuit, e.g. when a per-record id is missing).
 
-Adding a new event type? Extend `packages/core/types/events.ts`:
+Adding a new event type? Extend `frontend/packages/core/types/events.ts`:
 
 1. Add the event to the `WSEventType` union.
 2. Add the payload interface.
@@ -383,13 +383,13 @@ one microtask; iOS captures the source-view snapshot during that gap and
 freezes the row in its unread style inside the slide-in transition.
 
 Lives inside the mutation, not the caller. See `useMarkInboxRead.onMutate`
-in `apps/mobile/data/mutations/inbox.ts` for the canonical example.
+in `frontend/apps/mobile/data/mutations/inbox.ts` for the canonical example.
 
 ### Checklist for a new feature
 
 Before opening a PR for a new screen / mutation / realtime hook:
 
-1. Grep `packages/core/<feature>/` for the web equivalent — endpoints,
+1. Grep `frontend/packages/core/<feature>/` for the web equivalent — endpoints,
    key shape, optimistic patch shape. Mirror, don't invent.
 2. API methods → `fetchValidated` / `fetchValidatedWith` (or raw
    `this.fetch` only for writes with no consumed response).
@@ -414,23 +414,23 @@ Do NOT hardcode version numbers from memory. Run `pnpm view <pkg> dist-tags` to 
 
 ### 2. New source subdirectory: verify git tracking
 
-Every time you create a new source subdirectory under `apps/mobile/` (e.g. `data/`, `lib/foo/`, `components/inbox/`):
+Every time you create a new source subdirectory under `frontend/apps/mobile/` (e.g. `data/`, `lib/foo/`, `components/inbox/`):
 
 1. Run `git check-ignore -v <dir>/<file>` immediately. The repo-root `.gitignore` has generic rules (`data/`, `build/`, `bin/`, `*.app`, `*.dmg`) that are intended for backend runtime/output dirs but will silently swallow mobile source.
-2. If a rule matches, add `!<dir>/` and `!<dir>/**` to `apps/mobile/.gitignore` (subtree override beats parent rule).
+2. If a rule matches, add `!<dir>/` and `!<dir>/**` to `frontend/apps/mobile/.gitignore` (subtree override beats parent rule).
 3. After the commit lands, run `git ls-files <dir>` to confirm every file is tracked.
 
-This rule exists because `apps/mobile/data/` was once committed-but-not-tracked — 14 source files (ApiClient, all queries, all stores) were missing from the git tree even though `git status` was clean. Local builds worked because Metro reads the filesystem; CI / clones would have died.
+This rule exists because `frontend/apps/mobile/data/` was once committed-but-not-tracked — 14 source files (ApiClient, all queries, all stores) were missing from the git tree even though `git status` was clean. Local builds worked because Metro reads the filesystem; CI / clones would have died.
 
 ### 3. ApiClient capability list (4 must-haves)
 
-Mobile's fetch wrapper (`apps/mobile/data/api.ts`) MUST implement all four. Missing any of them is a bug, not a deferred polish item.
+Mobile's fetch wrapper (`frontend/apps/mobile/data/api.ts`) MUST implement all four. Missing any of them is a bug, not a deferred polish item.
 
-1. **Zod `parseWithFallback` for response validation.** Strictly enforced by the root CLAUDE.md "API Response Compatibility" section and the "Type drift defense" section above. **Any new endpoint method that does `as T` on the response body is a bug.** Reuse schemas from `packages/core/api/schemas.ts` (pure Zod exports, on the mobile sharing whitelist); define mobile-side fallbacks for new endpoints in `apps/mobile/data/`.
+1. **Zod `parseWithFallback` for response validation.** Strictly enforced by the root CLAUDE.md "API Response Compatibility" section and the "Type drift defense" section above. **Any new endpoint method that does `as T` on the response body is a bug.** Reuse schemas from `frontend/packages/core/api/schemas.ts` (pure Zod exports, on the mobile sharing whitelist); define mobile-side fallbacks for new endpoints in `frontend/apps/mobile/data/`.
 
 2. **`onUnauthorized` 401 callback.** The `ApiClientOptions.onUnauthorized` hook fires on every 401 and must be wired in `app/_layout.tsx` to: clear auth token, clear workspace store, clear TanStack Query cache, navigate to `/login`. Without it a session that expired server-side puts every subsequent request into a 401 loop and the user sees opaque "API error: 401" toasts on every screen. Use a `signingOutRef` to make the callback idempotent — multiple in-flight requests will all 401 simultaneously when a session expires.
 
-3. **`X-Request-ID` per request.** Generate a short random ID (`createRequestId()` in `apps/mobile/lib/request-id.ts`), send as `X-Request-ID` header. The same ID goes into client-side log lines so backend telemetry can be cross-referenced (server picks it up via the same header).
+3. **`X-Request-ID` per request.** Generate a short random ID (`createRequestId()` in `frontend/apps/mobile/lib/request-id.ts`), send as `X-Request-ID` header. The same ID goes into client-side log lines so backend telemetry can be cross-referenced (server picks it up via the same header).
 
 4. **Structured request logger.** Two log lines per request: `[api] → METHOD path` (start, with `rid`) and `[api] ← STATUS path` (end, with `rid` + `duration`). Use `console.error` for 5xx, `console.warn` for 404s, `console.log` for success. Without this, debugging mobile API issues means staring at the React Native Network panel; with it, the dev console is self-explanatory and prod telemetry already comes structured.
 
@@ -440,7 +440,7 @@ Mobile's fetch wrapper (`apps/mobile/data/api.ts`) MUST implement all four. Miss
 
 **Symptom that triggered the rule (2026-05-11)**: Inbox screen sometimes returned to the foreground showing the FlatList pull-to-refresh spinner stuck indefinitely. List items were rendered underneath, but `isRefetching` never flipped back to `false`. Pull-to-refresh, navigating away, and re-opening the tab did not clear it.
 
-**Root cause**: `apps/mobile/data/api.ts`'s `fetch()` had no timeout, no `AbortController`, and no caller-`signal` plumbing. iOS suspends backgrounded apps within ~30 seconds and can silently kill in-flight network tasks (facebook/react-native#35384 — "iOS fetch() POST fails if called too soon, with app running in background"; facebook/react-native#38711 — "JS Timers don't fire when app is launched in background"). When the app foregrounded, the suspended fetch's Promise neither resolved nor rejected. TanStack Query saw an existing query still in `fetching` state and did NOT start a new fetch on invalidate — it just waited on the dead Promise forever. `isRefetching` stayed `true`, the FlatList spinner stayed spinning.
+**Root cause**: `frontend/apps/mobile/data/api.ts`'s `fetch()` had no timeout, no `AbortController`, and no caller-`signal` plumbing. iOS suspends backgrounded apps within ~30 seconds and can silently kill in-flight network tasks (facebook/react-native#35384 — "iOS fetch() POST fails if called too soon, with app running in background"; facebook/react-native#38711 — "JS Timers don't fire when app is launched in background"). When the app foregrounded, the suspended fetch's Promise neither resolved nor rejected. TanStack Query saw an existing query still in `fetching` state and did NOT start a new fetch on invalidate — it just waited on the dead Promise forever. `isRefetching` stayed `true`, the FlatList spinner stayed spinning.
 
 **Rule, three parts (every one is required — partial fixes leave a footgun)**:
 
@@ -463,7 +463,7 @@ queryOptions({
 ```
 Forgetting the destructure (writing `() => api.listInbox()`) defeats every benefit of (1) and (2): TQ can't cancel hung requests when the user navigates away, and on workspace switch every stale request lives until its 30s timeout.
 
-**Verification**: After any change to `api.ts` or a new query addition, `grep -n "queryFn: () =>" apps/mobile/data/queries/` should return zero matches. Every `queryFn` should destructure `{ signal }`.
+**Verification**: After any change to `api.ts` or a new query addition, `grep -n "queryFn: () =>" frontend/apps/mobile/data/queries/` should return zero matches. Every `queryFn` should destructure `{ signal }`.
 
 **Why the wiring already in `data/query-client.ts` (focusManager + AppState, onlineManager + NetInfo) is not enough on its own**: focusManager triggers a *refetch attempt* when the app comes back to the foreground, but if the prior fetch promise is hanging, TQ won't start a new request — it'll keep waiting on the dead one. Only timeout + signal cancellation actually unwedges the query. The three pieces work together: signal lets TQ proactively cancel on staleness, timeout is the safety net when nothing else fires, focusManager is the "user came back, let's recheck" trigger.
 
@@ -546,13 +546,13 @@ The rule:
   + `runOnJS(Haptics.impactAsync)`. The shared-value reaction runs on
   the UI thread; `runOnJS` bridges to the JS-only Haptics call.
 
-See `apps/mobile/components/inbox/swipeable-inbox-row.tsx` for the
+See `frontend/apps/mobile/components/inbox/swipeable-inbox-row.tsx` for the
 reference implementation. When adding a new swipe-to-action row
 elsewhere, copy that pattern; do not reinvent.
 
 ### 7. Tier C domain components: opportunistic upgrade only — no silent rewrites
 
-Tier C in `apps/mobile/docs/rnr-migration.md` §4 names the domain UI
+Tier C in `frontend/apps/mobile/docs/rnr-migration.md` §4 names the domain UI
 files that stay where they are but need foundation upgrades
 (`ActorAvatar`, `StatusIcon`, `PriorityIcon`, `PresenceDot`, etc.).
 **You don't rewrite a Tier C file just because you're rendering it in

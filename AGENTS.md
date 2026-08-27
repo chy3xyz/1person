@@ -10,36 +10,36 @@ This file provides guidance to AI agents when working with code in this reposito
 
 ### Architecture
 
-Zig backend (zserver) + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.
+Monorepo: `frontend/` (pnpm workspaces + Turborepo) + `backend/zserver/` (Zig).
 
-- `zserver/` — Zig backend (zfinal framework, 43 modules, 24 e2e suites; canonical backend)
-- `apps/web/` — Next.js frontend (App Router)
-- `apps/desktop/` — Electron desktop app
-- `packages/core/` — Headless business logic (React Query hooks, API client)
-- `packages/ui/` — Atomic UI components (shadcn/Base UI, zero business logic)
-- `packages/views/` — Shared business pages/components
-- `packages/tsconfig/` — Shared TypeScript config
+- `backend/zserver/` — Zig backend (zfinal framework, 43 modules, 24 e2e suites; canonical backend)
+- `frontend/apps/web/` — Next.js frontend (App Router)
+- `frontend/apps/desktop/` — Electron desktop app
+- `frontend/packages/core/` — Headless business logic (React Query hooks, API client)
+- `frontend/packages/ui/` — Atomic UI components (shadcn/Base UI, zero business logic)
+- `frontend/packages/views/` — Shared business pages/components
+- `frontend/packages/tsconfig/` — Shared TypeScript config
 
 ### State Management (critical)
 
 - **React Query** owns all server state (issues, members, agents, inbox, workspace list)
 - **Zustand** owns all client state (current workspace selection, view filters, drafts, modals)
-- All Zustand stores live in `packages/core/` — never in `packages/views/` or app directories
+- All Zustand stores live in `frontend/packages/core/` — never in `frontend/packages/views/` or app directories
 - WS events invalidate React Query — never write directly to stores
 
 ### Package Boundaries (hard rules)
 
-- `packages/core/` — zero react-dom, zero localStorage, zero process.env
-- `packages/ui/` — zero `@1person/core` imports
-- `packages/views/` — zero `next/*`, zero `react-router-dom`, use `NavigationAdapter` for routing
-- `apps/web/platform/` — only place for Next.js APIs
+- `frontend/packages/core/` — zero react-dom, zero localStorage, zero process.env
+- `frontend/packages/ui/` — zero `@1person/core` imports
+- `frontend/packages/views/` — zero `next/*`, zero `react-router-dom`, use `NavigationAdapter` for routing
+- `frontend/apps/web/platform/` — only place for Next.js APIs
 
 ### Commands
 
 ```bash
 make dev              # Auto-setup + start everything
-pnpm typecheck        # TypeScript check
-pnpm test             # TS unit tests (Vitest)
+pnpm --dir frontend typecheck        # TypeScript check
+pnpm --dir frontend test             # TS unit tests (Vitest)
 make test             # zserver (Zig) tests
 make check            # Full verification pipeline
 ```

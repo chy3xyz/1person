@@ -139,7 +139,7 @@ To verify the daemon is running:
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy 1Person there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/1person-ai/charts/1person` or the source chart at [`deploy/helm/1person/`](deploy/helm/1person/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy 1Person there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/1person-ai/charts/1person` or the source chart at [`backend/deploy/helm/1person/`](backend/deploy/helm/1person/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
 
 The chart creates the following resources in the target namespace:
 
@@ -218,7 +218,7 @@ helm install 1person oci://ghcr.io/1person-ai/charts/1person \
 When developing from a checkout, use the local chart path instead:
 
 ```bash
-helm install 1person deploy/helm/1person -n 1person
+helm install 1person backend/deploy/helm/1person -n 1person
 ```
 
 Watch the pods come up:

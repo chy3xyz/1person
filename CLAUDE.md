@@ -6,16 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
 
-- **`apps/docs/content/docs/developers/conventions.mdx`** (English)
-- **`apps/docs/content/docs/developers/conventions.zh.mdx`** (Chinese)
+- **`frontend/apps/docs/content/docs/developers/conventions.mdx`** (English)
+- **`frontend/apps/docs/content/docs/developers/conventions.zh.mdx`** (Chinese)
 
 Read that page before:
 
-- Writing or editing translations (`packages/views/locales/`)
+- Writing or editing translations (`frontend/packages/views/locales/`)
 - Naming a new route, package, file, DB column, or TS type
 - Writing Chinese product copy (UI strings, error messages, docs)
 
-The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
+The legacy `frontend/packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
 
 ## Project Context
 
@@ -27,16 +27,16 @@ The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the
 
 ## Architecture
 
-**Zig backend (zserver) + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.**
+**Monorepo layout:** root Makefile and shared `scripts/`; `frontend/` (pnpm workspaces + Turborepo); `backend/zserver/` (Zig, zfinal). Shared packages live under `frontend/packages/`.
 
-- `zserver/` — Zig backend (zfinal framework; canonical backend; migrations live in zserver/migrations/)
-- `apps/web/` — Next.js frontend (App Router)
-- `apps/desktop/` — Electron desktop app (electron-vite)
-- `apps/mobile/` — Expo / React Native iOS app. See `apps/mobile/CLAUDE.md`.
-- `packages/core/` — Headless business logic (zero react-dom)
-- `packages/ui/` — Atomic UI components (zero business logic)
-- `packages/views/` — Shared business pages/components (zero next/* imports, zero react-router imports)
-- `packages/tsconfig/` — Shared TypeScript configuration
+- `backend/zserver/` — Zig backend (zfinal framework; canonical backend; migrations live in backend/zserver/migrations/)
+- `frontend/apps/web/` — Next.js frontend (App Router)
+- `frontend/apps/desktop/` — Electron desktop app (electron-vite)
+- `frontend/apps/mobile/` — Expo / React Native iOS app. See `frontend/apps/mobile/CLAUDE.md`.
+- `frontend/packages/core/` — Headless business logic (zero react-dom)
+- `frontend/packages/ui/` — Atomic UI components (zero business logic)
+- `frontend/packages/views/` — Shared business pages/components (zero next/* imports, zero react-router imports)
+- `frontend/packages/tsconfig/` — Shared TypeScript configuration
 
 What lives where for sharing purposes is documented in *Sharing Principles* below — read it once.
 
@@ -46,16 +46,16 @@ What lives where for sharing purposes is documented in *Sharing Principles* belo
 
 **Dependency direction:** `views/ → core/ + ui/`. Core and UI are independent of each other. No package imports from `next/*`, `react-router-dom`, or app-specific code.
 
-**Platform bridge:** `packages/core/platform/` provides `CoreProvider` — initializes API client, auth/workspace stores, WS connection, and QueryClient. Each app wraps its root with `<CoreProvider>` and provides its own `NavigationAdapter` for routing.
+**Platform bridge:** `frontend/packages/core/platform/` provides `CoreProvider` — initializes API client, auth/workspace stores, WS connection, and QueryClient. Each app wraps its root with `<CoreProvider>` and provides its own `NavigationAdapter` for routing.
 
-**pnpm catalog** — `pnpm-workspace.yaml` defines `catalog:` for version pinning. All shared deps use `catalog:` references to guarantee a single version across all packages. When adding new shared deps (including test deps), add to catalog first.
+**pnpm catalog** — `frontend/pnpm-workspace.yaml` defines `catalog:` for version pinning. All shared deps use `catalog:` references to guarantee a single version across all packages. When adding new shared deps (including test deps), add to catalog first.
 
 ### State Management
 
 The architecture relies on a strict split between server state and client state. Mixing them is the most common way to break it.
 
 - **TanStack Query owns all server state.** Issues, users, workspaces, inbox — anything fetched from the API lives in the Query cache. WS events keep it fresh via invalidation; no polling, no `staleTime` workarounds.
-- **Zustand owns all client state.** UI selections, filters, drafts, modal state, navigation history. Stores live in `packages/core/` (never in `packages/views/`) so they're shared.
+- **Zustand owns all client state.** UI selections, filters, drafts, modal state, navigation history. Stores live in `frontend/packages/core/` (never in `frontend/packages/views/`) so they're shared.
 - **React Context** is reserved for cross-cutting platform plumbing — `WorkspaceIdProvider`, `NavigationProvider`. Don't reach for it for general state.
 - **Auth and workspace stores are the only stores allowed to call `api.*` directly**, because they manage critical state that must exist before queries can run. They're created via factory + injected dependencies, registered by the platform layer.
 
@@ -76,12 +76,12 @@ The architecture relies on a strict split between server state and client state.
 
 The monorepo splits into two share zones:
 
-- **Web and desktop** share business logic, components, hooks, stores, and views through `packages/core/`, `packages/ui/`, and `packages/views/`. Existing model — keep using it.
-- **Mobile (`apps/mobile/`) is independent.** It shares only **types and pure functions** from `@1person/core/`, with `import type` for types (zero runtime coupling). UI, state, hooks, providers, i18n, React version, build pipeline, release cadence — all mobile-owned.
+- **Web and desktop** share business logic, components, hooks, stores, and views through `frontend/packages/core/`, `frontend/packages/ui/`, and `frontend/packages/views/`. Existing model — keep using it.
+- **Mobile (`frontend/apps/mobile/`) is independent.** It shares only **types and pure functions** from `@1person/core/`, with `import type` for types (zero runtime coupling). UI, state, hooks, providers, i18n, React version, build pipeline, release cadence — all mobile-owned.
 
 Mobile is locked to the React version that Expo SDK / React Native ships (which lags React main by 6-12 months). Coupling mobile to the root `catalog:` React would block mobile from upgrading on its own schedule.
 
-See `apps/mobile/CLAUDE.md` for the mobile rules and tech-stack baseline.
+See `frontend/apps/mobile/CLAUDE.md` for the mobile rules and tech-stack baseline.
 
 ## Commands
 
@@ -96,13 +96,13 @@ make stop             # Stop app processes for the current checkout
 make db-down          # Stop the shared PostgreSQL container
 
 # Frontend (all commands go through Turborepo)
-pnpm install
-pnpm dev:web          # Next.js dev server (port 3000)
-pnpm dev:desktop      # Electron dev (electron-vite, HMR)
-pnpm build            # Build all frontend apps
-pnpm typecheck        # TypeScript check (all packages + apps via turbo)
-pnpm lint             # ESLint
-pnpm test             # TS tests (Vitest, all packages + apps via turbo)
+pnpm --dir frontend install
+pnpm --dir frontend dev:web          # Next.js dev server (port 3000)
+pnpm --dir frontend dev:desktop      # Electron dev (electron-vite, HMR)
+pnpm --dir frontend build            # Build all frontend apps
+pnpm --dir frontend typecheck        # TypeScript check (all packages + apps via turbo)
+pnpm --dir frontend lint             # ESLint
+pnpm --dir frontend test             # TS tests (Vitest, all packages + apps via turbo)
 
 # Backend (zserver — Zig)
 make server           # Run zserver only (port 8080)
@@ -114,32 +114,32 @@ make migrate-up       # Apply database migrations (zserver migrate)
 make migrate-down     # Rollback not supported by zserver; use make db-reset
 
 # Run a single TS test (works for any package with a test script)
-pnpm --filter @1person/views exec vitest run auth/login-page.test.tsx
-pnpm --filter @1person/core exec vitest run runtimes/version.test.ts
-pnpm --filter @1person/web exec vitest run app/\(auth\)/login/page.test.tsx
+pnpm --dir frontend --filter @1person/views exec vitest run auth/login-page.test.tsx
+pnpm --dir frontend --filter @1person/core exec vitest run runtimes/version.test.ts
+pnpm --dir frontend --filter @1person/web exec vitest run app/\(auth\)/login/page.test.tsx
 
 # Run a single zserver (Zig) test / unit tests
-cd zserver && zig build test
+cd backend/zserver && zig build test
 
 # Run a single E2E test (requires backend + frontend running)
-pnpm exec playwright test e2e/tests/specific-test.spec.ts
+pnpm --dir frontend exec playwright test e2e/tests/specific-test.spec.ts
 
 # Mobile (Expo) — two environments only: dev and staging
-pnpm dev:mobile                  # Metro, dev env       (reads apps/mobile/.env.development.local)
-pnpm dev:mobile:staging          # Metro, staging env   (reads apps/mobile/.env.staging)
-pnpm ios:mobile                  # Native build + install dev-client to iOS Simulator, dev env
-pnpm ios:mobile:staging          # Native build + install dev-client to iOS Simulator, staging env
-pnpm ios:mobile:device           # Native build + install dev-client to USB iPhone, dev env
-pnpm ios:mobile:device:staging   # Native build + install dev-client to USB iPhone, staging env
-# Daily flow: run `pnpm dev:mobile:staging` (or :dev). Only re-run `ios:mobile*` when
+pnpm --dir frontend dev:mobile                  # Metro, dev env       (reads frontend/apps/mobile/.env.development.local)
+pnpm --dir frontend dev:mobile:staging          # Metro, staging env   (reads frontend/apps/mobile/.env.staging)
+pnpm --dir frontend ios:mobile                  # Native build + install dev-client to iOS Simulator, dev env
+pnpm --dir frontend ios:mobile:staging          # Native build + install dev-client to iOS Simulator, staging env
+pnpm --dir frontend ios:mobile:device           # Native build + install dev-client to USB iPhone, dev env
+pnpm --dir frontend ios:mobile:device:staging   # Native build + install dev-client to USB iPhone, staging env
+# Daily flow: run `pnpm --dir frontend dev:mobile:staging` (or :dev). Only re-run `ios:mobile*` when
 # native code or any expo-*/react-native-* dependency changes (lockfile drift counts).
 
 # Desktop build & package
-pnpm --filter @1person/desktop build      # Compile TS → JS (reads .env.production)
-pnpm --filter @1person/desktop package    # Package into .app/.dmg/.exe (current platform only)
+pnpm --dir frontend --filter @1person/desktop build      # Compile TS → JS (reads .env.production)
+pnpm --dir frontend --filter @1person/desktop package    # Package into .app/.dmg/.exe (current platform only)
 
-# shadcn — config lives in packages/ui/components.json (Base UI variant, base-nova style)
-pnpm ui:add badge                # Adds component to packages/ui/components/ui/
+# shadcn — config lives in frontend/packages/ui/components.json (Base UI variant, base-nova style)
+pnpm --dir frontend ui:add badge                # Adds component to frontend/packages/ui/components/ui/
 
 # Infrastructure
 make db-up            # Start shared PostgreSQL (pgvector/pg17 image)
@@ -174,8 +174,8 @@ make start-worktree     # Start using .env.worktree
 - If a flow or API is being replaced and the product is not yet live, prefer removing the old path instead of preserving both old and new behavior.
 - Avoid broad refactors unless required by the task.
 - New global (pre-workspace) routes MUST use a single word (`/login`, `/inbox`) or a `/{noun}/{verb}` pair (`/workspaces/new`). NEVER add hyphenated word-group root routes (`/new-workspace`, `/create-team`) — they collide with common user workspace names and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
-- The reserved-slug list lives in **one** place: `zserver/src/modules/workspace/reserved_slugs.json` (embedded by the Zig backend). `packages/core/paths/reserved-slugs.ts` is generated from it by `pnpm generate:reserved-slugs`. Edit the JSON, run the generator, commit both. CI re-runs the generator and fails on any drift, so a stale TS file cannot land.
-- When you change a CLI command or flag, an API request/response field, or product behavior that a built-in skill documents (`zserver/src/modules/skill/builtin_skills/*`), update that skill's `SKILL.md` **and** its `references/*-source-map.md` in the same PR. The built-in skills are source-traced contracts shipped to agents — if the code moves and the skill doesn't, it silently teaches stale behavior.
+- The reserved-slug list lives in **one** place: `backend/zserver/src/modules/workspace/reserved_slugs.json` (embedded by the Zig backend). `frontend/packages/core/paths/reserved-slugs.ts` is generated from it by `pnpm --dir frontend generate:reserved-slugs`. Edit the JSON, run the generator, commit both. CI re-runs the generator and fails on any drift, so a stale TS file cannot land.
+- When you change a CLI command or flag, an API request/response field, or product behavior that a built-in skill documents (`backend/zserver/src/modules/skill/builtin_skills/*`), update that skill's `SKILL.md` **and** its `references/*-source-map.md` in the same PR. The built-in skills are source-traced contracts shipped to agents — if the code moves and the skill doesn't, it silently teaches stale behavior.
 
 ### API Response Compatibility
 
@@ -183,7 +183,7 @@ The desktop app installed on a user's machine is older than any backend it talks
 
 When writing code that consumes an API response, follow these rules:
 
-- **Parse, don't cast.** Untyped JSON crossing the network is not `T`. Use `parseWithFallback` in `packages/core/api/schema.ts` with a `zod` schema and an explicit fallback. On validation failure it logs a warning and returns the fallback; it never throws into the UI.
+- **Parse, don't cast.** Untyped JSON crossing the network is not `T`. Use `parseWithFallback` in `frontend/packages/core/api/schema.ts` with a `zod` schema and an explicit fallback. On validation failure it logs a warning and returns the fallback; it never throws into the UI.
 - **No bare `as` casts on response bodies.** Every endpoint method whose response is consumed by UI logic must run through a schema before returning.
 - **Optional-chain and default everywhere downstream.** Treat every field as possibly missing. Use explicit boolean checks (`=== true`) over truthy/falsy negation, which silently treats `undefined` and `null` as `false`.
 - **Don't pin a UI affordance to a single backend field.** If a button or indicator depends on exactly one boolean from the server, a backend bug deletes it. Combine signals (cursor presence, page length, etc.) so the affordance stays available in the worst case.
@@ -194,7 +194,7 @@ This is not premature defense — it is the *only* defense for an installed-app 
 
 ### Backend Handler Conventions (zserver)
 
-Handlers live in `zserver/src/modules/<domain>/handler.zig` and delegate to
+Handlers live in `backend/zserver/src/modules/<domain>/handler.zig` and delegate to
 `service.zig` (business logic) + `model.zig` (DB access). Core rules:
 
 - Path params are parsed via `response.parseStringId(ctx, "id")`; resource
@@ -211,21 +211,21 @@ Handlers live in `zserver/src/modules/<domain>/handler.zig` and delegate to
 
 ### Dependency Declaration Rule
 
-Every workspace (`apps/` and `packages/` directories) must explicitly declare all directly imported external packages in its own `package.json`. Relying on pnpm hoist to resolve undeclared imports (phantom deps) is prohibited — it causes production build failures when pnpm creates peer-dep variants.
+Every workspace (`frontend/apps/` and `frontend/packages/` directories) must explicitly declare all directly imported external packages in its own `package.json`. Relying on pnpm hoist to resolve undeclared imports (phantom deps) is prohibited — it causes production build failures when pnpm creates peer-dep variants.
 
-- Use `"pkg": "catalog:"` to reference the shared version from `pnpm-workspace.yaml`.
+- Use `"pkg": "catalog:"` to reference the shared version from `frontend/pnpm-workspace.yaml`.
 - CI enforces this via `eslint-plugin-import-x/no-extraneous-dependencies`.
-- Exception: `apps/mobile/` uses pinned versions (not `catalog:`) for packages tied to its own React/Expo version.
+- Exception: `frontend/apps/mobile/` uses pinned versions (not `catalog:`) for packages tied to its own React/Expo version.
 
 ### Package Boundary Rules
 
 These are hard constraints. Violating them breaks the cross-platform architecture:
 
-- `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries. **Shared Zustand stores live here**, even view-related ones (filters, view modes) — stores are pure state, not UI.
-- `packages/ui/` — zero `@1person/core` imports (pure UI, no business logic).
-- `packages/views/` — zero `next/*` imports, zero `react-router-dom` imports, zero stores. Use `NavigationAdapter` for all routing.
-- `apps/web/platform/` — the only place for Next.js APIs (`next/navigation`).
-- `apps/desktop/src/renderer/src/platform/` — the only place for react-router-dom navigation wiring.
+- `frontend/packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries. **Shared Zustand stores live here**, even view-related ones (filters, view modes) — stores are pure state, not UI.
+- `frontend/packages/ui/` — zero `@1person/core` imports (pure UI, no business logic).
+- `frontend/packages/views/` — zero `next/*` imports, zero `react-router-dom` imports, zero stores. Use `NavigationAdapter` for all routing.
+- `frontend/apps/web/platform/` — the only place for Next.js APIs (`next/navigation`).
+- `frontend/apps/desktop/src/renderer/src/platform/` — the only place for react-router-dom navigation wiring.
 
 ### The No-Duplication Rule (web + desktop)
 
@@ -235,7 +235,7 @@ This applies to everything between web and desktop: components, hooks, guards, p
 
 1. Does this code depend on Next.js or Electron APIs? → Keep in the respective app.
 2. Does it depend on `react-router-dom` or `next/navigation`? → Keep in app's `platform/` layer.
-3. Everything else → belongs in `packages/core/` (headless logic) or `packages/views/` (UI components).
+3. Everything else → belongs in `frontend/packages/core/` (headless logic) or `frontend/packages/views/` (UI components).
 
 When the two apps need different behavior for the same concept (e.g., different loading UI), extract the shared logic into a component with props/slots for the differences. Don't duplicate the logic.
 
@@ -243,28 +243,28 @@ When the two apps need different behavior for the same concept (e.g., different 
 
 When adding a new page or feature for web/desktop:
 
-1. **New page component** → add to `packages/views/<domain>/`. Never import from `next/*` or `react-router-dom`.
-2. **Wire it in both apps** → add a route in `apps/web/app/` (Next.js page file) AND in the desktop router. **Exception**: pre-workspace transition flows (create workspace, accept invite) are NOT routes on desktop — they're `WindowOverlay` state. See *Desktop-specific Rules → Route categories*.
+1. **New page component** → add to `frontend/packages/views/<domain>/`. Never import from `next/*` or `react-router-dom`.
+2. **Wire it in both apps** → add a route in `frontend/apps/web/app/` (Next.js page file) AND in the desktop router. **Exception**: pre-workspace transition flows (create workspace, accept invite) are NOT routes on desktop — they're `WindowOverlay` state. See *Desktop-specific Rules → Route categories*.
 3. **Navigation** → use `useNavigation().push()` or `<AppLink>`. Never use framework-specific link/router APIs in shared code.
-4. **Shared guards/providers** → use `DashboardGuard` from `packages/views/layout/`. Don't create separate guard logic per app.
+4. **Shared guards/providers** → use `DashboardGuard` from `frontend/packages/views/layout/`. Don't create separate guard logic per app.
 5. **Platform-specific UI** → if a feature is web-only or desktop-only, keep it in the respective app. Use props slots (`extra`, `topSlot`) on shared layout components to inject platform-specific UI.
 6. **New hooks that need workspace context** → accept `wsId` as parameter instead of reading from `useWorkspaceId()` Context, so they work both inside and outside `WorkspaceIdProvider`.
 
 ### CSS Architecture (web + desktop)
 
-Web and desktop share the same CSS foundation from `packages/ui/styles/`.
+Web and desktop share the same CSS foundation from `frontend/packages/ui/styles/`.
 
 - **Design tokens** → use semantic tokens (`bg-background`, `text-muted-foreground`). Never use hardcoded Tailwind colors (`text-red-500`, `bg-gray-100`).
-- **Shared styles** → `packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
+- **Shared styles** → `frontend/packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
 - **`@source` directives** → both apps scan shared packages so Tailwind sees all class names.
 
 ## Mobile-specific Rules
 
-Rules for `apps/mobile/` live in `apps/mobile/CLAUDE.md`. Read it before touching anything in `apps/mobile/` — it covers what may be imported from `@1person/core/`, the React version policy, the build/release pipeline, and the locked tech-stack baseline.
+Rules for `frontend/apps/mobile/` live in `frontend/apps/mobile/CLAUDE.md`. Read it before touching anything in `frontend/apps/mobile/` — it covers what may be imported from `@1person/core/`, the React version policy, the build/release pipeline, and the locked tech-stack baseline.
 
 ## Desktop-specific Rules
 
-These rules apply to `apps/desktop/` only. Web has different constraints (URL bar, SSR, no tabs) and doesn't share these concerns. Every rule in this section was added after a concrete bug — treat them as enforced, not suggestions.
+These rules apply to `frontend/apps/desktop/` only. Web has different constraints (URL bar, SSR, no tabs) and doesn't share these concerns. Every rule in this section was added after a concrete bug — treat them as enforced, not suggestions.
 
 ### Route categories
 
@@ -274,7 +274,7 @@ Every path in the desktop app falls into exactly one category. Choosing the wron
 - **Transition flows** — pre-workspace / one-shot actions (create workspace, accept invite). **NOT routes.** They live as `WindowOverlay` state, dispatched when the navigation adapter sees `push('/workspaces/new')` or `push('/invite/<id>')`. The shared view (`NewWorkspacePage`, `InvitePage`) is the content; the overlay wrapper supplies platform chrome.
 - **Error / stale states** — "workspace not available", tabs pointing at a revoked workspace. **NOT pages.** `WorkspaceRouteLayout` auto-heals by dropping the stale tab group from the store; the user never lands on an explicit error screen. Web keeps `NoAccessPage` (shareable URL makes the error state meaningful); desktop has no URL bar so stale = heal silently.
 
-**Adding a new pre-workspace flow on desktop**: register a new `WindowOverlay` type in `stores/window-overlay-store.ts`. Do NOT add it to `routes.tsx`. If a shared view needs the flow on both platforms, add the route on web (`apps/web/app/(auth)/...`) AND the overlay type on desktop — the shared view component is identical.
+**Adding a new pre-workspace flow on desktop**: register a new `WindowOverlay` type in `stores/window-overlay-store.ts`. Do NOT add it to `routes.tsx`. If a shared view needs the flow on both platforms, add the route on web (`frontend/apps/web/app/(auth)/...`) AND the overlay type on desktop — the shared view component is identical.
 
 ### Workspace context
 
@@ -301,7 +301,7 @@ Every full-window desktop view (anything outside the dashboard shell) must mount
 
 ## UI/UX Rules
 
-- Prefer shadcn components over custom implementations. Install via `pnpm ui:add <component>` from project root — adds to `packages/ui/components/ui/`. All components use Base UI primitives (`@base-ui/react`), not Radix.
+- Prefer shadcn components over custom implementations. Install via `pnpm --dir frontend ui:add <component>` from project root — adds to `frontend/packages/ui/components/ui/`. All components use Base UI primitives (`@base-ui/react`), not Radix.
 - Use shadcn design tokens for styling. Avoid hardcoded color values.
 - Do not introduce extra state (useState, context, reducers) unless explicitly required by the design.
 - Pay close attention to **overflow** (truncate long text, scrollable containers), **alignment**, and **spacing** consistency.
@@ -315,20 +315,20 @@ Tests follow the code, not the app. This is the most important testing principle
 
 | What you're testing | Where the test lives | Why |
 |---|---|---|
-| Shared business logic (stores, queries, hooks) | `packages/core/*.test.ts` | No DOM needed, pure logic |
-| Shared UI components (pages, forms, modals) | `packages/views/*.test.tsx` | jsdom, no framework mocks |
-| Platform-specific wiring (cookies, redirects, searchParams) | `apps/web/*.test.tsx` or `apps/desktop/` | Needs framework-specific mocks |
-| End-to-end user flows | `e2e/*.spec.ts` | Real browser, real backend |
+| Shared business logic (stores, queries, hooks) | `frontend/packages/core/*.test.ts` | No DOM needed, pure logic |
+| Shared UI components (pages, forms, modals) | `frontend/packages/views/*.test.tsx` | jsdom, no framework mocks |
+| Platform-specific wiring (cookies, redirects, searchParams) | `frontend/apps/web/*.test.tsx` or `frontend/apps/desktop/` | Needs framework-specific mocks |
+| End-to-end user flows | `frontend/e2e/*.spec.ts` | Real browser, real backend |
 
-**Never test shared component behavior in an app's test file.** If a test requires mocking `next/navigation` or `react-router-dom` to test a component from `@1person/views`, the test is in the wrong place — move it to `packages/views/` and mock `@1person/core` instead.
+**Never test shared component behavior in an app's test file.** If a test requires mocking `next/navigation` or `react-router-dom` to test a component from `@1person/views`, the test is in the wrong place — move it to `frontend/packages/views/` and mock `@1person/core` instead.
 
 ### Test infrastructure
 
-- `packages/core/` — Vitest, Node environment (no DOM)
-- `packages/views/` — Vitest, jsdom environment, `@testing-library/react`
-- `apps/web/` — Vitest, jsdom environment, framework-specific mocks
-- `e2e/` — Playwright
-- `zserver/` — Zig unit tests (`zig build test`)
+- `frontend/packages/core/` — Vitest, Node environment (no DOM)
+- `frontend/packages/views/` — Vitest, jsdom environment, `@testing-library/react`
+- `frontend/apps/web/` — Vitest, jsdom environment, framework-specific mocks
+- `frontend/e2e/` — Playwright
+- `backend/zserver/` — Zig unit tests (`zig build test`)
 
 All test deps are in the pnpm catalog for unified versioning.
 
@@ -336,19 +336,19 @@ All test deps are in the pnpm catalog for unified versioning.
 
 - Mock `@1person/core` stores with `vi.hoisted()` + `Object.assign(selectorFn, { getState })` pattern (Zustand stores are both callable and have `.getState()`).
 - Mock `@1person/core/api` for API calls.
-- In `packages/views/` tests: never mock `next/*` or `react-router-dom` — those don't exist here.
-- In `apps/web/` tests: mock framework-specific APIs only for platform-specific behavior.
+- In `frontend/packages/views/` tests: never mock `next/*` or `react-router-dom` — those don't exist here.
+- In `frontend/apps/web/` tests: mock framework-specific APIs only for platform-specific behavior.
 
 ### TDD workflow
 
 1. Write failing test in the **correct package** first.
 2. Write implementation.
-3. Run `pnpm test` (Turborepo discovers all packages).
+3. Run `pnpm --dir frontend test` (Turborepo discovers all packages).
 4. Green → done.
 
 ### zserver (Zig) tests
 
-Run with `cd zserver && zig build test`. Tests live in `src/**/*_test.zig`
+Run with `cd backend/zserver && zig build test`. Tests live in `src/**/*_test.zig`
 next to the code they exercise; DB-backed tests create their own fixture
 data in the target database.
 
@@ -392,10 +392,10 @@ Run verification only when the user explicitly asks for it.
 
 For targeted checks when requested:
 ```bash
-pnpm typecheck        # TypeScript type errors only
-pnpm test             # TS unit tests only (Vitest, all packages)
+pnpm --dir frontend typecheck        # TypeScript type errors only
+pnpm --dir frontend test             # TS unit tests only (Vitest, all packages)
 make test             # zserver (Zig) tests only
-pnpm exec playwright test   # E2E only (requires backend + frontend running)
+pnpm --dir frontend exec playwright test   # E2E only (requires backend + frontend running)
 ```
 
 ## AI Agent Verification Loop

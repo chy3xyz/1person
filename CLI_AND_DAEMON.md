@@ -16,7 +16,7 @@ brew install 1person-ai/tap/1person
 git clone https://github.com/1person-ai/1person.git
 cd 1person
 make build
-cp server/bin/1person /usr/local/bin/1person
+cp backend/zserver/zig-out/bin/1p /usr/local/bin/1person
 ```
 
 ### Update

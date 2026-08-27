@@ -164,7 +164,7 @@ daemon 在后台运行，保持你的机器与 1Person 的连接。它会自动�
 **环境要求：** [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Go](https://go.dev/) v1.26+, [Docker](https://www.docker.com/)
 
 ```bash
-pnpm install
+pnpm --dir frontend install
 cp .env.example .env
 make setup
 make start
@@ -172,7 +172,7 @@ make start
 
 完整的开发流程、worktree 支持、测试和问题排查请参阅 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-iOS 移动端代码位于 [`apps/mobile/`](apps/mobile/)，自己编译装到手机的方法见 [README](apps/mobile/README.md)。
+iOS 移动端代码位于 [`frontend/apps/mobile/`](frontend/apps/mobile/)，自己编译装到手机的方法见 [README](frontend/apps/mobile/README.md)。
 
 ## 开源协议
 

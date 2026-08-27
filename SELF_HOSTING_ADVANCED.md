@@ -176,10 +176,10 @@ The Docker Compose setup runs migrations automatically. If you need to run them 
 
 ```bash
 # Using the built binary
-./server/bin/migrate up
+cd backend/zserver && ./zig-out/bin/zserver migrate
 
 # Or from source
-cd server && go run ./cmd/migrate up
+cd backend/zserver && zig build && ./zig-out/bin/zserver migrate
 ```
 
 ## Usage Dashboard Rollup
@@ -253,20 +253,20 @@ If you prefer to build and run services manually:
 make build
 
 # Run database migrations
-DATABASE_URL="your-database-url" ./server/bin/migrate up
+cd backend/zserver && DATABASE_URL="your-database-url" ./zig-out/bin/zserver migrate
 
 # Start the backend server
-DATABASE_URL="your-database-url" PORT=8080 JWT_SECRET="your-secret" ./server/bin/server
+cd backend/zserver && DATABASE_URL="your-database-url" JWT_SECRET="your-secret" ./zig-out/bin/zserver server --port 8080
 ```
 
 For the frontend:
 
 ```bash
-pnpm install
-pnpm build
+pnpm --dir frontend install
+pnpm --dir frontend build
 
 # Start the frontend (production mode)
-cd apps/web
+cd frontend/apps/web
 REMOTE_API_URL=http://localhost:8080 pnpm start
 ```
 
@@ -443,7 +443,7 @@ kept as an alias for operator familiarity.
 The backend can expose Prometheus metrics on a separate management listener:
 
 ```bash
-METRICS_ADDR=127.0.0.1:9090 ./server/bin/server
+cd backend/zserver && METRICS_ADDR=127.0.0.1:9090 ./zig-out/bin/zserver server --port 8080
 curl http://127.0.0.1:9090/metrics
 ```
 
