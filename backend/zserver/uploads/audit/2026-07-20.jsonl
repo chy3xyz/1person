@@ -1,4 +1,0 @@
-{"ts":"2026-07-20T03:50:41Z","actor":"admin","user_id":"user-aaa","action":"inbox.purge","workspace_id":"ws-aaa","target_user_id":"user-bbb","reason":"manual"}
-{"ts":"2026-07-20T03:50:41Z","actor":"service_actor","user_id":"","action":"inbox.purge","workspace_id":"ws-ccc","target_user_id":"user-ddd","reason":"manual"}
-{"ts":"2026-07-20T03:50:41Z","actor":"admin","user_id":"user-eee","action":"inbox.export","workspace_id":"ws-eee","target_user_id":"user-fff","reason":"manual"}
-{"ts":"2026-07-20T03:50:41Z","actor":"admin","user_id":"user-metakv","action":"inbox.export","workspace_id":"ws-metakv","target_user_id":"user-target","reason":"manual","format":"jsonl","bytes_exported":"1234"}
