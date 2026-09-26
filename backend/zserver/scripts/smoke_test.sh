@@ -102,9 +102,9 @@ else
 fi
 
 # Verification code is logged when no SMTP is configured; use the no-DB fallback path
-# with the deterministic MULTICA_DEV_VERIFICATION_CODE if available, otherwise skip.
+# with the deterministic ONEPERSON_DEV_VERIFICATION_CODE if available, otherwise skip.
 TOKEN=""
-DEV_CODE="${MULTICA_DEV_VERIFICATION_CODE:-${DEV_AUTH_CODE:-}}"
+DEV_CODE="${ONEPERSON_DEV_VERIFICATION_CODE:-${DEV_AUTH_CODE:-}}"
 if [[ -n "${DEV_CODE}" ]]; then
     body=$(http_body -X POST -H "Content-Type: application/json" \
         -d "{\"email\":\"${email}\",\"code\":\"${DEV_CODE}\"}" "${BASE}/auth/verify-code")
@@ -115,7 +115,7 @@ if [[ -n "${DEV_CODE}" ]]; then
         fail "POST /auth/verify-code: ${body}"
     fi
 else
-    echo "SKIP: /auth/verify-code (set MULTICA_DEV_VERIFICATION_CODE to test)"
+    echo "SKIP: /auth/verify-code (set ONEPERSON_DEV_VERIFICATION_CODE to test)"
 fi
 
 if [[ -n "${TOKEN}" ]]; then

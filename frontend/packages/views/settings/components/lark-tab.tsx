@@ -120,7 +120,7 @@ export function LarkTab() {
             <p className="text-xs text-muted-foreground">
               {t(($) => $.lark.not_enabled_description_prefix)}{" "}
               <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
-                MULTICA_LARK_SECRET_KEY
+                ONEPERSON_LARK_SECRET_KEY
               </code>{" "}
               {t(($) => $.lark.not_enabled_description_suffix)}{" "}
               {t(($) => $.lark.not_enabled_self_host_hint)}

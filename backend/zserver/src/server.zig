@@ -51,7 +51,7 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     // also a fail-open auth bypass (format-only token checks, "owner" role
     // for everyone), so in production the server refuses to start when a
     // database is unavailable — silently degrading would authenticate
-    // arbitrary `mul_`/`mdt_` tokens and grant workspace ownership.
+    // arbitrary `1p_`/`1d_` tokens and grant workspace ownership.
     const prod = config.isProduction(cfg.app_env);
     if (cfg.db_url.len > 0) {
         const pool_ready = deps.initPool(allocator, cfg.db_url);

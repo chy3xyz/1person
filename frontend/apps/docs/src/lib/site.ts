@@ -3,7 +3,7 @@ import { DEFAULT_LANGUAGE, LANGUAGES, type Lang } from "~/lib/i18n";
 
 // Canonical production origin and base path (kept identical to the Next
 // implementation — sitemap + hreflang contract must not change).
-export const SITE_ORIGIN = "https://www.1person.ai";
+export const SITE_ORIGIN = "https://www.1person.xyz";
 export const DOCS_BASE_PATH = "/docs";
 
 export function absoluteDocsUrl(relative: string): string {

@@ -26,31 +26,31 @@ import { docsAlternates, absoluteDocsUrl } from "./site";
 describe("docsAlternates", () => {
   it("builds hreflang alternates for a page in all languages", () => {
     const alternates = docsAlternates(["agents"]);
-    expect(alternates.canonical).toBe("https://www.1person.ai/docs/agents");
+    expect(alternates.canonical).toBe("https://www.1person.xyz/docs/agents");
     expect(alternates.languages).toMatchObject({
-      en: "https://www.1person.ai/docs/agents",
-      zh: "https://www.1person.ai/docs/zh/agents",
-      ko: "https://www.1person.ai/docs/ko/agents",
-      ja: "https://www.1person.ai/docs/ja/agents",
-      "x-default": "https://www.1person.ai/docs/agents",
+      en: "https://www.1person.xyz/docs/agents",
+      zh: "https://www.1person.xyz/docs/zh/agents",
+      ko: "https://www.1person.xyz/docs/ko/agents",
+      ja: "https://www.1person.xyz/docs/ja/agents",
+      "x-default": "https://www.1person.xyz/docs/agents",
     });
   });
 
   it("falls back to the first available language for untranslated pages", () => {
     const alternates = docsAlternates(["guides", "agents"]);
-    expect(alternates.canonical).toBe("https://www.1person.ai/docs/zh/guides/agents");
+    expect(alternates.canonical).toBe("https://www.1person.xyz/docs/zh/guides/agents");
     expect(alternates.languages["x-default"]).toBe(alternates.languages.zh);
   });
 
   it("returns a home fallback for unknown slugs", () => {
     const alternates = docsAlternates(["does-not-exist"]);
-    expect(alternates.canonical).toBe("https://www.1person.ai/docs");
+    expect(alternates.canonical).toBe("https://www.1person.xyz/docs");
   });
 });
 
 describe("absoluteDocsUrl", () => {
   it("strips the lone root slash", () => {
-    expect(absoluteDocsUrl("/")).toBe("https://www.1person.ai/docs");
-    expect(absoluteDocsUrl("/agents")).toBe("https://www.1person.ai/docs/agents");
+    expect(absoluteDocsUrl("/")).toBe("https://www.1person.xyz/docs");
+    expect(absoluteDocsUrl("/agents")).toBe("https://www.1person.xyz/docs/agents");
   });
 });

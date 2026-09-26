@@ -3,13 +3,13 @@
 //! Mirrors the Go server's DaemonAuth middleware. Accepts four
 //! token formats in priority order:
 //!
-//! 1. `mdt_` — daemon token. When a DB pool exists, the full token
+//! 1. `1d_` — daemon token. When a DB pool exists, the full token
 //!    is verified against the `daemon_token` table (SHA-256 hash,
 //!    not expired, daemon_id matches) — the same contract as the Go
 //!    server's `GetDaemonTokenByHash`. In no-DB mode (dev/test
 //!    only; production refuses to boot without a database) the prefix
 //!    is accepted without lookup so smoke/e2e keep working.
-//! 2. `mul_` / `mat_` / `mcn_` — personal / task / cloud-node
+//! 2. `1p_` / `1t_` / `1c_` — personal / task / cloud-node
 //!    tokens. These are rejected here (401 `daemon_token_required`)
 //!    unless the global `AuthInterceptor` already validated the
 //!    request and set `user_id` on the context.
@@ -25,10 +25,10 @@ const auth_lib = @import("../auth.zig");
 
 const log = std.log.scoped(.daemon_auth);
 
-const MDT_PREFIX = "mdt_";
-const MUL_PREFIX = "mul_";
-const MAT_PREFIX = "mat_";
-const MCN_PREFIX = "mcn_";
+const MDT_PREFIX = "1d_";
+const MUL_PREFIX = "1p_";
+const MAT_PREFIX = "1t_";
+const MCN_PREFIX = "1c_";
 
 fn extractBearerToken(ctx: *zfinal.Context) ?[]const u8 {
     const header = ctx.getHeader("Authorization") orelse return null;
@@ -87,7 +87,7 @@ fn daemonAuthBefore(ctx: *zfinal.Context) !bool {
     return false;
 }
 
-/// Verify a `mdt_` token against the `daemon_token` table. The
+/// Verify a `1d_` token against the `daemon_token` table. The
 /// full token (prefix included) is SHA-256 hashed, matching how the
 /// pairing flow stores tokens via `CreateDaemonToken`. Fails closed
 /// (503) when the pool is present but a connection cannot be acquired.
@@ -141,7 +141,7 @@ pub const DaemonAuthInterceptor = zfinal.Interceptor{
     }.before,
 };
 
-/// Public helper: extract `daemon_id` from a `mdt_<id>` token. Used
+/// Public helper: extract `daemon_id` from a `1d_<id>` token. Used
 /// by `daemon/service.zig::daemonRegister` to attribute the
 /// registration to a specific daemon.
 pub fn daemonIdFromToken(token: []const u8) ?[]const u8 {

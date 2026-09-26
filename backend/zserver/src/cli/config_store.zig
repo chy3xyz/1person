@@ -4,7 +4,7 @@
 //! {
 //!   "server_url": "http://localhost:8080",
 //!   "token": "<jwt>",
-//!   "daemon_tokens": [ { "workspace_id": "...", "token": "mdt_..." } ]
+//!   "daemon_tokens": [ { "workspace_id": "...", "token": "1d_..." } ]
 //! }
 //! Written with 0600 perms; tokens are secrets.
 

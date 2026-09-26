@@ -15,18 +15,18 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_DB: multica
-          POSTGRES_USER: multica
-          POSTGRES_PASSWORD: multica
+          POSTGRES_DB: 1person
+          POSTGRES_USER: 1person
+          POSTGRES_PASSWORD: 1person
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U multica -d multica"
+          --health-cmd "pg_isready -U 1person -d 1person"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
-      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      DATABASE_URL: postgres://1person:1person@localhost:5432/1person?sslmode=disable
     steps:
       - name: Checkout
         uses: actions/checkout@v6

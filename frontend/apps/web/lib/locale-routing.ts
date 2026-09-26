@@ -4,7 +4,7 @@ import {
   type SupportedLocale,
 } from "@1person/core/i18n";
 
-export const MULTICA_LOCALE_HEADER = "x-1person-locale";
+export const ONEPERSON_LOCALE_HEADER = "x-1person-locale";
 
 export function isSupportedLocale(
   value: string | null,

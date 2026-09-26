@@ -1,13 +1,13 @@
 ---
 title: Contributing
-description: Local development workflow for contributors working on the Multica codebase.
+description: Local development workflow for contributors working on the 1Person codebase.
 ---
 
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.
 
-- The main checkout usually uses `.env` and `POSTGRES_DB=multica`
+- The main checkout usually uses `.env` and `POSTGRES_DB=1person`
 - Each Git worktree uses its own `.env.worktree`
 - Every checkout connects to the same PostgreSQL host: `localhost:5432`
 - Isolation happens at the database level, not by starting a separate Docker Compose project
@@ -91,7 +91,7 @@ This is a first-class workflow. Both checkouts use the same PostgreSQL container
 
 | | Main | Worktree |
 |---|---|---|
-| Database | `multica` | `multica_my_feature_702` |
+| Database | `1person` | `1person_my_feature_702` |
 | Backend port | `8080` | generated (e.g. `18782`) |
 | Frontend port | `3000` | generated (e.g. `13702`) |
 
@@ -107,14 +107,13 @@ pnpm typecheck        # TypeScript check
 pnpm lint             # ESLint
 pnpm test             # TS tests (Vitest)
 
-# Backend (Go)
-make dev              # Run Go server (port 8080)
-make daemon           # Run local daemon
-make build            # Build server + CLI binaries
-make test             # Go tests
-make sqlc             # Regenerate sqlc code
+# Backend (Zig / zserver)
+make server           # Run zserver (port 8080)
+make daemon           # Restart local agent daemon via Zig 1p CLI
+make build            # Build zserver + the Zig 1p CLI
+make test             # zserver Zig unit tests
 make migrate-up       # Run database migrations
-make migrate-down     # Rollback migrations
+make db-reset         # Drop + recreate DB, then migrate (local only)
 ```
 
 ## Testing
@@ -129,7 +128,7 @@ This runs:
 
 1. TypeScript typecheck
 2. TypeScript unit tests
-3. Go tests
+3. zserver (Zig) tests
 4. Playwright E2E tests
 
 ## Troubleshooting
@@ -157,7 +156,7 @@ Look for `POSTGRES_DB`, `DATABASE_URL`, `PORT`, `FRONTEND_PORT`.
 ### List All Local Databases
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres \
+docker compose exec -T postgres psql -U 1person -d postgres \
   -At -c "select datname from pg_database order by datname;"
 ```
 

@@ -177,7 +177,7 @@ export function DaemonSettingsTab() {
               className="mt-2"
               onClick={() =>
                 window.desktopAPI.openExternal(
-                  "https://github.com/1person-ai/1person#cli-installation",
+                  "https://github.com/chy3xyz/1person#cli-installation",
                 )
               }
             >

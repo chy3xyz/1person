@@ -4,15 +4,15 @@
   "version": "0.1.0",
   "private": true,
   "description": "1Person Desktop — native desktop client for the 1Person platform.",
-  "homepage": "https://1person.app",
+  "homepage": "https://1person.xyz",
   "repository": {
     "type": "git",
-    "url": "https://github.com/1person-ai/1person.git",
+    "url": "https://github.com/chy3xyz/1person.git",
     "directory": "apps/desktop"
   },
   "author": {
     "name": "1Person",
-    "email": "support@1person.app"
+    "email": "support@1person.xyz"
   },
   "license": "UNLICENSED",
   "main": "./out/main/index.js",

@@ -46,9 +46,9 @@ describe("loadRuntimeConfig", () => {
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "https://api.1person.app",
-        wsUrl: "wss://api.1person.app/ws",
-        appUrl: "https://1person.app",
+        apiUrl: "https://api.1person.xyz",
+        wsUrl: "wss://api.1person.xyz/ws",
+        appUrl: "https://1person.xyz",
       },
     });
   });

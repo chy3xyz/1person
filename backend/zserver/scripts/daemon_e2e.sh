@@ -4,11 +4,11 @@
 # Boots a fresh zserver (no-DB mode), authenticates a dev user,
 # creates a scratch workspace + issue, then exercises the full
 # daemon lifecycle: register → heartbeat → claim → start → progress
-# → complete → deregister. The daemon uses a synthetic `mdt_<id>`
+# → complete → deregister. The daemon uses a synthetic `1d_<id>`
 # token accepted by `src/middleware/daemon_auth.zig`.
 #
 # Usage:
-#   MULTICA_DEV_VERIFICATION_CODE=000000 \
+#   ONEPERSON_DEV_VERIFICATION_CODE=000000 \
 #   JWT_SECRET=test-secret \
 #   ./scripts/daemon_e2e.sh
 #
@@ -85,7 +85,7 @@ fi
 EMAIL="daemon-e2e-$(date +%s)@example.com"
 http_status -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\"}" "${BASE}/auth/send-code" >/dev/null
-code="${MULTICA_DEV_VERIFICATION_CODE:-000000}"
+code="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}"
 auth_body=$(http_body -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"code\":\"${code}\"}" "${BASE}/auth/verify-code")
 TOKEN=$(jget_path "${auth_body}" token)
@@ -112,9 +112,9 @@ RUNTIME_ID="runtime-$(date +%s)"
 # (start/progress/complete) are skipped if no task is available.
 # The no-DB daemon handler still exercises every route.
 
-# ─── Daemon auth: mdt_<random> ──────────────────────────────────────
+# ─── Daemon auth: 1d_<random> ──────────────────────────────────────
 DAEMON_ID="daemon-$(date +%s)-$$"
-DAEMON_TOKEN="mdt_${DAEMON_ID}"
+DAEMON_TOKEN="1d_${DAEMON_ID}"
 DAEMON_AUTH="Authorization: Bearer ${DAEMON_TOKEN}"
 
 # ─── 1. daemonRegister (POST /api/daemon/register) ──────────────────
@@ -145,7 +145,7 @@ CLAIM_STATUS=$(http_status -X POST -H "Content-Type: application/json" -H "${DAE
 if [[ "${CLAIM_STATUS}" == "200" ]]; then pass "04 claimTask (200)"; else fail "04 claimTask (${CLAIM_STATUS})"; fi
 
 # ─── 5. daemonDeregister (POST /api/daemon/deregister) ────────────
-# Daemon id is taken from the mdt_ token; no path param needed.
+# Daemon id is taken from the 1d_ token; no path param needed.
 dr_status=$(http_status -X POST -H "Content-Type: application/json" -H "${DAEMON_AUTH}" \
     -d '{}' "${BASE}/api/daemon/deregister")
 if [[ "${dr_status}" == "200" || "${dr_status}" == "204" ]]; then pass "05 daemonDeregister (${dr_status})"; else fail "05 daemonDeregister (${dr_status})"; fi
@@ -155,12 +155,12 @@ mt_status=$(http_status -X POST -H "Content-Type: application/json" \
     -d '{}' "${BASE}/api/daemon/heartbeat")
 if [[ "${mt_status}" == "401" ]]; then pass "06 missing token rejected (401)"; else fail "06 missing token (${mt_status})"; fi
 
-# ─── 7. malformed mdt_ token rejected (401) ────────────────────────
-# mdt_ followed by an empty daemon id must be rejected.
-BAD_TOKEN="mdt_"
+# ─── 7. malformed 1d_ token rejected (401) ────────────────────────
+# 1d_ followed by an empty daemon id must be rejected.
+BAD_TOKEN="1d_"
 mt_status=$(http_status -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${BAD_TOKEN}" \
     -d '{}' "${BASE}/api/daemon/heartbeat")
-if [[ "${mt_status}" == "401" ]]; then pass "07 malformed mdt_ rejected (401)"; else fail "07 malformed mdt_ (${mt_status})"; fi
+if [[ "${mt_status}" == "401" ]]; then pass "07 malformed 1d_ rejected (401)"; else fail "07 malformed 1d_ (${mt_status})"; fi
 
 # ─── 8. invalid auth prefix rejected (401) ───────────────────────
 mt_status=$(http_status -X POST -H "Content-Type: application/json" -H "Authorization: Bearer foo_bar" \

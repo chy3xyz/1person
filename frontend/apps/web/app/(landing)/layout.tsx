@@ -20,8 +20,8 @@ const jsonLd = {
     {
       "@type": "Organization",
       name: "1Person",
-      url: "https://www.1person.ai",
-      sameAs: ["https://github.com/1person-ai/1person"],
+      url: "https://www.1person.xyz",
+      sameAs: ["https://github.com/chy3xyz/1person"],
     },
     {
       "@type": "SoftwareApplication",

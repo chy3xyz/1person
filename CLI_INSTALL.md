@@ -7,7 +7,7 @@
 Give this instruction to your AI agent:
 
 ```
-Fetch https://github.com/1person-ai/1person/blob/main/CLI_INSTALL.md and follow the instructions to install 1Person CLI, log in, and start the daemon on this machine.
+Fetch https://github.com/chy3xyz/1person/blob/main/CLI_INSTALL.md and follow the instructions to install 1Person CLI, log in, and start the daemon on this machine.
 ```
 
 ---
@@ -40,7 +40,7 @@ which brew
 If `brew` is found, install via Homebrew:
 
 ```bash
-brew install 1person-ai/tap/1person
+brew install chy3xyz/tap/1person
 ```
 
 Then verify:
@@ -54,34 +54,30 @@ If the version prints successfully, skip to **Step 3**.
 To upgrade later, run:
 
 ```bash
-brew upgrade 1person-ai/tap/1person
+brew upgrade chy3xyz/tap/1person
 ```
 
 ### Option B: Download from GitHub Releases (macOS/Linux, no Homebrew)
 
-If Homebrew is not available, download the binary directly.
-
-Detect OS and architecture, then download the correct archive:
+If Homebrew is not available, download the binary directly (same asset names as `scripts/install.sh`):
 
 ```bash
-OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # "darwin" or "linux"
-ARCH=$(uname -m)                                # "x86_64" or "arm64"
+# Resolve platform triple used by Zig CLI releases
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64)  OS_ARCH="aarch64-macos" ;;
+  Darwin-x86_64) OS_ARCH="x86_64-macos" ;;
+  Linux-x86_64)  OS_ARCH="x86_64-linux" ;;
+  Linux-aarch64) OS_ARCH="aarch64-linux" ;;
+  *) echo "Unsupported platform"; exit 1 ;;
+esac
 
-# Normalize architecture name
-if [ "$ARCH" = "x86_64" ]; then
-  ARCH="amd64"
-fi
-
-# Get the latest release tag from GitHub
-LATEST=$(curl -sI https://github.com/1person-ai/1person/releases/latest | grep -i '^location:' | sed 's/.*tag\///' | tr -d '\r\n')
-
-# Download and extract
-VERSION="${LATEST#v}"
-curl -sL "https://github.com/1person-ai/1person/releases/download/${LATEST}/1person-cli-${VERSION}-${OS}-${ARCH}.tar.gz" -o /tmp/1person.tar.gz
-tar -xzf /tmp/1person.tar.gz -C /tmp 1person
+BASE="https://github.com/chy3xyz/1person/releases/latest/download"
+curl -fsSL "$BASE/1person-${OS_ARCH}" -o /tmp/1person
+chmod +x /tmp/1person
 sudo mv /tmp/1person /usr/local/bin/1person
-rm /tmp/1person.tar.gz
 ```
+
+> **Note:** The Zig CLI GitHub Release job is still being rewired (`release.yml` release job is currently disabled). Prefer Homebrew when available, or build from source with `make build` and copy `backend/zserver/zig-out/bin/1p` to `1person` on `PATH`.
 
 Verify:
 
@@ -99,7 +95,7 @@ Verify:
 Run in PowerShell (no admin required):
 
 ```powershell
-irm https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 | iex
 ```
 
 This downloads the latest Windows binary from GitHub Releases, installs it to `%USERPROFILE%\.1person\bin\`, and adds it to your user PATH.
@@ -112,7 +108,7 @@ Verify:
 
 **If this fails:**
 - Restart your terminal so the updated PATH takes effect.
-- If you use Scoop, the installer will use it automatically: `scoop bucket add 1person https://github.com/1person-ai/scoop-bucket.git && scoop install 1person`
+- If you use Scoop, the installer will use it automatically: `scoop bucket add 1person https://github.com/chy3xyz/scoop-bucket.git && scoop install 1person`
 - If your execution policy blocks the script: `Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned` then re-run.
 
 ---
@@ -140,7 +136,7 @@ Verify:
 Expected output should show the authenticated user and server URL.
 
 **If login fails:**
-- If no browser is available (headless environment), the user can generate a Personal Access Token at `https://app.1person.ai/settings` and run: `1person login --token <mul_...>` (use `--token=` with an empty value to be prompted interactively).
+- If no browser is available (headless environment), the user can generate a Personal Access Token at `https://app.1person.xyz/settings` and run: `1person login --token <1p_...>` (use `--token=` with an empty value to be prompted interactively).
 - If the server URL needs to be customized: `1person config set server_url <url>` before logging in.
 
 ---

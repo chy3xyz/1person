@@ -65,7 +65,7 @@ vi.mock("../../../navigation", () => ({
     searchParams: new URLSearchParams(),
     back: vi.fn(),
     replace: vi.fn(),
-    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+    getShareableUrl: (p: string) => `https://app.1person.com${p}`,
   }),
 }));
 
@@ -148,7 +148,7 @@ describe("useIssueActions", () => {
   });
 
   it("does not re-open backlog-hint when the user has dismissed it", () => {
-    localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+    localStorage.setItem("1person:backlog-agent-hint-dismissed", "true");
     const backlogIssue = { ...mockIssue, status: "backlog" } as Issue;
     const { result } = renderHook(() => useIssueActions(backlogIssue), { wrapper });
 
@@ -170,7 +170,7 @@ describe("useIssueActions", () => {
     });
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      "https://app.multica.com/test/issues/issue-1",
+      "https://app.1person.com/test/issues/issue-1",
     );
   });
 

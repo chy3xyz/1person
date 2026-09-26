@@ -37,7 +37,7 @@ backend/zserver (Zig, zfinal)
 
 | 模块 | 说明 |
 |------|------|
-| **auth** | 认证 (JWT + PAT + mdt_ + 多 token 类型) |
+| **auth** | 认证 (JWT + PAT + 1d_ + 多 token 类型) |
 | **issue** | 工单系统 (CRUD + metadata + reaction + subscriber + label + dependency) |
 | **workspace** | 多租户隔离 (invite + member 管理) |
 | **project** | 项目分组 (status/priority/resource CRUD) |
@@ -82,7 +82,7 @@ backend/zserver (Zig, zfinal)
 cd backend/zserver
 zig build                        # 编译
 # 无 DB 模式 (内存存储)
-JWT_SECRET=my-secret MULTICA_DEV_VERIFICATION_CODE=000000 ./zig-out/bin/zserver server --port 8090
+JWT_SECRET=my-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 ./zig-out/bin/zserver server --port 8090
 # PostgreSQL 模式
 DATABASE_URL="postgres://user:pass@localhost/db?sslmode=disable" JWT_SECRET=my-secret ./zig-out/bin/zserver server --port 8090
 ```

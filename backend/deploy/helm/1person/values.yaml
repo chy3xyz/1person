@@ -3,13 +3,13 @@
 # -----------------------------------------------------------------------------
 images:
   backend:
-    repository: ghcr.io/1person-ai/1person-backend
+    repository: ghcr.io/chy3xyz/1person-backend
     # Empty defaults to Chart.appVersion. Released OCI charts set appVersion to
     # the Git tag (for example v0.3.5), so installs use matching app images.
     tag: ""
     pullPolicy: IfNotPresent
   frontend:
-    repository: ghcr.io/1person-ai/1person-web
+    repository: ghcr.io/chy3xyz/1person-web
     # Empty defaults to Chart.appVersion. Set explicitly to override.
     tag: ""
     pullPolicy: IfNotPresent
@@ -27,19 +27,19 @@ images:
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+#     --from-literal=ONEPERSON_DEV_VERIFICATION_CODE=""
 #
 # The chart references this Secret by name; it does not template it, so real
 # values never need to land in git.
 # -----------------------------------------------------------------------------
-existingSecret: multica-secrets
+existingSecret: 1person-secrets
 
 # -----------------------------------------------------------------------------
 # PostgreSQL (pgvector)
 # -----------------------------------------------------------------------------
 postgres:
-  database: multica
-  user: multica
+  database: 1person
+  user: 1person
   persistence:
     size: 10Gi
     # Leave empty to use the cluster's default StorageClass.
@@ -53,23 +53,22 @@ postgres:
       memory: 1Gi
 
 # -----------------------------------------------------------------------------
-# Backend (Go API + WS server)
+# Backend (Zig zserver API + WS)
 # -----------------------------------------------------------------------------
 backend:
-  # Concurrent backend pods are now safe to start: cmd/migrate uses a
+  # Concurrent backend pods are now safe to start: migrate uses a
   # Postgres session-level advisory lock to serialize the startup
-  # `migrate up` run, so late-arriving pods queue and then no-op (see
-  # GitHub multica-ai/multica#3647). 1 is still the recommended default
-  # because the chart Deployment uses strategy: Recreate and there is no
-  # leader-elected workload split — increase this only if you actually
-  # need horizontal scale of the API/WS server.
+  # `migrate` run, so late-arriving pods queue and then no-op. 1 is still
+  # the recommended default because the chart Deployment uses strategy:
+  # Recreate and there is no leader-elected workload split — increase this
+  # only if you actually need horizontal scale of the API/WS server.
   replicas: 1
   uploads:
     persistence:
       # When true (default) the chart provisions a PersistentVolumeClaim for
       # /app/data/uploads and mounts it into the backend pod. The backend only
       # uses this directory when S3 is NOT configured (`backend.config.s3Bucket`
-      # empty) — see server/cmd/server/router.go for the storage selection.
+      # empty).
       #
       # Set to false when you have configured S3/CloudFront and don't want the
       # chart to declare the uploads PVC at all. The default access mode is
@@ -93,10 +92,10 @@ backend:
   config:
     appEnv: production
     appUrl: http://1person.dev.lan
-    frontendOrigin: http://multica.dev.lan
+    frontendOrigin: http://1person.dev.lan
     corsAllowedOrigins: ""
     cookieDomain: ""
-    resendFromEmail: noreply@multica.ai
+    resendFromEmail: noreply@1person.xyz
     allowSignup: true
     allowedEmails: ""
     allowedEmailDomains: ""
@@ -105,12 +104,12 @@ backend:
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
     googleClientId: ""
-    googleRedirectUri: http://multica.dev.lan/auth/callback
+    googleRedirectUri: http://1person.dev.lan/auth/callback
     s3Bucket: ""
     s3Region: us-west-2
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
-    localUploadBaseUrl: http://api.multica.dev.lan
+    localUploadBaseUrl: http://api.1person.dev.lan
   resources:
     requests:
       cpu: 100m
@@ -122,13 +121,13 @@ backend:
 # -----------------------------------------------------------------------------
 # Frontend (Next.js standalone)
 #
-# The multica-web image bakes REMOTE_API_URL=http://backend:8080 at build time;
+# The 1person-web image bakes REMOTE_API_URL=http://backend:8080 at build time;
 # the chart ships an ExternalName Service named "backend" so that bare host
 # resolves to the in-cluster backend Service.
 # -----------------------------------------------------------------------------
 frontend:
   replicas: 1
-  # Compatibility shim for the prebuilt multica-web image.
+  # Compatibility shim for the prebuilt 1person-web image.
   compatibility:
     # When true (default) the chart creates an ExternalName Service literally
     # named "backend" so the REMOTE_API_URL=http://backend:8080 baked into the
@@ -154,12 +153,12 @@ ingress:
   className: traefik
   annotations: {}
   frontend:
-    host: multica.dev.lan
+    host: 1person.dev.lan
   backend:
-    host: api.multica.dev.lan
+    host: api.1person.dev.lan
   # tls:
-  #   - hosts: [multica.dev.lan, api.multica.dev.lan]
-  #     secretName: multica-tls
+  #   - hosts: [1person.dev.lan, api.1person.dev.lan]
+  #     secretName: 1person-tls
 
 # -----------------------------------------------------------------------------
 # Monitoring

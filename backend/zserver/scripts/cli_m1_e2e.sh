@@ -4,8 +4,8 @@ cd /Users/n0x/w4_proj/dev_machine/1person/zserver
 BASE="http://127.0.0.1:18093"
 CFG="/tmp/1p-m1-config.json"
 rm -f "$CFG"
-DATABASE_URL="postgres://multica:multica@localhost:5432/multica?sslmode=disable" \
-  MULTICA_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
+DATABASE_URL="postgres://1person:1person@localhost:5432/1person?sslmode=disable" \
+  ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
   ./zig-out/bin/zserver server --port 18093 > /tmp/m1-server.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null' EXIT

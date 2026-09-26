@@ -76,7 +76,7 @@ export function RuntimeList({
 }: {
   runtimes: AgentRuntime[];
   // Kept on the API surface for callers, but unused here: the CLI column
-  // shows each agent's own tool version, while the multica daemon CLI
+  // shows each agent's own tool version, while the 1person daemon CLI
   // update prompt lives at the machine/detail level (UpdateSection), so the
   // table no longer derives per-row update state. Left to avoid scope creep
   // on the page-level wrapper that still computes the set.

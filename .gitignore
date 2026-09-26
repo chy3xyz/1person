@@ -29,7 +29,7 @@ dist-electron
 !frontend/apps/mobile/.env.staging
 # Mobile production config is public (production API URL) — track it so
 # external users can run `pnpm ios:mobile:device:prod:release` against
-# multica.ai's production backend without copying templates first.
+# 1person.xyz's production backend without copying templates first.
 !frontend/apps/mobile/.env.production
 
 # test coverage

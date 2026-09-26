@@ -23,7 +23,7 @@ export function BacklogAgentHintModal({
         if (!v) onClose();
       }}
       onDismissPermanently={() => {
-        localStorage.setItem("multica:backlog-agent-hint-dismissed", "true");
+        localStorage.setItem("1person:backlog-agent-hint-dismissed", "true");
       }}
       onMoveToTodo={() => {
         if (issueId) {

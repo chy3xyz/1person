@@ -352,14 +352,14 @@ describe("Attachment — image dispatch", () => {
     const att = makeRecord({
       // Raw private-bucket URL — must NOT be the rendered src.
       url: "https://prod.s3.amazonaws.com/key.png",
-      markdown_url: "https://api.multica.test/api/attachments/att-1/download",
+      markdown_url: "https://api.1person.test/api/attachments/att-1/download",
       // bare API path on download_url — no signature query.
       download_url: "/api/attachments/att-1/download",
     });
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: att }} />);
     const img = document.querySelector("img");
     expect(img?.getAttribute("src")).toBe(
-      "https://api.multica.test/api/attachments/att-1/download",
+      "https://api.1person.test/api/attachments/att-1/download",
     );
     expect(img?.getAttribute("src")).not.toContain("prod.s3.amazonaws.com");
   });

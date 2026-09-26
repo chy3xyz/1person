@@ -79,7 +79,7 @@ async function main() {
   const email = `feint-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`;
   await api("POST", "/auth/send-code", { body: { email } });
   const verify = await api("POST", "/auth/verify-code", {
-    body: { email, code: process.env.MULTICA_DEV_VERIFICATION_CODE || "000000" },
+    body: { email, code: process.env.ONEPERSON_DEV_VERIFICATION_CODE || "000000" },
   });
   if (verify.status !== 200 || !verify.body?.token) {
     console.error("verify-code failed:", JSON.stringify(verify));

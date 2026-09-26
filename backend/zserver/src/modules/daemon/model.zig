@@ -80,7 +80,7 @@ pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
     return true;
 }
 
-/// Insert a minted daemon token (SHA-256 hash of the full mdt_ token)
+/// Insert a minted daemon token (SHA-256 hash of the full 1d_ token)
 /// into the daemon_token table. Returns true on success.
 pub fn insertDaemonToken(workspace_id: []const u8, daemon_id: []const u8, token_hash: []const u8, ttl_days: i64) bool {
     const db = borrowDb() orelse return false;

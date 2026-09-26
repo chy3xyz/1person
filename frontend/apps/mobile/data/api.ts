@@ -1159,7 +1159,7 @@ class ApiClient {
 
   async reorderPins(data: ReorderPinsRequest): Promise<void> {
     await this.fetch<void>("/api/pins/reorder", {
-      method: "PUT",
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

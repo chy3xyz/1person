@@ -57,18 +57,18 @@ pub const UserToken = struct {
 
 /// Detect the kind of bearer/cookie token.
 pub fn detectTokenType(token: []const u8) TokenType {
-    if (std.mem.startsWith(u8, token, "mul_")) return .personal;
-    if (std.mem.startsWith(u8, token, "mat_")) return .task;
-    if (std.mem.startsWith(u8, token, "mcn_")) return .cloud_node;
-    if (std.mem.startsWith(u8, token, "mdt_")) return .daemon;
+    if (std.mem.startsWith(u8, token, "1p_")) return .personal;
+    if (std.mem.startsWith(u8, token, "1t_")) return .task;
+    if (std.mem.startsWith(u8, token, "1c_")) return .cloud_node;
+    if (std.mem.startsWith(u8, token, "1d_")) return .daemon;
     return .jwt;
 }
 
-/// Extract the daemon id from a `mdt_<id>` token. Returns null when
+/// Extract the daemon id from a `1d_<id>` token. Returns null when
 /// the token doesn't carry the daemon prefix.
 pub fn daemonIdFromToken(token: []const u8) ?[]const u8 {
-    if (!std.mem.startsWith(u8, token, "mdt_")) return null;
-    const id = token[4..];
+    if (!std.mem.startsWith(u8, token, "1d_")) return null;
+    const id = token["1d_".len..];
     if (id.len == 0) return null;
     return id;
 }
@@ -83,7 +83,7 @@ pub fn tokenFromRequest(ctx: *zfinal.Context) ?[]const u8 {
 
 /// Extract token from the HttpOnly auth cookie.
 pub fn tokenFromCookie(ctx: *zfinal.Context) !?[]const u8 {
-    return try ctx.getCookie("multica_auth");
+    return try ctx.getCookie("1person_auth");
 }
 
 /// Validate a JWT access token and return the user id and email.
@@ -187,12 +187,12 @@ fn base64UrlEncode(allocator: std.mem.Allocator, input: []const u8) ![]const u8 
     return encoder.encode(out, input);
 }
 
-/// Generate a personal access token: "mul_" + 40 random hex chars.
+/// Generate a personal access token: "1p_" + 40 random hex chars.
 pub fn generatePersonalAccessToken(allocator: std.mem.Allocator) ![]const u8 {
     var bytes: [20]u8 = undefined;
     try zfinal.io_instance.io.randomSecure(&bytes);
     const hex = std.fmt.bytesToHex(bytes, .lower);
-    return try std.fmt.allocPrint(allocator, "mul_{s}", .{hex});
+    return try std.fmt.allocPrint(allocator, "1p_{s}", .{hex});
 }
 
 /// Hash a token with SHA-256 and return the hex-encoded digest.
@@ -241,12 +241,12 @@ pub fn setAuthCookies(ctx: *zfinal.Context, token: []const u8) !void {
     const csrf = try csrfTokenFor(ctx.allocator, token);
     defer ctx.allocator.free(csrf);
 
-    try ctx.setCookieFull("multica_auth", token, @intCast(ttl), "/", true, true, false);
-    try ctx.setCookieFull("multica_csrf", csrf, @intCast(ttl), "/", false, true, false);
+    try ctx.setCookieFull("1person_auth", token, @intCast(ttl), "/", true, true, false);
+    try ctx.setCookieFull("1person_csrf", csrf, @intCast(ttl), "/", false, true, false);
 }
 
 /// Clear the auth and CSRF cookies.
 pub fn clearAuthCookies(ctx: *zfinal.Context) !void {
-    try ctx.setCookieFull("multica_auth", "", 0, "/", true, true, false);
-    try ctx.setCookieFull("multica_csrf", "", 0, "/", false, true, false);
+    try ctx.setCookieFull("1person_auth", "", 0, "/", true, true, false);
+    try ctx.setCookieFull("1person_csrf", "", 0, "/", false, true, false);
 }

@@ -10,9 +10,9 @@ describe("runtime config", () => {
   it("uses cloud defaults without a desktop.json file", () => {
     expect(DEFAULT_RUNTIME_CONFIG).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.1person.app",
-      wsUrl: "wss://api.1person.app/ws",
-      appUrl: "https://1person.app",
+      apiUrl: "https://api.1person.xyz",
+      wsUrl: "wss://api.1person.xyz/ws",
+      appUrl: "https://1person.xyz",
     });
   });
 
@@ -35,13 +35,13 @@ describe("runtime config", () => {
   it("strips the leading api. label when deriving appUrl", () => {
     expect(
       parseRuntimeConfig(
-        JSON.stringify({ schemaVersion: 1, apiUrl: "https://api.1person.app" }),
+        JSON.stringify({ schemaVersion: 1, apiUrl: "https://api.1person.xyz" }),
       ),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.1person.app",
-      wsUrl: "wss://api.1person.app/ws",
-      appUrl: "https://1person.app",
+      apiUrl: "https://api.1person.xyz",
+      wsUrl: "wss://api.1person.xyz/ws",
+      appUrl: "https://1person.xyz",
     });
   });
 
@@ -126,26 +126,26 @@ describe("runtime config", () => {
     // api at `api.<web-host>`, so stripping the leading label gives the
     // right web origin without a separate VITE_APP_URL.
     expect(
-      runtimeConfigFromDevEnv({ apiUrl: "https://api.test.1person.app" }),
+      runtimeConfigFromDevEnv({ apiUrl: "https://api.test.1person.xyz" }),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.test.1person.app",
-      wsUrl: "wss://api.test.1person.app/ws",
-      appUrl: "https://test.1person.app",
+      apiUrl: "https://api.test.1person.xyz",
+      wsUrl: "wss://api.test.1person.xyz/ws",
+      appUrl: "https://test.1person.xyz",
     });
   });
 
   it("dev VITE_APP_URL still wins over apiUrl-derived value", () => {
     expect(
       runtimeConfigFromDevEnv({
-        apiUrl: "https://api.test.1person.app",
-        appUrl: "https://staging.1person.app",
+        apiUrl: "https://api.test.1person.xyz",
+        appUrl: "https://staging.1person.xyz",
       }),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://api.test.1person.app",
-      wsUrl: "wss://api.test.1person.app/ws",
-      appUrl: "https://staging.1person.app",
+      apiUrl: "https://api.test.1person.xyz",
+      wsUrl: "wss://api.test.1person.xyz/ws",
+      appUrl: "https://staging.1person.xyz",
     });
   });
 });

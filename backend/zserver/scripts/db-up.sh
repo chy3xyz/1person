@@ -41,9 +41,9 @@ if [ -f "$REPO_ROOT/.env" ]; then
     set +a
 fi
 
-POSTGRES_DB="${POSTGRES_DB:-multica}"
-POSTGRES_USER="${POSTGRES_USER:-multica}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-multica}"
+POSTGRES_DB="${POSTGRES_DB:-1person}"
+POSTGRES_USER="${POSTGRES_USER:-1person}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-1person}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 
 echo "==> Bringing up local PostgreSQL via docker compose (port ${POSTGRES_PORT})..."

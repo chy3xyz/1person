@@ -615,7 +615,7 @@ async function ensureRunningDaemonVersionMatches(): Promise<
 
 /**
  * Exchange the user's JWT for a long-lived PAT via POST /api/tokens. The
- * daemon needs a PAT (or `mul_` / `mdt_` token) because JWTs expire in 30
+ * daemon needs a PAT (or `1p_` / `1d_` token) because JWTs expire in 30
  * days and signatures are tied to a specific backend instance.
  */
 async function mintPat(jwt: string): Promise<string> {
@@ -643,7 +643,7 @@ async function mintPat(jwt: string): Promise<string> {
     );
   }
   const data = (await res.json()) as { token?: unknown };
-  if (typeof data.token !== "string" || !data.token.startsWith("mul_")) {
+  if (typeof data.token !== "string" || !data.token.startsWith("1p_")) {
     throw new Error("mint PAT: response missing token");
   }
   return data.token;
@@ -654,7 +654,7 @@ async function mintPat(jwt: string): Promise<string> {
  *
  * - Input from the renderer is the user's JWT (from localStorage) plus the
  *   current user's id, so we can detect session changes.
- * - If the profile already has a cached PAT (`mul_...`) AND the sidecar user
+ * - If the profile already has a cached PAT (`1p_...`) AND the sidecar user
  *   id matches the caller, reuse it — minting fresh on every launch would
  *   accumulate garbage in the user's tokens page.
  * - On user mismatch (or first run) call POST /api/tokens with the JWT to
@@ -676,10 +676,10 @@ async function syncToken(
     !userChanged &&
     previousUserId === userId &&
     typeof config.token === "string" &&
-    config.token.startsWith("mul_");
+    config.token.startsWith("1p_");
 
   let finalToken: string;
-  if (tokenFromRenderer.startsWith("mul_")) {
+  if (tokenFromRenderer.startsWith("1p_")) {
     finalToken = tokenFromRenderer;
   } else if (sameUserWithCachedPat) {
     finalToken = config.token as string;
@@ -816,7 +816,7 @@ function profileArgs(active: ActiveProfile): string[] {
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  return { ...process.env, ONEPERSON_LAUNCHED_BY: "desktop" };
 }
 
 async function startDaemon(): Promise<{ success: boolean; error?: string }> {

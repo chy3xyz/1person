@@ -268,7 +268,7 @@ describe("ReadonlyContent code styling", () => {
   });
 
   it("renders code blocks without a language tag (lowlight highlightAuto fallback)", () => {
-    const token = "mul_407ec1e4464b580304362ed749f821901fd7d310";
+    const token = "1p_407ec1e4464b580304362ed749f821901fd7d310";
     const { container } = render(
       <ReadonlyContent content={["```", token, "```"].join("\n")} />,
     );

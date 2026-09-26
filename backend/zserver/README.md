@@ -1,6 +1,6 @@
 # zserver
 
-Zig 0.17 rewrite of the Multica Go server (`server/`, excluded from this repo
+Zig 0.17 rewrite of the 1Person Go server (`server/`, excluded from this repo
 — only its `server/migrations/` SQL is kept because `zserver migrate` reads
 it).
 
@@ -57,7 +57,7 @@ Uses `zcli` (Zig package manager git dep in `build.zig.zon`, commit `3c466ee`):
 
 ```bash
 zserver server [--port PORT] [--db-url URL]
-zserver migrate [--db-url URL]   # DATABASE_URL / MULTICA_DATABASE_URL env also honored
+zserver migrate [--db-url URL]   # DATABASE_URL / ONEPERSON_DATABASE_URL env also honored
 zserver version               # version injected from build.zig.zon (-Dcommit=...)
 ```
 
@@ -92,7 +92,7 @@ middleware).
 | `src/router.zig` | Module registry (50 modules) + `/ws` |
 | `src/middleware.zig` | Auth (JWT / PAT / task-token DB verification), CORS, logging, CSRF |
 | `src/middleware/workspace.zig` | Workspace-member gating (`RequireWorkspaceMember`) |
-| `src/middleware/daemon_auth.zig` | `mdt_` daemon token handling |
+| `src/middleware/daemon_auth.zig` | `1d_` daemon token handling |
 | `src/daemon_notify.zig` | Runtime→daemon WebSocket registry (`daemon:task_available`) |
 | `src/task_queue.zig` | In-memory task queue (claim/enqueue + WS notify) |
 | `src/health.zig` | `/health`, `/readyz` (migration-version aware) |
@@ -111,8 +111,8 @@ Hardening status as of the zserver 转正 (promotion) pass:
    token checks and grants workspace `owner` to everyone — a fail-open
    bypass that must never run in production). Token verification also fails
    closed (503) if a configured pool can't be acquired.
-2. **Daemon (`mdt_`) tokens: DB-verified and mintable.** `DaemonAuthInterceptor`
-   verifies `mdt_` tokens against the `daemon_token` table (SHA-256 hash,
+2. **Daemon (`1d_`) tokens: DB-verified and mintable.** `DaemonAuthInterceptor`
+   verifies `1d_` tokens against the `daemon_token` table (SHA-256 hash,
    unexpired, matching `daemon_id`) in DB mode, and `POST /api/daemon/tokens`
    (user auth + workspace membership required) mints workspace-bound daemon
    credentials — the `GenerateDaemonToken` + `CreateDaemonToken` counterpart.
@@ -138,12 +138,12 @@ Environment variables (with defaults):
 | Variable | Default |
 |----------|---------|
 | `PORT` | `8080` |
-| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable`; empty ⇒ no-DB mode |
+| `DATABASE_URL` | `postgres://1person:1person@localhost:5432/1person?sslmode=disable`; empty ⇒ no-DB mode |
 | `APP_ENV` | `development` (`production` refuses to boot without `JWT_SECRET`) |
 | `JWT_SECRET` | random dev secret (generated on boot; production requires it) |
-| `MULTICA_DEV_VERIFICATION_CODE` | none — when set to a 6-digit code, `verify-code` accepts it |
+| `ONEPERSON_DEV_VERIFICATION_CODE` | none — when set to a 6-digit code, `verify-code` accepts it |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | none — `/auth/google` returns 503 without them |
-| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | none / `noreply@1person.app` — email delivery for login codes |
+| `RESEND_API_KEY` / `RESEND_FROM_EMAIL` | none / `noreply@1person.xyz` — email delivery for login codes |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173,http://localhost:5174` |
 
 ## Testing

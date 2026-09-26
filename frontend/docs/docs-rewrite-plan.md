@@ -36,7 +36,7 @@
 | P2 | **Agent 本身** | "这个命令怎么用？这个概念是什么？" |
 | ✗ | OSS 贡献者 | 暂不做 —— 用 `CONTRIBUTING.md` 顶着 |
 
-> **关键**：P2 的 agent 不会逛导航，只会被人类用 `Fetch https://docs.1person.ai/...` 指向某一页。所以每一页都要**自包含**。
+> **关键**：P2 的 agent 不会逛导航，只会被人类用 `Fetch https://docs.1person.xyz/...` 指向某一页。所以每一页都要**自包含**。
 
 ---
 
@@ -93,7 +93,7 @@
 | 13 | **Chat** | 和 issue comment 的区别；session 复用 | **完全沙盒**——chat 里的 agent 不能发 comment 到 issue；session_id 用 COALESCE 持久化，agent crash 不会抹掉 |
 | 14 | **Inbox** | 个人通知中心；10 种通知类型 | **Agents 可以被加入 subscriber 表但永远收不到 inbox 通知**——`notifyIssueSubscribers` 显式过滤；mention dedup 只在单 event 内生效（一 comment 里 @alice 5 次 = 1 inbox） |
 | 15 | **Subscriptions** | 谁会自动订阅；如何手动订阅 | **取消分配后旧 assignee 不会被取消订阅**；parent issue 冒泡只对 `status_changed` 生效 |
-| 16 | **Authentication & Tokens** | 3 种凭证 + signup flow + OAuth | JWT cookie（30 天）/ PAT（`mul_` 前缀）/ Daemon Token（`mdt_` 前缀）；Daemon Token **不能命中 user-scoped 路由**；PAT 几乎什么都能命中；signup 白名单优先级：`ALLOWED_EMAILS` > `ALLOWED_EMAIL_DOMAINS` > `ALLOW_SIGNUP` |
+| 16 | **Authentication & Tokens** | 3 种凭证 + signup flow + OAuth | JWT cookie（30 天）/ PAT（`1p_` 前缀）/ Daemon Token（`1d_` 前缀）；Daemon Token **不能命中 user-scoped 路由**；PAT 几乎什么都能命中；signup 白名单优先级：`ALLOWED_EMAILS` > `ALLOWED_EMAIL_DOMAINS` > `ALLOW_SIGNUP` |
 | 17 | **Realtime & Events** | WebSocket hub + room model + 事件目录 | **40+ event types**（按命名空间分：issue:* / task:* / inbox:* / chat:* 等）；WS 是 **push-only**（client→server 走 HTTP）；room 按 workspace；inbox:* 用 SendToUser 定向推送 |
 
 ### 板块 4. Guides（12 篇，任务导向）
@@ -120,7 +120,7 @@
 | Overview | 决策树（哪种部署模式适合你） |
 | Docker Compose deployment | `make selfhost` vs `make selfhost-build` |
 | Environment variables reference | 完整 env 表 |
-| Authentication setup | **🚨 固定测试验证码必须显式设置 `MULTICA_DEV_VERIFICATION_CODE`，生产保持为空**；Google OAuth 配置；signup 白名单 |
+| Authentication setup | **🚨 固定测试验证码必须显式设置 `ONEPERSON_DEV_VERIFICATION_CODE`，生产保持为空**；Google OAuth 配置；signup 白名单 |
 | Storage | S3 / CloudFront / 本地磁盘 |
 | Email | Resend 配置；**没配会落到 stderr** |
 | Upgrading | 版本升级 + migration 策略 |
@@ -147,7 +147,7 @@ Installation / Authentication / Setup / Daemon / Workspace / Issue / Comment / A
 | 5 | Webhook autopilot trigger 字段建了但没接路由——第一版不文档化 | Autopilots |
 | 6 | custom_env merge 是覆盖而非合并——不能用 custom_env"取消设置"系统 env | Agents |
 | 7 | 旧 assignee 取消分配后不会被取消订阅 | Subscriptions |
-| 8 | 固定本地测试验证码默认关闭；`MULTICA_DEV_VERIFICATION_CODE` 仅用于非 production 私有测试 | Self-Hosting → Auth |
+| 8 | 固定本地测试验证码默认关闭；`ONEPERSON_DEV_VERIFICATION_CODE` 仅用于非 production 私有测试 | Self-Hosting → Auth |
 | 9 | Signup 白名单优先级：ALLOWED_EMAILS > ALLOWED_EMAIL_DOMAINS > ALLOW_SIGNUP | Self-Hosting → Auth |
 | 10 | One daemon ↔ many runtimes；one runtime ↔ ONE provider；同 daemon_id 重启复用旧 runtime 行 | Runtimes / Daemon |
 | 11 | Inbox 10 种类型，mention dedup 只在单 event 内生效 | Inbox |

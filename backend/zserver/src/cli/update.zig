@@ -21,7 +21,7 @@ pub const UpdateOptions = struct {
 };
 
 pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: UpdateOptions) !void {
-    const base = opts.from orelse "https://github.com/1person-ai/1person/releases/latest/download";
+    const base = opts.from orelse "https://github.com/chy3xyz/1person/releases/latest/download";
     const target = opts.target orelse {
         out.printErr("no target path (argv[0] resolution unsupported here) — pass --target\n", .{});
         return error.TargetRequired;

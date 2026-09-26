@@ -153,7 +153,7 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
 4. Agent 跑 LLM + tool calling:
    - LLM 输出形如 `1person issue create --title="..." --description="..."` 的命令
    - daemon 执行 CLI 命令,CLI 调 POST /api/issues 创建 issue
-   - CLI 自动在请求里带上 MULTICA_QUICK_CREATE_TASK_ID env(daemon/daemon.go:2081)
+   - CLI 自动在请求里带上 ONEPERSON_QUICK_CREATE_TASK_ID env(daemon/daemon.go:2081)
      → 让创建出来的 issue 带 origin_type='quick_create' + origin_id=<task_id>
 
 5. 后端 link + 通知:
@@ -306,7 +306,7 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
   ```
 - **CLI 命令**(新):`1person agent create`
   - 后端 handler 已存在(handler/agent.go:CreateAgent),只需要绑 CLI(~50 行)
-  - 创建时带 `MULTICA_AI_DRAFT_TASK_ID` env,服务端用它做 origin 标记 + LinkTaskToAgent
+  - 创建时带 `ONEPERSON_AI_DRAFT_TASK_ID` env,服务端用它做 origin 标记 + LinkTaskToAgent
 - **完成通知**:inbox_item type = `agent_draft_done`,payload 含 agent_id + 摘要
 - **前端**:`CreateAgentDialog` 加 "AI" 模式
   - 输入需求 → 提交 → 等通知 → inbox 通知里点击 → 跳新 agent 详情页(用户在那儿编辑/调整)

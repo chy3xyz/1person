@@ -63,7 +63,7 @@ zig build -Doptimize=ReleaseSafe
 | `JWT_SECRET` | **是** | — | JWT 签名密钥 (≥32 字符) |
 | `DATABASE_URL` | 否 | — | PG 连接串。不设则使用内存存储 |
 | `REDIS_URL` | 否 | — | Redis 连接串。用于 WS 多实例同步 |
-| `MULTICA_DEV_VERIFICATION_CODE` | 否 | — | 开发模式验证码 (不设则必须用真实邮件) |
+| `ONEPERSON_DEV_VERIFICATION_CODE` | 否 | — | 开发模式验证码 (不设则必须用真实邮件) |
 | `CORS_ORIGIN` | 否 | `*` | 允许的跨域来源 |
 
 ### systemd 服务
@@ -341,7 +341,7 @@ A: 设置 `REDIS_URL` 后自动启用 Redis pub/sub bridge。publish 侧已就�
 
 ```bash
 # 终端 1: zserver
-cd zserver && zig build && JWT_SECRET=dev-secret-dev-secret-dev-secret- MULTICA_DEV_VERIFICATION_CODE=000000 ./zig-out/bin/zserver server
+cd zserver && zig build && JWT_SECRET=dev-secret-dev-secret-dev-secret- ONEPERSON_DEV_VERIFICATION_CODE=000000 ./zig-out/bin/zserver server
 
 # 终端 2: 前端
 cd apps/web && pnpm dev

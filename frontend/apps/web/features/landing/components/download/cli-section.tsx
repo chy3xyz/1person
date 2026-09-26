@@ -6,7 +6,7 @@ import { copyText } from "@1person/ui/lib/clipboard";
 import { useLocale } from "../../i18n";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash";
+  "curl -fsSL https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.sh | bash";
 const SETUP_CMD = "1person setup";
 
 /**

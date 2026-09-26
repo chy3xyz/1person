@@ -729,7 +729,7 @@ Issue 的 assignee 可以是 member（人）或 agent。这是 1Person 和传统
 - **目标读者**: self-host 运维
 - **叙事位置**: self-host 的 auth 配置。
 - **写什么**（1500-2000 字）:
-  - **🚨 超醒目 warning block**：生产环境必须保持 `MULTICA_DEV_VERIFICATION_CODE` 为空；固定测试验证码只用于非 production 私有测试
+  - **🚨 超醒目 warning block**：生产环境必须保持 `ONEPERSON_DEV_VERIFICATION_CODE` 为空；固定测试验证码只用于非 production 私有测试
   - Email + verification code 登录流程（依赖 Resend）
   - Google OAuth 配置步骤（创建 OAuth client → redirect URI → 填 env）
   - **Signup 白名单三层优先级决策树**:
@@ -756,7 +756,7 @@ Issue 的 assignee 可以是 member（人）或 agent。这是 1Person 和传统
   - 任务一直 queued（runtime offline / max_concurrent 满 / agent 配错）
   - WebSocket 连不上（cookie / CORS / proxy）
   - Email 没收到（Resend 未配置 → 看 stderr）
-  - 固定测试验证码不工作（APP_ENV / MULTICA_DEV_VERIFICATION_CODE 检查）
+  - 固定测试验证码不工作（APP_ENV / ONEPERSON_DEV_VERIFICATION_CODE 检查）
   - Port 冲突
   - 日志位置：daemon / server / browser console
 - **不写**: 深度 bug report（去 GitHub issue）
@@ -779,8 +779,8 @@ Issue 的 assignee 可以是 member（人）或 agent。这是 1Person 和传统
 - **叙事位置**: Reference 板块首篇。
 - **写什么**（2000-2500 字）:
   - **认证入口**（开头一段）:
-    - `1person login` → 拿 PAT（`mul_` 前缀）
-    - PAT 存 `~/.1person/config.json`
+    - `1person login` → 拿 PAT（`1p_` 前缀）
+    - PAT 存 `~/.config/1person/config.json`
     - 详细 token 机制见 [Authentication & Tokens](/docs/auth-tokens)
   - **命令总览**（按功能分组，每条一行）:
     - **Auth**：`login / auth status / auth logout`
@@ -812,8 +812,8 @@ Issue 的 assignee 可以是 member（人）或 agent。这是 1Person 和传统
 - **写什么**（1200-1800 字）:
   - **3 种 token**:
     - **JWT Cookie**（`1person_auth`，HttpOnly，30 天）—— 浏览器
-    - **PAT**（`mul_` 前缀）—— CLI / 脚本
-    - **Daemon Token**（`mdt_` 前缀）—— daemon 专用
+    - **PAT**（`1p_` 前缀）—— CLI / 脚本
+    - **Daemon Token**（`1d_` 前缀）—— daemon 专用
   - **Token 适用矩阵**:
     | 路由 | JWT | PAT | Daemon Token |
     |---|---|---|---|

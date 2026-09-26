@@ -11,8 +11,8 @@ import { getUiText } from "~/lib/translations";
 import { DOCS_BASE_PATH, toDocsHref } from "~/lib/locale-link";
 
 const EXTERNAL_LINKS: { label: string; href: string }[] = [
-  { label: "GitHub", href: "https://github.com/1person-ai/1person" },
-  { label: "1Person", href: "https://1person.ai" },
+  { label: "GitHub", href: "https://github.com/chy3xyz/1person" },
+  { label: "1Person", href: "https://1person.xyz" },
 ];
 
 export function DocsLayout(props: {

@@ -4,7 +4,7 @@ set -euo pipefail
 PORT="${PORT:-18089}"
 BASE="http://127.0.0.1:${PORT}"
 export JWT_SECRET="${JWT_SECRET:-test-secret}"
-export MULTICA_DEV_VERIFICATION_CODE="${MULTICA_DEV_VERIFICATION_CODE:-000000}"
+export ONEPERSON_DEV_VERIFICATION_CODE="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}"
 RED="\033[0;31m"; GREEN="\033[0;32m"; RESET="\033[0m"
 failures=0
 pass() { echo -e "${GREEN}PASS${RESET}: $1"; }
@@ -22,7 +22,7 @@ for i in $(seq 1 30); do if [[ $(http_status "${BASE}/health") == "200" ]]; then
 
 EMAIL="notif-e2e-$(date +%s)@example.com"
 http_status -X POST -d "{\"email\":\"${EMAIL}\"}" -H "Content-Type: application/json" "${BASE}/auth/send-code" >/dev/null
-auth_body=$(http_body -X POST -d "{\"email\":\"${EMAIL}\",\"code\":\"${MULTICA_DEV_VERIFICATION_CODE:-000000}\"}" -H "Content-Type: application/json" "${BASE}/auth/verify-code")
+auth_body=$(http_body -X POST -d "{\"email\":\"${EMAIL}\",\"code\":\"${ONEPERSON_DEV_VERIFICATION_CODE:-000000}\"}" -H "Content-Type: application/json" "${BASE}/auth/verify-code")
 TOKEN=$(jget "${auth_body}" token)
 AUTH="Authorization: Bearer ${TOKEN}"
 

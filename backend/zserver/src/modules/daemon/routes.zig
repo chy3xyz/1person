@@ -4,8 +4,8 @@
 //! under `/api/daemon`, same handler functions (now living in this
 //! module's `handler.zig`). The `/api/daemon` group is gated by the
 //! dedicated `DaemonAuth` interceptor (see
-//! `src/middleware/daemon_auth.zig`) which accepts `mdt_` daemon
-//! tokens in addition to the global `mul_` / `mat_` / `mcn_`
+//! `src/middleware/daemon_auth.zig`) which accepts `1d_` daemon
+//! tokens in addition to the global `1p_` / `1t_` / `1c_`
 //! prefixes. The global `AuthInterceptor` runs first and short-
 //! circuits the daemon middleware via the `user_id` attribute.
 

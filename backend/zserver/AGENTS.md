@@ -91,7 +91,7 @@ To exercise the real DB path locally:
 ```bash
 docker compose up -d postgres
 DATABASE_URL=postgres://app:secret@localhost:5432/zserver \
-    MULTICA_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
+    ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
     ./zig-out/bin/zserver migrate
 DATABASE_URL=... ./zig-out/bin/zserver server --port 18080
 ```

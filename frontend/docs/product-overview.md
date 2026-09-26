@@ -115,8 +115,8 @@ Claude Code · Codex · OpenClaw · OpenCode · Hermes · Gemini · Pi · Cursor
 | **Pin 固定** | 个人侧边栏快捷方式，把常用的 issue/project 置顶 | `pinned_item` |
 | **Reaction 反应** | Issue 或评论上的 emoji 反应，跟 GitHub/Slack 一样 | `issue_reaction`, `comment_reaction` |
 | **Attachment 附件** | Issue 或评论的文件上传，支持 S3/CloudFront 或本地存储 | `attachment` |
-| **Personal Access Token (PAT)** | 用户级 API token，CLI 和自动化用。`mul_` 前缀 | `personal_access_token` |
-| **Daemon Token** | 单 workspace 单 daemon 的 token。`mdt_` 前缀，比 PAT 权限范围更小 | `daemon_token` |
+| **Personal Access Token (PAT)** | 用户级 API token，CLI 和自动化用。`1p_` 前缀 | `personal_access_token` |
+| **Daemon Token** | 单 workspace 单 daemon 的 token。`1d_` 前缀，比 PAT 权限范围更小 | `daemon_token` |
 | **Session Resumption 会话恢复** | 同一对 (agent, issue) 的下一次任务会自动复用上次 Claude Code 的 `session_id` 和工作目录——历史对话、文件状态都保留 | `agent_task_queue.session_id`, `.work_dir` |
 | **MCP (Model Context Protocol)** | Anthropic 提出的协议，让 agent 通过标准接口调用外部工具。每个 agent 可配自己的 MCP server 列表 | `agent.mcp_config` (JSONB) |
 | **Workspace Context 工作区上下文** | 工作区级别的 agent 系统提示词。所有该工作区的 agent 都会感知到它 | `workspace.context` |
@@ -324,7 +324,7 @@ Agent 是 1Person 的灵魂。几乎所有功能都围绕"如何让一个 agent 
 | 命令 | 说明 |
 |------|------|
 | `1person setup` | 一键配置：填 URL + 登录 + 启动 daemon |
-| `1person login` | 浏览器打开 OAuth 登录，保存 90 天 PAT 到 `~/.1person/config.json` |
+| `1person login` | 浏览器打开 OAuth 登录，保存 90 天 PAT 到 `~/.config/1person/config.json` |
 | `1person login --token <pat>` | 无头登录（SSH/CI） |
 | `1person daemon start` | 后台启动 daemon（写 PID 到 `~/.1person/daemon.pid`，日志到 `~/.1person/daemon.log`） |
 | `1person daemon stop` | 发 SIGTERM，优雅关闭（等待进行中的任务完成，超时 30s） |
@@ -335,7 +335,7 @@ Agent 是 1Person 的灵魂。几乎所有功能都围绕"如何让一个 agent 
 #### 安全边界
 
 - 每个任务一个**独立工作目录** `~/1person_workspaces/{ws}/{task_short_id}/workdir/`
-- 环境变量**过滤**：阻止 agent 覆盖 daemon 的认证变量（`MULTICA_TOKEN` 等）
+- 环境变量**过滤**：阻止 agent 覆盖 daemon 的认证变量（`ONEPERSON_TOKEN` 等）
 - 仓库访问**白名单**：agent 只能 checkout workspace 配置的仓库
 - Codex 有**版本相关的 sandbox 策略**
 

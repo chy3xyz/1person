@@ -28,7 +28,7 @@ This keeps Docker simple while still isolating schema and data.
 
 - Node.js `v20+`
 - `pnpm` `v10.28+`
-- Go `v1.26+`
+- Zig `0.17+`
 - Docker
 
 ## Important Rules
@@ -289,12 +289,12 @@ This runs:
 
 1. TypeScript typecheck
 2. TypeScript unit tests
-3. Go tests
+3. zserver (Zig) tests
 4. Playwright E2E tests
 
 Notes:
 
-- Go tests create their own fixture data
+- zserver tests create their own fixture data
 - E2E tests create their own workspace and issue fixtures
 - the check flow starts backend/frontend only if they are not already running
 
@@ -319,7 +319,7 @@ human intervention.
 ### Why Not Just `make daemon`?
 
 `make daemon` uses the system-installed CLI's stored token and connects to
-whatever server is configured in `~/.1person/config.json`. That's fine for
+whatever server is configured in `~/.config/1person/config.json`. That's fine for
 day-to-day development against a shared server, but for fully isolated testing
 you need:
 
@@ -373,7 +373,7 @@ done
 
 #### 2. Create a test user and token (automated auth)
 
-For deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE=888888`
+For deterministic local automation, set `ONEPERSON_DEV_VERIFICATION_CODE=888888`
 in your env file before starting the backend:
 
 ```bash
@@ -433,7 +433,7 @@ EOF
 make cli ARGS="daemon start --profile $PROFILE"
 ```
 
-The daemon runs from the current worktree's Go source, connecting to the
+The daemon runs from the current worktree's Zig CLI (`backend/zserver`), connecting to the
 local backend. Agent-executed `1person` commands automatically use the same
 binary (the daemon prepends its own directory to `PATH`).
 
@@ -478,7 +478,7 @@ This automatically:
 4. Connects to the local backend
 
 Login in the Desktop UI with `dev@localhost` and the generated code from the
-backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
+backend logs. If you set `ONEPERSON_DEV_VERIFICATION_CODE=888888` before starting
 the backend, you can use `888888` instead.
 
 If the backend runs on a non-default port (worktree), create
@@ -492,16 +492,16 @@ VITE_WS_URL=ws://localhost:<backend-port>/ws
 ### Isolation Guarantee
 
 Nothing in this flow touches the system-installed `1person` or the default
-`~/.1person/config.json`:
+`~/.config/1person/config.json`:
 
 | Resource | System / Production | Local Dev (per-worktree) |
 |---|---|---|
-| Config | `~/.1person/config.json` | `~/.1person/profiles/dev-<slug>-<hash>/config.json` |
+| Config | `~/.config/1person/config.json` | `~/.1person/profiles/dev-<slug>-<hash>/config.json` |
 | Daemon PID | `~/.1person/daemon.pid` | `~/.1person/profiles/dev-<slug>-<hash>/daemon.pid` |
 | Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
 | Workspaces dir | `~/1person_workspaces/` | `~/1person_workspaces_dev-<slug>-<hash>/` |
 | Database | remote / production | local Docker: `1person_<slug>_<hash>` |
-| Desktop profile | `desktop-api.1person.ai` | `desktop-localhost-<port>` |
+| Desktop profile | `desktop-api.1person.xyz` | `desktop-localhost-<port>` |
 
 Multiple worktrees can run simultaneously without conflict.
 

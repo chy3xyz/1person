@@ -1,6 +1,6 @@
 import { cn } from "@1person/ui/lib/utils";
 
-export const githubUrl = "https://github.com/1person-ai/1person";
+export const githubUrl = "https://github.com/chy3xyz/1person";
 export const twitterUrl = "https://x.com/1PersonAI";
 
 export function GitHubMark({ className }: { className?: string }) {

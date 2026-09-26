@@ -2,8 +2,8 @@
 set -euo pipefail
 cd /Users/n0x/w4_proj/dev_machine/1person/zserver
 BASE="http://127.0.0.1:18097"
-DATABASE_URL="postgres://multica:multica@localhost:5432/multica?sslmode=disable" \
-  MULTICA_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
+DATABASE_URL="postgres://1person:1person@localhost:5432/1person?sslmode=disable" \
+  ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
   ./zig-out/bin/zserver server --port 18097 > /tmp/mint-test.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null' EXIT
@@ -28,8 +28,8 @@ echo "$REG" | grep -q daemon_id && echo "PASS: daemon register with minted token
 HB=$(curl -s -X POST -H "Authorization: Bearer $DT" $BASE/api/daemon/heartbeat)
 echo "$HB" | grep -q '"ok"' && echo "PASS: heartbeat" || { echo "FAIL: heartbeat $HB"; exit 1; }
 
-FORGED=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -H "Authorization: Bearer mdt_deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" -d '{"runtime_id":"x"}' $BASE/api/daemon/register)
-[ "$FORGED" = "401" ] && echo "PASS: forged mdt_ rejected (401)" || { echo "FAIL: forged token status=$FORGED"; exit 1; }
+FORGED=$(curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -H "Authorization: Bearer 1d_deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" -d '{"runtime_id":"x"}' $BASE/api/daemon/register)
+[ "$FORGED" = "401" ] && echo "PASS: forged 1d_ rejected (401)" || { echo "FAIL: forged token status=$FORGED"; exit 1; }
 
 NONMEMBER=$(curl -s -X POST -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "{\"workspace_id\":\"00000000-0000-0000-0000-000000000000\"}" $BASE/api/daemon/tokens)
 echo "$NONMEMBER" | grep -q "not a workspace member" && echo "PASS: non-member mint rejected" || { echo "FAIL: nonmember $NONMEMBER"; exit 1; }

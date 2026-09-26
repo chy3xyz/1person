@@ -3,7 +3,7 @@
 
 services:
   backend:
-    image: multica-backend:dev
+    image: 1person-backend:dev
     build:
       context: .
       dockerfile: Dockerfile
@@ -13,7 +13,7 @@ services:
         DATE: ${DATE:-unknown}
 
   frontend:
-    image: multica-web:dev
+    image: 1person-web:dev
     build:
       context: ./frontend
       dockerfile: ../Dockerfile.web

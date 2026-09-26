@@ -90,7 +90,7 @@ win:
   artifactName: 1person-desktop-${version}-windows-${arch}.${ext}
 publish:
   provider: github
-  owner: 1person-ai
+  owner: chy3xyz
   repo: 1person
   # Align with our CLI release flow which pre-creates a *published* GitHub
   # Release via `gh release create`. The electron-builder default of

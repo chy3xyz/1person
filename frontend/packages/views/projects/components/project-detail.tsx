@@ -457,7 +457,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
   // Sidebar panel
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_project_detail_layout",
+    id: "1person_project_detail_layout",
   });
   const sidebarRef = usePanelRef();
   // Desktop and mobile sidebar state must be separate. A single state defaulting

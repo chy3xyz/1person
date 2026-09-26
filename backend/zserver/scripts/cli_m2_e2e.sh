@@ -10,15 +10,15 @@ cat > "$CFG" <<JSON
   "daemon_tokens": []
 }
 JSON
-# no-DB server (deterministic; synthetic mdt_ token accepted)
-DATABASE_URL="" MULTICA_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
+# no-DB server (deterministic; synthetic 1d_ token accepted)
+DATABASE_URL="" ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
   ./zig-out/bin/zserver server --port 18091 > /tmp/m2-server.log 2>&1 &
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null' EXIT
 for i in $(seq 1 30); do curl -sf $BASE/health > /dev/null 2>&1 && break; sleep 0.5; done
 
 RUNTIME="rt-m2-$(date +%s)"
-DT="mdt_m2test0000000000000000000000000000"
+DT="1d_m2test0000000000000000000000000000"
 
 echo "== starting 1p daemon (runtime=$RUNTIME) =="
 ./zig-out/bin/1p daemon --runtime_id "$RUNTIME" --token "$DT" --path "$CFG" > /tmp/m2-daemon.log 2>&1 &

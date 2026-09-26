@@ -1496,7 +1496,7 @@ pub fn connectGithub(ctx: *zfinal.Context) !void {
     if (!(try model.requireWorkspaceRoleAttr(ctx, "admin"))) return;
 
     const cfg = g_cfg.?;
-    const app_slug = cfg.github_app_slug orelse "multica";
+    const app_slug = cfg.github_app_slug orelse "1person";
     const state = try model.generateId(allocator, workspace_id);
     defer allocator.free(state);
     const url = try std.fmt.allocPrint(allocator, "https://github.com/apps/{s}/installations/new?state={s}", .{ app_slug, state });
@@ -1707,7 +1707,7 @@ pub fn deleteLarkInstallation(ctx: *zfinal.Context) !void {
 
 pub fn beginLarkInstall(ctx: *zfinal.Context) !void {
     // The Go server returns 503 when the Lark integration is not wired
-    // (no MULTICA_LARK_SECRET_KEY / RegistrationService); the UI hides
+    // (no ONEPERSON_LARK_SECRET_KEY / RegistrationService); the UI hides
     // the bind button in that case. zserver has no external Lark
     // registration service yet, so this endpoint always reports
     // "not configured" instead of fabricating an empty install URL.

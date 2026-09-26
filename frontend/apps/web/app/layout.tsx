@@ -60,7 +60,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.1person.app"),
+  metadataBase: new URL("https://www.1person.xyz"),
   title: {
     default: "1Person — Project Management for Human + Agent Teams",
     template: "%s | 1Person",

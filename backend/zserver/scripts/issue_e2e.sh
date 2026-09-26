@@ -7,7 +7,7 @@
 # every check passes, 1 otherwise.
 #
 # Usage:
-#   MULTICA_DEV_VERIFICATION_CODE=000000 \
+#   ONEPERSON_DEV_VERIFICATION_CODE=000000 \
 #   JWT_SECRET=test-secret \
 #   ./scripts/issue_e2e.sh
 #
@@ -84,7 +84,7 @@ if [[ $(http_status "${BASE}/health") != "200" ]]; then
 fi
 
 # ─── Auth ─────────────────────────────────────────────────────────────
-DEV_CODE="${MULTICA_DEV_VERIFICATION_CODE:-${DEV_AUTH_CODE:-000000}}"
+DEV_CODE="${ONEPERSON_DEV_VERIFICATION_CODE:-${DEV_AUTH_CODE:-000000}}"
 email="e2e-$(date +%s)@example.com"
 http_status -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${email}\"}" "${BASE}/auth/send-code" >/dev/null

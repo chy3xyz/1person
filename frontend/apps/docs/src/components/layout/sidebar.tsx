@@ -14,12 +14,12 @@ function GitHubMark() {
 }
 
 // 1Person asterisk mark (matches packages/ui AppIcon clip-path).
-const MULTICA_CLIP = "polygon(45% 62.1%, 45% 100%, 55% 100%, 55% 62.1%, 81.8% 88.9%, 88.9% 81.8%, 62.1% 55%, 100% 55%, 100% 45%, 62.1% 45%, 88.9% 18.2%, 81.8% 11.1%, 55% 37.9%, 55% 0%, 45% 0%, 45% 37.9%, 18.2% 11.1%, 11.1% 18.2%, 37.9% 45%, 0% 45%, 0% 55%, 37.9% 55%, 11.1% 81.8%, 18.2% 88.9%)";
+const ONEPERSON_CLIP = "polygon(45% 62.1%, 45% 100%, 55% 100%, 55% 62.1%, 81.8% 88.9%, 88.9% 81.8%, 62.1% 55%, 100% 55%, 100% 45%, 62.1% 45%, 88.9% 18.2%, 81.8% 11.1%, 55% 37.9%, 55% 0%, 45% 0%, 45% 37.9%, 18.2% 11.1%, 11.1% 18.2%, 37.9% 45%, 0% 45%, 0% 55%, 37.9% 55%, 11.1% 81.8%, 18.2% 88.9%)";
 
 function PersonMark() {
   return (
     <span class="inline-block size-[1em]" aria-hidden="true">
-      <span class="block size-full bg-current" style={{ "clip-path": MULTICA_CLIP }} />
+      <span class="block size-full bg-current" style={{ "clip-path": ONEPERSON_CLIP }} />
     </span>
   );
 }
@@ -152,10 +152,10 @@ export function Sidebar(props: {
       />
       <div class="mt-6 border-t border-border/60 pt-4">
         <div class="space-y-2.5 px-2.5">
-          <ExternalLink href="https://github.com/1person-ai/1person" icon={<GitHubMark />}>
+          <ExternalLink href="https://github.com/chy3xyz/1person" icon={<GitHubMark />}>
             GitHub
           </ExternalLink>
-          <ExternalLink href="https://1person.ai" icon={<PersonMark />}>
+          <ExternalLink href="https://1person.xyz" icon={<PersonMark />}>
             1Person
           </ExternalLink>
         </div>

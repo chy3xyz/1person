@@ -6,7 +6,7 @@ This document is the source of truth for the analytics events 1Person ships
 to PostHog. Events feed the acquisition → activation → expansion funnel that
 drives our weekly Active Workspaces (WAW) north-star metric.
 
-See [MUL-1122](https://github.com/1person-ai/1person) for the design context.
+See [MUL-1122](https://github.com/chy3xyz/1person) for the design context.
 
 > **PostHog is reserved for user/product-behaviour events.** High-volume
 > operational / execution-lifecycle telemetry — runtime lifecycle

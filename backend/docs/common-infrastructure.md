@@ -15,7 +15,7 @@
 | **模块系统** | 17 个模块（issue/workspace/agent/autopilot/...） | 新增 9 个共性模块 |
 | **路由注册** | `router.zig` 自动扫描 `modules/` | 无需改动 |
 | **数据存储** | 无 DB（内存） + PG（可选） | 部分模块需要持久化 |
-| **鉴权** | JWT + PAT + mdt_ + 多 token 类型 | 增加角色级鉴权 |
+| **鉴权** | JWT + PAT + 1d_ + 多 token 类型 | 增加角色级鉴权 |
 | **实时** | WS RoomManager + Redis PUB 桥 | 增加事件类型 |
 | **测试** | 12 套 e2e + 30 个 integration | 每个新模块配 e2e |
 

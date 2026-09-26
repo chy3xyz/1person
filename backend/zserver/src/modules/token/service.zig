@@ -73,7 +73,7 @@ fn resolveCaller(ctx: *zfinal.Context) !?model.CurrentUser {
     if (getCurrentUser(ctx)) |u| return u;
 
     const token_value = ctx.attributes.get("token_value") orelse return null;
-    if (!std.mem.startsWith(u8, token_value, "mul_")) return null;
+    if (!std.mem.startsWith(u8, token_value, "1p_")) return null;
 
     const hash = try auth.hashToken(ctx.allocator, token_value);
     defer ctx.allocator.free(hash);
@@ -337,7 +337,7 @@ pub fn renewCurrentToken(ctx: *zfinal.Context) !void {
     else
         "";
 
-    if (raw_token.len == 0 or !std.mem.startsWith(u8, raw_token, "mul_")) {
+    if (raw_token.len == 0 or !std.mem.startsWith(u8, raw_token, "1p_")) {
         ctx.res_status = .bad_request;
         try ctx.renderJson(.{ .@"error" = "only personal access tokens can be renewed" });
         return;

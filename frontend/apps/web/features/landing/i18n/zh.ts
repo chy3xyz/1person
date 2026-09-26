@@ -1107,7 +1107,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         ],
         improvements: [
           "Server 用 Redis 缓存 PAT / Daemon Token 校验，大型团队不再让 DB 抗下每次请求",
-          "后端支持通过 `MULTICA_CLAUDE_ARGS` / `MULTICA_CODEX_ARGS` 配置 Agent CLI 默认参数",
+          "后端支持通过 `ONEPERSON_CLAUDE_ARGS` / `ONEPERSON_CODEX_ARGS` 配置 Agent CLI 默认参数",
           "Manual 与 Agent 创建 Issue 共享同一个 Dialog 外壳，picker Agent 会被默认设为 assignee",
         ],
         fixes: [

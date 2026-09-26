@@ -31,7 +31,7 @@ pub fn register(app: *zfinal.ZFinal) !void {
     // interceptor is stricter than the group's `member` interceptor so
     // workspace owners / admins can purge another user's replay log
     // without having to relax the rest of the inbox surface, and a
-    // service caller (when `MULTICA_SERVICE_TOKEN` is configured) can
+    // service caller (when `ONEPERSON_SERVICE_TOKEN` is configured) can
     // drive the same path without a workspace context.
     var admin_api = zfinal.RouteGroup.init(app, "/api/inbox/admin");
     defer admin_api.deinit();

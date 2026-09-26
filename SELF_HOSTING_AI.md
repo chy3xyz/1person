@@ -12,7 +12,7 @@ This document is designed for AI agents to execute. Follow these steps exactly t
 
 ```bash
 # Install CLI + provision self-host server
-curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.sh | bash -s -- --with-server
 
 # Configure CLI for localhost, authenticate, and start daemon
 1person setup self-host
@@ -28,10 +28,10 @@ Wait for the server output `✓ 1Person server is running and CLI is ready!` bef
 ## Alternative: Manual Setup
 
 ```bash
-git clone https://github.com/1person-ai/1person.git
+git clone https://github.com/chy3xyz/1person.git
 cd 1person
 make selfhost
-brew install 1person-ai/tap/1person
+brew install chy3xyz/tap/1person
 1person setup self-host
 ```
 

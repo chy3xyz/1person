@@ -17,10 +17,10 @@
 开源的 Managed Agents 平台。<br/>
 将编码 Agent 变成真正的队友——分配任务、跟踪进度、积累技能。
 
-[![CI](https://github.com/1person-ai/1person/actions/workflows/ci.yml/badge.svg)](https://github.com/1person-ai/1person/actions/workflows/ci.yml)
-[![GitHub stars](https://img.shields.io/github/stars/1person-ai/1person?style=flat)](https://github.com/1person-ai/1person/stargazers)
+[![CI](https://github.com/chy3xyz/1person/actions/workflows/ci.yml/badge.svg)](https://github.com/chy3xyz/1person/actions/workflows/ci.yml)
+[![GitHub stars](https://img.shields.io/github/stars/chy3xyz/1person?style=flat)](https://github.com/chy3xyz/1person/stargazers)
 
-[官网](https://1person.ai) · [云服务](https://1person.ai) · [X](https://x.com/1PersonAI) · [自部署指南](SELF_HOSTING.md) · [参与贡献](CONTRIBUTING.md)
+[官网](https://1person.xyz) · [云服务](https://1person.xyz) · [X](https://x.com/1PersonAI) · [自部署指南](SELF_HOSTING.md) · [参与贡献](CONTRIBUTING.md)
 
 **[English](README.md) | 简体中文**
 
@@ -69,15 +69,15 @@
 ### macOS / Linux（推荐 Homebrew）
 
 ```bash
-brew install 1person-ai/tap/1person
+brew install chy3xyz/tap/1person
 ```
 
-后续可用 `brew upgrade 1person-ai/tap/1person` 更新 CLI。
+后续可用 `brew upgrade chy3xyz/tap/1person` 更新 CLI。
 
 ### macOS / Linux（安装脚本）
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.sh | bash
 ```
 
 如果没有 Homebrew，可以使用安装脚本。脚本会安装 1Person CLI：检测到 `brew` 时通过 Homebrew 安装，否则直接下载二进制。
@@ -85,7 +85,7 @@ curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/ins
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 | iex
 ```
 
 安装完成后，一条命令完成配置、认证和启动：
@@ -97,7 +97,7 @@ irm https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.ps
 > **自部署？** 加上 `--with-server` 在本地部署完整的 1Person 服务：
 >
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --with-server
+> curl -fsSL https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.sh | bash -s -- --with-server
 > 1person setup self-host
 > ```
 >
@@ -107,7 +107,7 @@ irm https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.ps
 
 ## 快速上手
 
-安装好 CLI（或注册 [1Person 云服务](https://1person.ai)）后，按以下步骤将第一个任务分配给 Agent：
+安装好 CLI（或注册 [1Person 云服务](https://1person.xyz)）后，按以下步骤将第一个任务分配给 Agent：
 
 ### 1. 配置并启动 daemon
 
@@ -139,8 +139,8 @@ daemon 在后台运行，保持你的机器与 1Person 的连接。它会自动�
 
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────────┐
-│   Next.js    │────>│  Go 后端     │────>│   PostgreSQL     │
-│   前端       │<────│  (Chi + WS)  │<────│   (pgvector)     │
+│   Next.js    │────>│  Zig 后端    │────>│   PostgreSQL     │
+│   前端       │<────│  (zserver)   │<────│   (pgvector)     │
 └──────────────┘     └──────┬───────┘     └──────────────────┘
                             │
                      ┌──────┴───────┐
@@ -153,7 +153,7 @@ daemon 在后台运行，保持你的机器与 1Person 的连接。它会自动�
 | 层级 | 技术栈 |
 |------|--------|
 | 前端 | Next.js 16 (App Router) |
-| 后端 | Go (Chi router, sqlc, gorilla/websocket) |
+| 后端 | Zig (`zserver` / zfinal) |
 | 数据库 | PostgreSQL 17 with pgvector |
 | Agent 运行时 | 本地 daemon 执行 Claude Code、Codex、GitHub Copilot CLI、OpenClaw、OpenCode、Hermes、Gemini、Pi、Cursor Agent、Kimi 或 Kiro CLI |
 
@@ -161,7 +161,7 @@ daemon 在后台运行，保持你的机器与 1Person 的连接。它会自动�
 
 参与 1Person 代码贡献，请参阅 [贡献指南](CONTRIBUTING.md)。
 
-**环境要求：** [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Go](https://go.dev/) v1.26+, [Docker](https://www.docker.com/)
+**环境要求：** [Zig](https://ziglang.org/) 0.17+, [Node.js](https://nodejs.org/) v20+, [pnpm](https://pnpm.io/) v10.28+, [Docker](https://www.docker.com/)
 
 ```bash
 pnpm --dir frontend install

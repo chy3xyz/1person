@@ -10,7 +10,7 @@
 # `POST /:id/triggers/:tid/rotate-webhook-token`.
 #
 # Usage:
-#   MULTICA_DEV_VERIFICATION_CODE=000000 \
+#   ONEPERSON_DEV_VERIFICATION_CODE=000000 \
 #   JWT_SECRET=test-secret \
 #   ./scripts/autopilot_e2e.sh
 #
@@ -87,7 +87,7 @@ fi
 EMAIL="autopilot-e2e-$(date +%s)@example.com"
 http_status -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\"}" "${BASE}/auth/send-code" >/dev/null
-code="${MULTICA_DEV_VERIFICATION_CODE:-000000}"
+code="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}"
 auth_body=$(http_body -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"code\":\"${code}\"}" "${BASE}/auth/verify-code")
 TOKEN=$(jget_path "${auth_body}" token)
@@ -110,7 +110,7 @@ HWS="X-Workspace-Id: ${WS_ID}"
 # to a fake assignee_id only when psql is unavailable.
 AGENT_RUNTIME_ID="e2e00000-0000-0000-0000-000000000001"
 AGENT_ID="e2e00000-0000-0000-0000-000000000002"
-PG_CONN="${DATABASE_URL:-postgres://n0x@localhost:5432/multica?sslmode=disable}"
+PG_CONN="${DATABASE_URL:-postgres://1person:1person@localhost:5432/1person?sslmode=disable}"
 if psql "${PG_CONN}" -c "SELECT 1" >/dev/null 2>&1; then
     psql "${PG_CONN}" -c "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, daemon_id, status, visibility) VALUES ('${AGENT_RUNTIME_ID}'::uuid, '${WS_ID}'::uuid, 'e2e-runtime', 'local', 'e2e', 'e2e-daemon', 'online', 'private') ON CONFLICT (id) DO UPDATE SET workspace_id = EXCLUDED.workspace_id" >/dev/null 2>&1 || true
     psql "${PG_CONN}" -c "INSERT INTO agent (id, workspace_id, name, runtime_id, runtime_mode, visibility, status, description, instructions) VALUES ('${AGENT_ID}'::uuid, '${WS_ID}'::uuid, 'e2e-agent', '${AGENT_RUNTIME_ID}'::uuid, 'local', 'workspace', 'idle', '', '') ON CONFLICT (id) DO UPDATE SET workspace_id = EXCLUDED.workspace_id" >/dev/null 2>&1 || true

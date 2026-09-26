@@ -6,11 +6,11 @@ description: |
 type: application
 version: 0.1.0
 appVersion: "latest"
-home: https://multica.ai
+home: https://1person.xyz
 sources:
-  - https://github.com/multica-ai/multica
+  - https://github.com/chy3xyz/1person
 keywords:
-  - multica
+  - 1person
   - issue-tracker
   - ai-agents
   - self-host

@@ -1026,7 +1026,7 @@ pub fn metrics() model.RoomManagerMetricsSnapshot {
 fn getToken(ctx: *zfinal.Context) !?[]const u8 {
     const from_query = try ctx.getPara("token") orelse "";
     if (from_query.len > 0) return from_query;
-    return try ctx.getCookie("multica_auth");
+    return try ctx.getCookie("1person_auth");
 }
 
 fn authenticate(ctx: *zfinal.Context) !?model.TokenInfo {

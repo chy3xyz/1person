@@ -366,7 +366,7 @@ export class ApiClient {
     if (typeof document === "undefined") return null;
     const match = document.cookie
       .split("; ")
-      .find((c) => c.startsWith("multica_csrf="));
+      .find((c) => c.startsWith("1person_csrf="));
     return match ? match.split("=")[1] ?? null : null;
   }
 
@@ -2156,7 +2156,7 @@ export class ApiClient {
 
   async reorderPins(data: ReorderPinsRequest): Promise<void> {
     await this.fetch("/api/pins/reorder", {
-      method: "PUT",
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

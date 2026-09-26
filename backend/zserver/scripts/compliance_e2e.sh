@@ -13,7 +13,7 @@ http_body() { curl -s "$@"; }
 jget() { echo "$1" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('data',d).get('$2',''))" 2>/dev/null || true; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ( cd "${SCRIPT_DIR}/.." && zig build ) || { echo "build failed"; exit 1; }
-MULTICA_DEV_VERIFICATION_CODE="${MULTICA_DEV_VERIFICATION_CODE:-000000}" "${SCRIPT_DIR}/../zig-out/bin/zserver" server --port "${PORT}" >/tmp/zserver-compliance-e2e.log 2>&1 &
+ONEPERSON_DEV_VERIFICATION_CODE="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}" "${SCRIPT_DIR}/../zig-out/bin/zserver" server --port "${PORT}" >/tmp/zserver-compliance-e2e.log 2>&1 &
 SERVER_PID=$!
 cleanup() { kill "${SERVER_PID}" >/dev/null 2>&1 || true; wait "${SERVER_PID}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
@@ -21,7 +21,7 @@ for i in $(seq 1 30); do if [[ $(http_status "${BASE}/health") == "200" ]]; then
 
 EMAIL="comp-e2e-$(date +%s)@example.com"
 http_status -X POST -d "{\"email\":\"${EMAIL}\"}" -H "Content-Type: application/json" "${BASE}/auth/send-code" >/dev/null
-auth_body=$(http_body -X POST -d "{\"email\":\"${EMAIL}\",\"code\":\"${MULTICA_DEV_VERIFICATION_CODE:-000000}\"}" -H "Content-Type: application/json" "${BASE}/auth/verify-code")
+auth_body=$(http_body -X POST -d "{\"email\":\"${EMAIL}\",\"code\":\"${ONEPERSON_DEV_VERIFICATION_CODE:-000000}\"}" -H "Content-Type: application/json" "${BASE}/auth/verify-code")
 TOKEN=$(jget "${auth_body}" token)
 AUTH="Authorization: Bearer ${TOKEN}"
 

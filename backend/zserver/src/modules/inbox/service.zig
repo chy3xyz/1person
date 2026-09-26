@@ -917,8 +917,8 @@ pub fn exportInboxEvents(ctx: *zfinal.Context) !void {
 
     // Append a structured audit line. Best-effort: failures are
     // logged inside `appendAudit` and never block the response.
-    var format_kv_buf: [32]u8 = undefined;
-    const format_kv = std.fmt.bufPrint(&format_kv_buf, "format={s}", .{format}) catch "format=json";
+    var for1t_kv_buf: [32]u8 = undefined;
+    const for1t_kv = std.fmt.bufPrint(&for1t_kv_buf, "format={s}", .{format}) catch "format=json";
     var bytes_kv_buf: [32]u8 = undefined;
     const bytes_kv = std.fmt.bufPrint(&bytes_kv_buf, "bytes_exported={d}", .{bytes_exported}) catch "bytes_exported=0";
     realtime.appendAudit(
@@ -928,6 +928,6 @@ pub fn exportInboxEvents(ctx: *zfinal.Context) !void {
         workspace_id,
         target_user_id,
         "manual",
-        &[_][]const u8{ format_kv, bytes_kv },
+        &[_][]const u8{ for1t_kv, bytes_kv },
     );
 }

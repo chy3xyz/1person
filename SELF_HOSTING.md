@@ -6,7 +6,7 @@ Deploy 1Person on your own infrastructure in minutes.
 
 | Component | Description | Technology |
 |-----------|-------------|------------|
-| **Backend** | REST API + WebSocket server | Go (single binary) |
+| **Backend** | REST API + WebSocket server | Zig (`zserver`, single binary) |
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
@@ -18,7 +18,7 @@ Two commands to set up everything — server, CLI, and configuration:
 
 ```bash
 # 1. Install CLI + provision the self-host server
-curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --with-server
+curl -fsSL https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.sh | bash -s -- --with-server
 
 # 2. Configure CLI, authenticate, and start the daemon
 1person setup self-host
@@ -33,7 +33,7 @@ Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for 
 > **CLI only?** If the self-host server is already running and you only need the CLI on a macOS/Linux machine, install it with Homebrew:
 >
 > ```bash
-> brew install 1person-ai/tap/1person
+> brew install chy3xyz/tap/1person
 > ```
 
 ---
@@ -47,7 +47,7 @@ If you prefer to run each step manually:
 **Prerequisites:** Docker and Docker Compose.
 
 ```bash
-git clone https://github.com/1person-ai/1person.git
+git clone https://github.com/chy3xyz/1person.git
 cd 1person
 make selfhost
 ```
@@ -71,11 +71,11 @@ Open http://localhost:3000 in your browser. The Docker self-host stack defaults 
 
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
-- **Deterministic local/private testing:** set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
+- **Deterministic local/private testing:** set `APP_ENV=development` and `ONEPERSON_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
 
 Changes to `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads all three from `/api/config` at runtime, so no web rebuild is needed. See [Advanced Configuration → Signup Controls](SELF_HOSTING_ADVANCED.md#signup-controls-optional) for the recommended sequence to lock down workspace creation.
 
-> **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
+> **Warning:** do **not** set `ONEPERSON_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
 ### Step 3 — Install CLI & Start Daemon
 
@@ -86,7 +86,7 @@ Each team member who wants to run AI agents locally needs to:
 ### a) Install the CLI and an AI agent
 
 ```bash
-brew install 1person-ai/tap/1person
+brew install chy3xyz/tap/1person
 ```
 
 You also need at least one AI agent CLI installed:
@@ -139,12 +139,12 @@ To verify the daemon is running:
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy 1Person there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/1person-ai/charts/1person` or the source chart at [`backend/deploy/helm/1person/`](backend/deploy/helm/1person/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy 1Person there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/chy3xyz/charts/1person` or the source chart at [`backend/deploy/helm/1person/`](backend/deploy/helm/1person/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
 
 The chart creates the following resources in the target namespace:
 
 - `1person-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
-- `1person-backend` — Go API/WS server. Backed by a 5Gi `ReadWriteOnce` uploads PVC by default; set `backend.uploads.persistence.enabled=false` when you have configured S3 (`backend.config.s3Bucket`) and don't want the chart to declare the PVC at all.
+- `1person-backend` — Zig API/WS server (`zserver`). Backed by a 5Gi `ReadWriteOnce` uploads PVC by default; set `backend.uploads.persistence.enabled=false` when you have configured S3 (`backend.config.s3Bucket`) and don't want the chart to declare the PVC at all.
 - `1person-frontend` — Next.js standalone server
 - Two `Ingress` resources: one for the web host, one for the backend host
 - `1person-config` ConfigMap (rendered from `values.yaml`)
@@ -188,7 +188,7 @@ kubectl -n 1person create secret generic 1person-secrets \
   --from-literal=RESEND_API_KEY="" \
   --from-literal=GOOGLE_CLIENT_SECRET="" \
   --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-  --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+  --from-literal=ONEPERSON_DEV_VERIFICATION_CODE=""
 ```
 
 Leave optional values empty for now — you can fill them in later (see [Step 5 — Log In](#step-5--log-in)).
@@ -196,7 +196,7 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 ### Step 4 — Install the chart
 
 ```bash
-helm install 1person oci://ghcr.io/1person-ai/charts/1person \
+helm install 1person oci://ghcr.io/chy3xyz/charts/1person \
   --version <chart-version> \
   -n 1person
 ```
@@ -206,10 +206,10 @@ Released chart versions strip the leading `v` from the Git tag. For example, rel
 To override defaults, export the chart values, edit them, and pass them with `-f`:
 
 ```bash
-helm show values oci://ghcr.io/1person-ai/charts/1person \
+helm show values oci://ghcr.io/chy3xyz/charts/1person \
   --version <chart-version> > my-values.yaml
 # edit my-values.yaml — e.g. change ingress hosts, image tags, resource limits
-helm install 1person oci://ghcr.io/1person-ai/charts/1person \
+helm install 1person oci://ghcr.io/chy3xyz/charts/1person \
   --version <chart-version> \
   -n 1person \
   -f my-values.yaml
@@ -256,21 +256,21 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
   kubectl -n 1person logs -f deploy/1person-backend | grep "Verification code"
   ```
 
-- **Deterministic local/private testing:** set `backend.config.appEnv: development` in your values file and `MULTICA_DEV_VERIFICATION_CODE=888888` in the Secret, then `helm upgrade` and restart. This fixed code is ignored when `APP_ENV=production`.
+- **Deterministic local/private testing:** set `backend.config.appEnv: development` in your values file and `ONEPERSON_DEV_VERIFICATION_CODE=888888` in the Secret, then `helm upgrade` and restart. This fixed code is ignored when `APP_ENV=production`.
 
   ```bash
-  helm upgrade 1person oci://ghcr.io/1person-ai/charts/1person \
+  helm upgrade 1person oci://ghcr.io/chy3xyz/charts/1person \
     --version <chart-version> \
     -n 1person \
     -f my-values.yaml --set backend.config.appEnv=development
   kubectl -n 1person patch secret 1person-secrets --type=merge \
-    -p '{"stringData":{"MULTICA_DEV_VERIFICATION_CODE":"888888"}}'
+    -p '{"stringData":{"ONEPERSON_DEV_VERIFICATION_CODE":"888888"}}'
   kubectl -n 1person rollout restart deploy/1person-backend
   ```
 
 `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` likewise live under `backend.config.*` in `values.yaml` (as `allowSignup`, `disableWorkspaceCreation`, and `googleClientId`). After `helm upgrade`, the backend pod will roll automatically because the ConfigMap hash changes; the web UI reads all three from `/api/config` at runtime, so no web rebuild is needed.
 
-> **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
+> **Warning:** do **not** set `ONEPERSON_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
 ### Step 6 — Install CLI & Start Daemon
 
@@ -295,7 +295,7 @@ kubectl -n 1person rollout restart deploy/1person-backend deploy/1person-fronten
 To upgrade to a specific 1Person release, upgrade to the matching chart version. The released chart defaults its app images to the matching Git tag:
 
 ```bash
-helm upgrade 1person oci://ghcr.io/1person-ai/charts/1person \
+helm upgrade 1person oci://ghcr.io/chy3xyz/charts/1person \
   --version <chart-version> \
   -n 1person \
   -f my-values.yaml
@@ -314,7 +314,7 @@ images:
 Then run the same upgrade command with `-f my-values.yaml`:
 
 ```bash
-helm upgrade 1person oci://ghcr.io/1person-ai/charts/1person \
+helm upgrade 1person oci://ghcr.io/chy3xyz/charts/1person \
   --version <chart-version> \
   -n 1person \
   -f my-values.yaml
@@ -392,7 +392,7 @@ External cron / systemd timer / Kubernetes `CronJob` setups that call `SELECT ro
 If you installed via the install script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/1person-ai/1person/main/scripts/install.sh | bash -s -- --stop
+curl -fsSL https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.sh | bash -s -- --stop
 ```
 
 If you cloned the repo manually:
@@ -407,13 +407,13 @@ make selfhost-stop
 
 ## Switching to 1Person Cloud
 
-If you've been self-hosting and want to switch your CLI to [1Person Cloud](https://1person.ai):
+If you've been self-hosting and want to switch your CLI to [1Person Cloud](https://1person.xyz):
 
 ```bash
 1person setup
 ```
 
-This reconfigures the CLI for 1person.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
+This reconfigures the CLI for 1person.xyz, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
 
 > Your local Docker services are unaffected. Stop them separately if you no longer need them.
 
@@ -424,7 +424,7 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Pin `MULTICA_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
+Pin `ONEPERSON_IMAGE_TAG` in `.env` to an exact version like `v0.2.4` if you want to stay on a specific release. Migrations run automatically on backend startup.
 If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` or `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
 
 > **Upgrading from `v0.3.4` to `v0.3.5+` fails with `refusing to drop legacy daily rollups: ...`?** That's migration `103`'s fail-closed guard: it requires `task_usage_hourly` to be seeded before the legacy daily rollups are dropped. As of MUL-2957 `migrate up` runs that backfill automatically right before applying `103`, so the upgrade completes in a single invocation. If you are still on a pre-MUL-2957 binary or the auto-hook fails, run `backfill_task_usage_hourly` manually first, then re-run the upgrade. Full instructions in [Advanced Configuration → Usage Dashboard Rollup](SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
@@ -436,7 +436,7 @@ If the selected GHCR tag has not been published yet, fall back to `make selfhost
 If you prefer running Docker Compose steps manually instead of `make selfhost`:
 
 ```bash
-git clone https://github.com/1person-ai/1person.git
+git clone https://github.com/chy3xyz/1person.git
 cd 1person
 cp .env.example .env
 ```

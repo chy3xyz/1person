@@ -17,5 +17,8 @@ pub fn register(app: *zfinal.ZFinal) !void {
 
     try api.get("", handler.getPreferences);
     try api.get("/", handler.getPreferences);
+    // Register both "" and "/" — clients call PUT /api/notification-preferences
+    // (no trailing slash); zfinal does not normalize trailing slashes.
+    try api.put("", handler.updatePreferences);
     try api.put("/", handler.updatePreferences);
 }

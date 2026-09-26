@@ -92,7 +92,7 @@ fn memInit() !void {
 
 /// Mint a daemon credential bound to a workspace. Requires a valid user
 /// token (the global auth interceptor stamps user_id) plus workspace
-/// membership. The returned token is `mdt_<40 hex>` and is stored
+/// membership. The returned token is `1d_<40 hex>` and is stored
 /// SHA-256-hashed in daemon_token, so DaemonAuth can verify it in DB
 /// mode. This is the missing creation half of the daemon-token lifecycle
 /// (Go's GenerateDaemonToken + CreateDaemonToken).
@@ -135,15 +135,15 @@ pub fn mintDaemonToken(ctx: *zfinal.Context) !void {
         return;
     }
 
-    // mdt_ + 40 random hex chars (matches Go GenerateDaemonToken). The
+    // 1d_ + 40 random hex chars (matches Go GenerateDaemonToken). The
     // hex part IS the daemon_id — DaemonAuth compares the token's
     // embedded id against the stored daemon_id column.
     var bytes: [20]u8 = undefined;
     try zfinal.io_instance.io.randomSecure(&bytes);
     const hex = std.fmt.bytesToHex(bytes, .lower);
-    const token = try std.fmt.allocPrint(allocator, "mdt_{s}", .{hex});
+    const token = try std.fmt.allocPrint(allocator, "1d_{s}", .{hex});
     defer allocator.free(token);
-    const daemon_id = token["mdt_".len..];
+    const daemon_id = token["1d_".len..];
 
     const token_hash = try auth_lib.hashToken(allocator, token);
     defer allocator.free(token_hash);
@@ -206,7 +206,7 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
 }
 
 pub fn daemonDeregister(ctx: *zfinal.Context) !void {
-    // The daemon id is carried by the `mdt_<id>` token, not by a
+    // The daemon id is carried by the `1d_<id>` token, not by a
     // path param (Go's `/api/daemon/deregister` is a single endpoint
     // shared by every daemon).
     const daemon_id = ctx.attributes.get("daemon_id") orelse {
@@ -255,8 +255,8 @@ pub fn daemonWebSocket(ctx: *zfinal.Context) !void {
         return;
     };
 
-    // Daemon authentication: `Bearer mdt_<daemon_id>`. The global
-    // AuthInterceptor only marks `mdt_` tokens; the daemon id is
+    // Daemon authentication: `Bearer 1d_<daemon_id>`. The global
+    // AuthInterceptor only marks `1d_` tokens; the daemon id is
     // resolved here (mirrors the Go daemonws handshake, which derives
     // the identity from the daemon token before upgrading).
     const token = @import("../../auth.zig").tokenFromRequest(ctx) orelse {

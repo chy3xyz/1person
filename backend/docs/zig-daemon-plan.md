@@ -11,7 +11,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 - `1p login --server_url ... --email ... --code ... [--path ...]`：send-code +
   verify-code → JWT 存 `~/.config/1person/config.json`（0600）。
 - `1p pair --workspace_id <uuid> [--path ...]`：POST /api/daemon/tokens 铸造
-  mdt_ 并存 config。
+  1d_ 并存 config。
 - 验证：`scripts/cli_m1_e2e.sh`（login → 建工作区 → pair → 用铸造令牌注册
   daemon → 权限 600），对真实 zserver DB 模式全部通过。
 - 与方案的两处偏差：
@@ -25,7 +25,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 
 ## 1. 目标
 
-用 Zig 重写本地 CLI + agent daemon（当前为 Go 的 multica），使桌面端本地
+用 Zig 重写本地 CLI + agent daemon（当前为 Go 的 1person），使桌面端本地
 运行时完全脱离 Go，与 zserver 形成同一生态。CLI 面向用户（登录、配置、
 工作区/工单/技能操作），daemon 面向执行（注册、心跳、认领任务、在本机
 执行 agent 任务并回报）。
@@ -36,7 +36,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 |------|------|------|
 | `1p config` | 读写 ~/.config/1person/config.json（server URL、token） | M1 |
 | `1p login` | 浏览器/验证码登录 → 存 JWT | M1 |
-| `1p daemon pair` | 调 POST /api/daemon/tokens 铸造 mdt_（workspace 绑定） | M1 |
+| `1p daemon pair` | 调 POST /api/daemon/tokens 铸造 1d_（workspace 绑定） | M1 |
 | `1p daemon start/stop/status` | 启动/停止/查询本地 daemon 进程 | M2 |
 | `1p version` / `1p update` | 版本与自更新 | M5 |
 | `1p issue/workspace/agent/skill ...` | 只读/管理命令（复用 zserver API） | M4 |
@@ -44,15 +44,15 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 ## 3. 认证与令牌
 
 - 登录：POST /auth/send-code → /auth/verify-code（dev code 或邮件码）→ JWT（Bearer）。
-- Daemon 令牌：POST /api/daemon/tokens（JWT + workspace 成员）→ `mdt_<40hex>`，
+- Daemon 令牌：POST /api/daemon/tokens（JWT + workspace 成员）→ `1d_<40hex>`，
   服务端存 SHA-256。客户端只存明文令牌。
-- 本地存储：~/.config/1person/config.json，权限 0600；JWT 与 mdt_ 均存于此。
+- 本地存储：~/.config/1person/config.json，权限 0600；JWT 与 1d_ 均存于此。
 
 ## 4. Daemon 协议（对齐 Go daemonws + /api/daemon）
 
-1. register：POST /api/daemon/register {runtime_id, name}（Bearer mdt_）→ daemon_id。
+1. register：POST /api/daemon/register {runtime_id, name}（Bearer 1d_）→ daemon_id。
 2. heartbeat：POST /api/daemon/heartbeat（周期 30s；失败重连退避）。
-3. WS：GET /api/daemon/ws?runtime_ids=...（Bearer mdt_）→ 服务端推送
+3. WS：GET /api/daemon/ws?runtime_ids=...（Bearer 1d_）→ 服务端推送
    `daemon:task_available`。
 4. 任务认领：GET /api/daemon/runtimes/{rid}/tasks/pending + POST .../tasks/claim。
 5. 执行：POST /api/daemon/tasks/{id}/start → 本地执行 → 周期
@@ -72,7 +72,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 
 | 里程碑 | 内容 | 验收 |
 |--------|------|------|
-| M1 | config + login + pair（本机可用） | 对真实 zserver：登录拿 JWT、铸造 mdt_ |
+| M1 | config + login + pair（本机可用） | 对真实 zserver：登录拿 JWT、铸造 1d_ |
 | M2 | daemon 主循环：register/heartbeat/WS/认领 | 对真实 zserver DB 模式：注册→心跳→WS 连接 |
 | M3 | 任务执行垂直切片：认领→执行 echo→progress→complete | e2e：任务状态流转正确 |
 | M4 | 技能与只读命令面 | skill e2e + issue 查询 |
@@ -83,7 +83,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 - 每个里程碑都有 shell e2e（复用 zserver/scripts 模式），对真实 zserver
   （DB 模式）断言。
 - 服务端依赖已就绪：`POST /api/daemon/tokens`（scripts/daemon_db_e2e.sh
-  全绿）、DB 模式 mdt_ 认证（伪造令牌 401）。
+  全绿）、DB 模式 1d_ 认证（伪造令牌 401）。
 - 构建复用 zserver 的 build.zig.zon 依赖（zfinal/zcli，Zig git 包依赖）。
 
 ## 8. 边界与已知约束
@@ -99,7 +99,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
   断线退避重连 → SIGINT/SIGTERM 优雅注销。
 - WS 客户端 `src/cli/ws.zig`：握手（Sec-WebSocket-Accept 校验）+ 掩码帧收发 +
   ping/pong + 带超时的轮询读取（`operateTimeout`）。
-- 验证：`scripts/cli_m2_e2e.sh`（no-DB，合成 mdt_）——register/WS/心跳/认领/优雅停止
+- 验证：`scripts/cli_m2_e2e.sh`（no-DB，合成 1d_）——register/WS/心跳/认领/优雅停止
   全部通过；服务器日志确认 `GET /api/daemon/ws` 连接保持 + `deregister 204`。
 - 关键坑：服务器 greeting 帧与 101 响应头粘在同一 TCP 段，读响应头时被丢弃 → 增加
   pending buffer 消费残余字节后 WS 帧正常。
@@ -124,7 +124,7 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
   实测：构建成功，容器内 migrate 152 幂等、/health、/readyz（动态版本 119）。
 - **docker/entrypoint.sh**：`./zserver migrate && exec ./zserver server`。
 - **ci.yml**：移除失效的 Go backend job（源码 gitignored，全新 checkout 必挂），
-  后端覆盖由 zserver-ci.yml 承担；修复 @multica → @1person 过滤器。
+  后端覆盖由 zserver-ci.yml 承担；修复 @1person → @1person 过滤器。
 - **release.yml**：verify 改为 zserver 构建+单测；goreleaser（Go CLI）job 置 `if: false`
   并注释（等 Zig CLI M5 重接）。
 - **install-zig.sh**：从官方 ziglang.org 下载固定版本（zigup 上游迁移/install.sh 404，
@@ -151,24 +151,25 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 - 遗留（M5）：真实 update 应用（下载+替换二进制）、skill 真实拉取、goreleaser 重接。
 ## 阶段 3 落地记录（品牌/身份统一 → 1person）
 
-已统一（无歧义 + 按仓库既定身份 1person-ai/1person）：
+已统一（无歧义 + 按仓库既定身份 chy3xyz/1person）：
 - **桌面身份分裂修复**（真 bug）：运行时注册 `1person://` + `ai.1person.desktop`，但
-  electron-builder.yml 打包的是 multica scheme/appId/产物名/publish 仓库 →
+  electron-builder.yml 打包的是 1person scheme/appId/产物名/publish 仓库 →
   全部统一为 1person（appId ai.1person.desktop、productName 1Person、schemes [1person]、
-  产物 1person-desktop-*、publish 1person-ai/1person）。打包产物现在能接收自己的深链。
-- **CI 过滤器**：mobile-verify.yml `@multica/mobile` → `@1person/mobile`（此前选中空集）。
+  产物 1person-desktop-*、publish chy3xyz/1person）。打包产物现在能接收自己的深链。
+- **CI 过滤器**：mobile-verify.yml `@1person/mobile` → `@1person/mobile`（此前选中空集）。
 - **镜像/部署面**：release.yml + compose + helm chart + .env.example 的镜像名 →
-  `ghcr.io/1person-ai/1person-backend|web`；compose 项目名/helm 图表 → 1person；
-  RESEND_FROM_EMAIL → noreply@1person.app；goreleaser brew tap → 1person-ai。
-- **helm chart**：deploy/helm/multica → deploy/helm/1person（chart 名、镜像、secret、域名）。
-- **zserver**：isOfficialCloud 同时识别 multica.ai 与 1person.app（自托管判定兼容两代域名）。
+  `ghcr.io/chy3xyz/1person-backend|web`；compose 项目名/helm 图表 → 1person；
+  RESEND_FROM_EMAIL → noreply@1person.xyz；goreleaser brew tap → chy3xyz。
+- **helm chart**：backend/deploy/helm/1person（chart 名、镜像、secret、域名）。
+- **zserver**：isOfficialCloud 同时识别 1person.xyz / 1person.xyz 与遗留 1person.xyz。
 - 镜像按最终代码重建验证（1person-backend:latest）。
+- 仓库与发布面以 `https://github.com/chy3xyz/1person` / `ghcr.io/chy3xyz/*` 为准。
 
 保留并记录（需你定夺/属契约）：
-- `MULTICA_*` 环境变量名前缀（真实 env 契约，重命名破坏兼容）。
-- `POSTGRES_DB/USER=multica`（内部 DB 名，改则破坏本地/CI）。
-- `apps/mobile/.env.production` 指向 multica.ai（真实生产后端 URL，待后端真正迁移域名）。
-- `scripts/install.sh` 的 multica 引用（Go CLI 安装器，随 M5 Zig CLI 重写）。
+- `ONEPERSON_*` 环境变量名前缀（真实 env 契约，重命名破坏兼容）。
+- `POSTGRES_DB/USER=1person`（内部 DB 名，改则破坏本地/CI）。
+- `apps/mobile/.env.production` 指向 1person.xyz（真实生产后端 URL，待后端真正迁移域名）。
+- `scripts/install.sh` 的 1person 引用（Go CLI 安装器，随 M5 Zig CLI 重写）。
 - 镜像发布依赖 `1person-ai` org 真实存在。
 ## M5 落地记录
 
@@ -178,9 +179,9 @@ Status: **M1-M4 + M5（自更新/桌面捆绑/安装器）+ 阶段 2/3 完成**
 - **桌面捆绑 Zig CLI**（`bundle-cli.mjs` 重写）：zig build 1p → 复制为
   resources/bin/1person（桌面运行时查找名）。实测：捆绑产物可运行（`1person version`）。
 - **install.sh 重写为 1p**：version.txt 契约 + 直下二进制 + sha256 校验；品牌统一
-  （1person-ai/1person、~/.1person）；安装后校验 `1person version`。install.test.sh
+  （chy3xyz/1person、~/.1person）；安装后校验 `1person version`。install.test.sh
   测试桩同步更新，全部通过。
 - **遗留（需真实发布仓库/服务端契约）**：
   - local_skill_import 真实拉取（需服务端 skill 导出端点或 URL 契约）。
   - goreleaser 重接为 Zig 1p 发布（release.yml 的 release job 已 `if: false`，待
-    1person-ai org 存在 + M5 CLI 形态稳定后重写配置并启用）。
+    chy3xyz org 存在 + M5 CLI 形态稳定后重写配置并启用）。

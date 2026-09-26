@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = join(here, "..", ".output", "public");
 const SOURCE = join(here, "..", ".source");
-const SITE_ORIGIN = "https://www.1person.ai";
+const SITE_ORIGIN = "https://www.1person.xyz";
 const DOCS_BASE_PATH = "/docs";
 const NL = String.fromCharCode(10);
 

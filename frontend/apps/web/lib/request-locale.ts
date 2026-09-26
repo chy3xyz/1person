@@ -3,14 +3,14 @@ import { cookies, headers } from "next/headers";
 import { LOCALE_COOKIE, type SupportedLocale } from "@1person/core/i18n";
 import {
   isSupportedLocale,
-  MULTICA_LOCALE_HEADER,
+  ONEPERSON_LOCALE_HEADER,
   resolveLocaleFromSignals,
 } from "./locale-routing";
 
 export const getRequestLocale = cache(
   async (): Promise<SupportedLocale> => {
     const headerList = await headers();
-    const headerLocale = headerList.get(MULTICA_LOCALE_HEADER);
+    const headerLocale = headerList.get(ONEPERSON_LOCALE_HEADER);
     if (isSupportedLocale(headerLocale)) return headerLocale;
 
     const cookieStore = await cookies();

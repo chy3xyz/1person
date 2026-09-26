@@ -5,7 +5,7 @@ set -euo pipefail
 # (/api/i18n/locales, /api/i18n/translations) against a running
 # zserver in no-DB mode.
 #
-# Usage: MULTICA_DEV_VERIFICATION_CODE=<code> ./scripts/i18n_e2e.sh
+# Usage: ONEPERSON_DEV_VERIFICATION_CODE=<code> ./scripts/i18n_e2e.sh
 
 PORT="${PORT:-18099}"
 BASE="http://127.0.0.1:${PORT}"
@@ -64,9 +64,9 @@ done
 echo "==> running i18n checks"
 
 # ── Auth: obtain a JWT token via the dev verification code ──────
-DEV_CODE="${MULTICA_DEV_VERIFICATION_CODE:-${DEV_AUTH_CODE:-}}"
+DEV_CODE="${ONEPERSON_DEV_VERIFICATION_CODE:-${DEV_AUTH_CODE:-}}"
 if [[ -z "${DEV_CODE}" ]]; then
-    echo "SKIP: i18n endpoints require auth (set MULTICA_DEV_VERIFICATION_CODE)"
+    echo "SKIP: i18n endpoints require auth (set ONEPERSON_DEV_VERIFICATION_CODE)"
     exit 0
 fi
 

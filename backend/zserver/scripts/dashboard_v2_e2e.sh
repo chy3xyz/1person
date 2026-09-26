@@ -21,7 +21,7 @@ for i in $(seq 1 30); do if [[ $(http_status "${BASE}/health") == "200" ]]; then
 # Auth
 EMAIL="dv2-$(date +%s)@e.com"
 http_status -X POST -d "{\"email\":\"${EMAIL}\"}" -H "Content-Type: application/json" "${BASE}/auth/send-code" >/dev/null
-TOKEN=$(http_body -X POST -d "{\"email\":\"${EMAIL}\",\"code\":\"${MULTICA_DEV_VERIFICATION_CODE:-000000}\"}" -H "Content-Type: application/json" "${BASE}/auth/verify-code" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
+TOKEN=$(http_body -X POST -d "{\"email\":\"${EMAIL}\",\"code\":\"${ONEPERSON_DEV_VERIFICATION_CODE:-000000}\"}" -H "Content-Type: application/json" "${BASE}/auth/verify-code" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))" 2>/dev/null)
 AUTH="Authorization: Bearer ${TOKEN}"
 WS=$(http_body -X POST -d "{\"name\":\"DashV2\",\"slug\":\"dv2-$(date +%s)\"}" -H "Content-Type: application/json" -H "${AUTH}" "${BASE}/api/workspaces")
 WS_ID=$(echo "$WS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null)

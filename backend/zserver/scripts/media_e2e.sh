@@ -6,7 +6,7 @@
 # in `src/modules/media/routes.zig`.
 #
 # Usage:
-#   MULTICA_DEV_VERIFICATION_CODE=000000 \
+#   ONEPERSON_DEV_VERIFICATION_CODE=000000 \
 #   JWT_SECRET=test-secret \
 #   ./scripts/media_e2e.sh
 #
@@ -83,7 +83,7 @@ fi
 EMAIL="media-e2e-$(date +%s)@example.com"
 http_status -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\"}" "${BASE}/auth/send-code" >/dev/null
-code="${MULTICA_DEV_VERIFICATION_CODE:-000000}"
+code="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}"
 auth_body=$(http_body -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"code\":\"${code}\"}" "${BASE}/auth/verify-code")
 TOKEN=$(jget_path "${auth_body}" token)

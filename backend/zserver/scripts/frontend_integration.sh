@@ -9,7 +9,7 @@
 # frontend would walk.
 #
 # Usage:
-#   MULTICA_DEV_VERIFICATION_CODE=000000 \
+#   ONEPERSON_DEV_VERIFICATION_CODE=000000 \
 #   JWT_SECRET=test-secret \
 #   ./scripts/frontend_integration.sh
 #
@@ -49,5 +49,5 @@ if [[ $(curl -s -o /dev/null -w "%{http_code}" "${BASE}/health") != "200" ]]; th
 fi
 
 echo "==> running frontend integration script"
-MULTICA_DEV_VERIFICATION_CODE="${MULTICA_DEV_VERIFICATION_CODE:-000000}" \
+ONEPERSON_DEV_VERIFICATION_CODE="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}" \
 node "${SCRIPT_DIR}/integration.mjs" "${BASE}"

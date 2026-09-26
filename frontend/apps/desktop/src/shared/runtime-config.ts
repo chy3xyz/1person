@@ -15,9 +15,9 @@ export type RuntimeConfigResult =
 
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
-  apiUrl: "https://api.1person.app",
-  wsUrl: "wss://api.1person.app/ws",
-  appUrl: "https://1person.app",
+  apiUrl: "https://api.1person.xyz",
+  wsUrl: "wss://api.1person.xyz/ws",
+  appUrl: "https://1person.xyz",
 });
 
 const LOCAL_DEV_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
@@ -93,8 +93,8 @@ export function deriveWsUrl(apiUrl: string): string {
   return trimTrailingSlash(url.toString());
 }
 
-// Convention: api hosts are exposed at `api.<web-host>` (api.1person.app →
-// 1person.app, api.test.1person.app → test.1person.app). Strip the leading
+// Convention: api hosts are exposed at `api.<web-host>` (api.1person.xyz →
+// 1person.xyz, api.test.1person.xyz → test.1person.xyz). Strip the leading
 // `api.` label so a single `apiUrl` configuration produces the right
 // shareable web URL. Hosts that don't match the convention (no leading
 // `api.` label, or short two-label hosts like `api.local`) fall through

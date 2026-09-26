@@ -15,7 +15,7 @@ import { selectPlatformReleaseAssetName } from "./cli-release-asset";
 // userData on first launch when the bundled binary is missing or unusable.
 
 const GITHUB_LATEST_BASE =
-  "https://github.com/1person-ai/1person/releases/latest/download";
+  "https://github.com/chy3xyz/1person/releases/latest/download";
 
 function binaryName(): string {
   return process.platform === "win32" ? "1person.exe" : "1person";

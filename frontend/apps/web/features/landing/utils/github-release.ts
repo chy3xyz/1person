@@ -31,7 +31,7 @@ export interface LatestRelease {
 }
 
 const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/1person-ai/1person/releases?per_page=2";
+  "https://api.github.com/repos/chy3xyz/1person/releases?per_page=2";
 
 const REVALIDATE_SECONDS = 300;
 

@@ -1,4 +1,4 @@
-//! zserver — Zig rewrite of the Multica Go server.
+//! zserver — Zig rewrite of the 1Person Go server.
 
 const std = @import("std");
 const zcli = @import("zcli");
@@ -28,7 +28,7 @@ const MigrateCmd = struct {
     db_url: ?[]const u8 = null,
 
     pub const zcli_options = .{
-        .db_url = .{ .help = "Database URL (env: DATABASE_URL or MULTICA_DATABASE_URL)" },
+        .db_url = .{ .help = "Database URL (env: DATABASE_URL or ONEPERSON_DATABASE_URL)" },
     };
 };
 
@@ -37,7 +37,7 @@ const VersionCmd = struct {
 };
 
 const Root = struct {
-    //! Multica server CLI — Zig rewrite.
+    //! 1Person server CLI — Zig rewrite.
 
     server: ServerCmd,
     migrate: MigrateCmd,
@@ -54,12 +54,12 @@ fn handle_server(cmd: ServerCmd, init: std.process.Init) !void {
 fn handle_migrate(cmd: MigrateCmd, init: std.process.Init) !void {
     const allocator = std.heap.page_allocator;
     // --db-url flag wins; otherwise fall back to the DATABASE_URL /
-    // MULTICA_DATABASE_URL env vars (documented in the zcli_options).
+    // ONEPERSON_DATABASE_URL env vars (documented in the zcli_options).
     // Reading the env here keeps `zserver migrate` usable in containers
     // and CI without an explicit flag.
     const db_url = cmd.db_url orelse
         init.environ_map.get("DATABASE_URL") orelse
-        init.environ_map.get("MULTICA_DATABASE_URL");
+        init.environ_map.get("ONEPERSON_DATABASE_URL");
     try migrate_mod.run(allocator, db_url);
 }
 

@@ -101,7 +101,7 @@ async function exists(p) {
 }
 
 // M5: bundle the Zig `1p` CLI (docs/zig-daemon-plan.md) instead of the
-// Go multica CLI. Builds it with `zig build` in zserver/ (provisioning the
+// Go 1person CLI. Builds it with `zig build` in zserver/ (provisioning the
 // pinned zig_ws checkouts first), then copies zig-out/bin/1p to
 // resources/bin/1person (the name the desktop runtime looks for).
 // Graceful: if zig is unavailable, skip the bundle and let the desktop fall

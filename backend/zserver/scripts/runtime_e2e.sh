@@ -12,7 +12,7 @@
 # update / usage / activity endpoints are exercised for real.
 #
 # Usage:
-#   MULTICA_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
+#   ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
 #   [DATABASE_URL=postgres://...] ./scripts/runtime_e2e.sh
 #
 # Override the port with PORT=<n>.
@@ -54,7 +54,7 @@ done
 EMAIL="runtime-e2e-$(date +%s)@example.com"
 http_status -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\"}" "${BASE}/auth/send-code" >/dev/null
-code="${MULTICA_DEV_VERIFICATION_CODE:-000000}"
+code="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}"
 AUTH_BODY=$(http_body -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"code\":\"${code}\"}" "${BASE}/auth/verify-code")
 TOKEN=$(jget "${AUTH_BODY}" token)

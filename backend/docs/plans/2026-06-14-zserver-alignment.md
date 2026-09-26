@@ -271,7 +271,7 @@ Read `Cookie` header, parse `1person_auth` and `1person_csrf`.
 
 - [ ] **Step 4: Implement Redis-backed fixed-window rate limiter**
 
-Key format: `mul:ratelimit:<path>:<ip>` where path has `/` replaced with `:` and IP honors `MULTICA_TRUSTED_PROXIES`.
+Key format: `mul:ratelimit:<path>:<ip>` where path has `/` replaced with `:` and IP honors `ONEPERSON_TRUSTED_PROXIES`.
 
 ---
 
@@ -355,7 +355,7 @@ const UserResponse = struct {
 - Modify: `zserver/src/router.zig`
 - Modify: `zserver/src/middleware.zig`
 
-- [ ] **Step 1: Generate `mul_` tokens**
+- [ ] **Step 1: Generate `1p_` tokens**
 
 Prefix + random suffix; store `token_hash` and `token_prefix`.
 
@@ -366,7 +366,7 @@ Prefix + random suffix; store `token_hash` and `token_prefix`.
 - `POST /api/tokens/current/renew` → extend expiry by 90 days if within 7 days.
 - `DELETE /api/tokens/:id` → revoke.
 
-- [ ] **Step 3: Update auth middleware to validate `mul_` PATs**
+- [ ] **Step 3: Update auth middleware to validate `1p_` PATs**
 
 ---
 
@@ -554,7 +554,7 @@ pub const CrudHandler = struct {
 - Modify: `zserver/src/middleware.zig`
 - Modify: `zserver/src/config.zig`
 
-- [ ] **Step 1: Parse `MULTICA_TRUSTED_PROXIES` and use it for `X-Forwarded-For` IP extraction in rate limiting**
+- [ ] **Step 1: Parse `ONEPERSON_TRUSTED_PROXIES` and use it for `X-Forwarded-For` IP extraction in rate limiting**
 
 - [ ] **Step 2: Log structured request/response with request ID, user ID, method, path, status, duration**
 

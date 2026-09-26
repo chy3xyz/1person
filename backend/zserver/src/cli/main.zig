@@ -114,7 +114,7 @@ const DaemonCmd = struct {
     pub const zcli_options = .{
         .runtime_id = .{ .help = "Runtime id this daemon services (required)" },
         .workspace_id = .{ .help = "Workspace whose daemon token to use" },
-        .token = .{ .help = "Override daemon token (mdt_...)" },
+        .token = .{ .help = "Override daemon token (1d_...)" },
         .path = .{ .help = "Config file path" },
         .heartbeat_ms = .{ .help = "Heartbeat interval in ms (default 30000)" },
         .claim_ms = .{ .help = "Claim poll interval in ms (default 15000)" },

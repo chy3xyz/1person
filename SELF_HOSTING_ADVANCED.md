@@ -32,7 +32,7 @@ These have sensible defaults and only need to be set when tuning a large or cons
 | Variable | Description |
 |----------|-------------|
 | `RESEND_API_KEY` | Your Resend API key |
-| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@1person.ai`) |
+| `RESEND_FROM_EMAIL` | Sender email address (default: `noreply@1person.xyz`) |
 
 #### Option B: SMTP relay (for self-hosted / on-premise deployments)
 
@@ -50,7 +50,7 @@ Use this option when your deployment cannot reach the public internet or you alr
 
 STARTTLS is used automatically when advertised by the server. Port 465 (SMTPS / implicit TLS) is supported and auto-enables implicit TLS; set `SMTP_TLS=implicit` (aliases `smtps`, `ssl`) to force it on a non-standard port.
 
-> **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
+> **Note:** If neither Resend nor SMTP is configured, generated verification codes are printed to backend logs — copy them from there to log in. A fixed local testing code (e.g. `888888`) is **opt-in only**: set `ONEPERSON_DEV_VERIFICATION_CODE=888888` in `.env` and keep `APP_ENV` non-production. The Docker self-host stack pins `APP_ENV=production`, so the shortcut is ignored there. **Never enable a fixed code on a publicly reachable instance.**
 
 ### Google OAuth (Optional)
 
@@ -124,33 +124,33 @@ These are configured on each user's machine, not on the server:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | WebSocket URL for daemon → server connection |
-| `MULTICA_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
-| `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
+| `ONEPERSON_SERVER_URL` | `ws://localhost:8080/ws` | WebSocket URL for daemon → server connection |
+| `ONEPERSON_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
+| `ONEPERSON_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
+| `ONEPERSON_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 
 Agent-specific overrides:
 
 | Variable | Description |
 |----------|-------------|
-| `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
-| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
-| `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
-| `MULTICA_CODEX_MODEL` | Override the Codex model used |
-| `MULTICA_COPILOT_PATH` | Custom path to the `copilot` (GitHub Copilot CLI) binary |
-| `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
-| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
-| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
-| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
-| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
-| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
-| `MULTICA_GEMINI_PATH` | Custom path to the `gemini` binary |
-| `MULTICA_GEMINI_MODEL` | Override the Gemini model used |
-| `MULTICA_PI_PATH` | Custom path to the `pi` binary |
-| `MULTICA_PI_MODEL` | Override the Pi model used |
-| `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
-| `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
+| `ONEPERSON_CLAUDE_PATH` | Custom path to the `claude` binary |
+| `ONEPERSON_CLAUDE_MODEL` | Override the Claude model used |
+| `ONEPERSON_CODEX_PATH` | Custom path to the `codex` binary |
+| `ONEPERSON_CODEX_MODEL` | Override the Codex model used |
+| `ONEPERSON_COPILOT_PATH` | Custom path to the `copilot` (GitHub Copilot CLI) binary |
+| `ONEPERSON_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
+| `ONEPERSON_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `ONEPERSON_OPENCODE_MODEL` | Override the OpenCode model used |
+| `ONEPERSON_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `ONEPERSON_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `ONEPERSON_HERMES_PATH` | Custom path to the `hermes` binary |
+| `ONEPERSON_HERMES_MODEL` | Override the Hermes model used |
+| `ONEPERSON_GEMINI_PATH` | Custom path to the `gemini` binary |
+| `ONEPERSON_GEMINI_MODEL` | Override the Gemini model used |
+| `ONEPERSON_PI_PATH` | Custom path to the `pi` binary |
+| `ONEPERSON_PI_MODEL` | Override the Pi model used |
+| `ONEPERSON_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
+| `ONEPERSON_CURSOR_MODEL` | Override the Cursor Agent model used |
 
 ## Database Setup
 
@@ -244,7 +244,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
+**Prerequisites:** Zig 0.17+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)
@@ -467,5 +467,5 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
-Pin `MULTICA_IMAGE_TAG` in `.env` to an exact release like `v0.2.4` if you want to stay on a specific version. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
+Pin `ONEPERSON_IMAGE_TAG` in `.env` to an exact release like `v0.2.4` if you want to stay on a specific version. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
 If the selected GHCR tag has not been published yet, fall back to `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.

@@ -7,13 +7,13 @@ The `1person` CLI connects your local machine to 1Person. It handles authenticat
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install 1person-ai/tap/1person
+brew install chy3xyz/tap/1person
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/1person-ai/1person.git
+git clone https://github.com/chy3xyz/1person.git
 cd 1person
 make build
 cp backend/zserver/zig-out/bin/1p /usr/local/bin/1person
@@ -22,7 +22,7 @@ cp backend/zserver/zig-out/bin/1p /usr/local/bin/1person
 ### Update
 
 ```bash
-brew upgrade 1person-ai/tap/1person
+brew upgrade chy3xyz/tap/1person
 ```
 
 For install script or manual installs, use:
@@ -70,7 +70,7 @@ Opens your browser for OAuth authentication, creates a 90-day personal access to
 ### Token Login
 
 ```bash
-1person login --token <mul_...>
+1person login --token <1p_...>
 ```
 
 Authenticate using a personal access token directly. Useful for headless environments. Pass `--token=` with an empty value to be prompted interactively (so the token never lands in shell history).
@@ -166,62 +166,62 @@ Daemon behavior is configured via flags or environment variables:
 
 | Setting | Flag | Env Variable | Default |
 |---------|------|--------------|---------|
-| Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` |
-| Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
-| Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
-| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
-| Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
-| Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
-| Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
-| Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
-| Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/1person_workspaces` |
-| GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
-| GC scan interval | — | `MULTICA_GC_INTERVAL` | `1h` |
-| GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
-| GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
-| GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
-| GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
+| Poll interval | `--poll-interval` | `ONEPERSON_DAEMON_POLL_INTERVAL` | `3s` |
+| Heartbeat interval | `--heartbeat-interval` | `ONEPERSON_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
+| Agent timeout | `--agent-timeout` | `ONEPERSON_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
+| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `ONEPERSON_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
+| Max concurrent tasks | `--max-concurrent-tasks` | `ONEPERSON_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
+| Daemon ID | `--daemon-id` | `ONEPERSON_DAEMON_ID` | hostname |
+| Device name | `--device-name` | `ONEPERSON_DAEMON_DEVICE_NAME` | hostname |
+| Runtime name | `--runtime-name` | `ONEPERSON_AGENT_RUNTIME_NAME` | `Local Agent` |
+| Workspaces root | — | `ONEPERSON_WORKSPACES_ROOT` | `~/1person_workspaces` |
+| GC enabled | — | `ONEPERSON_GC_ENABLED` | `true` (set `false`/`0` to disable) |
+| GC scan interval | — | `ONEPERSON_GC_INTERVAL` | `1h` |
+| GC TTL (done/cancelled issues) | — | `ONEPERSON_GC_TTL` | `24h` |
+| GC orphan TTL (no `.gc_meta.json`) | — | `ONEPERSON_GC_ORPHAN_TTL` | `72h` |
+| GC artifact TTL (open issues) | — | `ONEPERSON_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
+| GC artifact patterns | — | `ONEPERSON_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
 
 #### Workspace garbage collection
 
-The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space in three modes:
+The daemon periodically scans `ONEPERSON_WORKSPACES_ROOT` and reclaims disk space in three modes:
 
-- **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
-- **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
-- **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed; the rest of the workdir (source, `.git`, `output/`, `logs/`, `.gc_meta.json`) is preserved so the agent can resume the same workdir on the next task.
+- **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `ONEPERSON_GC_TTL`, the entire task directory is removed.
+- **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `ONEPERSON_GC_ORPHAN_TTL`.
+- **Artifact-only cleanup** — when a task has been completed for at least `ONEPERSON_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `ONEPERSON_GC_ARTIFACT_PATTERNS` are removed; the rest of the workdir (source, `.git`, `output/`, `logs/`, `.gc_meta.json`) is preserved so the agent can resume the same workdir on the next task.
 
-Patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, set `MULTICA_GC_ARTIFACT_TTL=0`.
+Patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `ONEPERSON_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, set `ONEPERSON_GC_ARTIFACT_TTL=0`.
 
 Agent-specific overrides:
 
 | Variable | Description |
 |----------|-------------|
-| `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
-| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
-| `MULTICA_CLAUDE_ARGS` | Default extra arguments for Claude Code runs |
-| `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
-| `MULTICA_CODEX_MODEL` | Override the Codex model used |
-| `MULTICA_CODEX_ARGS` | Default extra arguments for Codex runs |
-| `MULTICA_COPILOT_PATH` | Custom path to the `copilot` binary |
-| `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
-| `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
-| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
-| `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
-| `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
-| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
-| `MULTICA_GEMINI_PATH` | Custom path to the `gemini` binary |
-| `MULTICA_GEMINI_MODEL` | Override the Gemini model used |
-| `MULTICA_PI_PATH` | Custom path to the `pi` binary |
-| `MULTICA_PI_MODEL` | Override the Pi model used |
-| `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
-| `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
-| `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
-| `MULTICA_KIMI_MODEL` | Override the Kimi model used |
-| `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
-| `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `ONEPERSON_CLAUDE_PATH` | Custom path to the `claude` binary |
+| `ONEPERSON_CLAUDE_MODEL` | Override the Claude model used |
+| `ONEPERSON_CLAUDE_ARGS` | Default extra arguments for Claude Code runs |
+| `ONEPERSON_CODEX_PATH` | Custom path to the `codex` binary |
+| `ONEPERSON_CODEX_MODEL` | Override the Codex model used |
+| `ONEPERSON_CODEX_ARGS` | Default extra arguments for Codex runs |
+| `ONEPERSON_COPILOT_PATH` | Custom path to the `copilot` binary |
+| `ONEPERSON_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
+| `ONEPERSON_OPENCODE_PATH` | Custom path to the `opencode` binary |
+| `ONEPERSON_OPENCODE_MODEL` | Override the OpenCode model used |
+| `ONEPERSON_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
+| `ONEPERSON_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `ONEPERSON_HERMES_PATH` | Custom path to the `hermes` binary |
+| `ONEPERSON_HERMES_MODEL` | Override the Hermes model used |
+| `ONEPERSON_GEMINI_PATH` | Custom path to the `gemini` binary |
+| `ONEPERSON_GEMINI_MODEL` | Override the Gemini model used |
+| `ONEPERSON_PI_PATH` | Custom path to the `pi` binary |
+| `ONEPERSON_PI_MODEL` | Override the Pi model used |
+| `ONEPERSON_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
+| `ONEPERSON_CURSOR_MODEL` | Override the Cursor Agent model used |
+| `ONEPERSON_KIMI_PATH` | Custom path to the `kimi` binary |
+| `ONEPERSON_KIMI_MODEL` | Override the Kimi model used |
+| `ONEPERSON_KIRO_PATH` | Custom path to the `kiro-cli` binary |
+| `ONEPERSON_KIRO_MODEL` | Override the Kiro model used |
 
-`MULTICA_CLAUDE_ARGS` and `MULTICA_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded 1Person defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
+`ONEPERSON_CLAUDE_ARGS` and `ONEPERSON_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded 1Person defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
 
 ### Self-Hosted Server
 
@@ -274,7 +274,7 @@ Each profile gets its own config directory (`~/.1person/profiles/<name>/`), daem
 Every command runs against a single workspace. The CLI resolves which one in this order (highest priority first):
 
 1. `--workspace-id <id>` flag on the command
-2. `MULTICA_WORKSPACE_ID` environment variable
+2. `ONEPERSON_WORKSPACE_ID` environment variable
 3. The default workspace stored in your current profile (set by `1person workspace switch` or `1person login`)
 
 `1person workspace switch <id|slug>` is the day-to-day way to change the default workspace. For scripting and headless setups where you don't want any stored state, prefer the `--workspace-id` flag or the env variable. `1person config set workspace_id <id>` is the low-level equivalent of `switch` (it writes the same setting but skips the access check).
@@ -298,7 +298,7 @@ The current default workspace is marked with `*`. Table output shows short UUID 
 1person workspace switch <slug>
 ```
 
-Verifies you have access to the workspace, then sets it as the default for the current profile. Subsequent commands without `--workspace-id` and `MULTICA_WORKSPACE_ID` target this workspace. Pair `--profile` if you want to change a non-default profile's workspace.
+Verifies you have access to the workspace, then sets it as the default for the current profile. Subsequent commands without `--workspace-id` and `ONEPERSON_WORKSPACE_ID` target this workspace. Pair `--profile` if you want to change a non-default profile's workspace.
 
 ### Get Details
 
@@ -716,7 +716,7 @@ layer.) The underlying detail is still available on demand (see `--debug`).
   connection refused, TLS) and HTTP status failures (401/403/404/409/400·422/
   429/5xx) are each rendered as one clear sentence with a next step — for
   example a timeout suggests checking the network or raising
-  `MULTICA_HTTP_TIMEOUT`, and a 401 tells you to run `1person login`.
+  `ONEPERSON_HTTP_TIMEOUT`, and a 401 tells you to run `1person login`.
 - **Server-provided validation messages are preserved.** For a 400/422 that
   carries a message from the server, that message is shown verbatim
   (`Invalid request: <server message>`); only when there is none do you get the
@@ -755,23 +755,23 @@ if [ $? -eq 4 ]; then echo "no such issue"; fi
 
 ### Seeing the full detail (`--debug`)
 
-Pass the global `--debug` flag (or set `MULTICA_DEBUG=1`) to print the complete
+Pass the global `--debug` flag (or set `ONEPERSON_DEBUG=1`) to print the complete
 original error chain — the internal verb chain, the request method/path/status,
 and the raw server body — underneath the friendly message. Use it when you need
 to file a bug or understand exactly what the server returned:
 
 ```bash
 1person issue list --debug
-MULTICA_DEBUG=1 1person issue update MUL-1234 --title "x"
+ONEPERSON_DEBUG=1 1person issue update MUL-1234 --title "x"
 ```
 
 ### Request timeout
 
 API requests use a default timeout of 30 seconds. Override it with
-`MULTICA_HTTP_TIMEOUT` when you are on a slow network; it accepts a Go duration
+`ONEPERSON_HTTP_TIMEOUT` when you are on a slow network; it accepts a Go duration
 (`45s`, `2m`) or a plain number of seconds (`45`). Command-level deadlines are
 always at least this value, so raising it takes effect across all commands.
 
 ```bash
-MULTICA_HTTP_TIMEOUT=60s 1person issue list
+ONEPERSON_HTTP_TIMEOUT=60s 1person issue list
 ```

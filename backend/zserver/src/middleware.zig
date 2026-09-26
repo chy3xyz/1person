@@ -169,7 +169,7 @@ pub fn logAfter(ctx: *zfinal.Context) !void {
     const target = ctx.attributes.get("req_target") orelse "";
     const status = @intFromEnum(ctx.res_status);
 
-    // Resolve the real client IP honouring MULTICA_TRUSTED_PROXIES
+    // Resolve the real client IP honouring ONEPERSON_TRUSTED_PROXIES
     // (zfinal v0.22.1+ fixed allow-list matching). Off by default so
     // proxy headers cannot spoof the logged address.
     var ip_buf: [64]u8 = undefined;
@@ -213,13 +213,13 @@ fn isStateChanging(method: std.http.Method) bool {
 }
 
 fn tokenFromCookie(ctx: *zfinal.Context) !?[]const u8 {
-    return try ctx.getCookie("multica_auth");
+    return try ctx.getCookie("1person_auth");
 }
 
 /// Authentication interceptor. Skips OPTIONS and public paths.
-/// Verify a `mul_` personal access token against the
+/// Verify a `1p_` personal access token against the
 /// `personal_access_token` table (token_hash + revoked + expiry), the
-/// same contract as the Go server's mul_ branch. On success stamps
+/// same contract as the Go server's 1p_ branch. On success stamps
 /// `token_type`/`token_value`/`user_id` on the context. Falls back to
 /// format-only in no-DB mode so dev smoke/e2e keep working.
 fn validatePersonalToken(ctx: *zfinal.Context, token: []const u8) !bool {
@@ -264,9 +264,9 @@ fn validatePersonalToken(ctx: *zfinal.Context, token: []const u8) !bool {
     return true;
 }
 
-/// Verify a `mat_` task token against the `task_token` table, stamping
+/// Verify a `1t_` task token against the `task_token` table, stamping
 /// the bound (user_id, agent_id, task_id, workspace_id) — the same
-/// authoritative identity mapping as the Go server's mat_ branch.
+/// authoritative identity mapping as the Go server's 1t_ branch.
 /// Falls back to format-only in no-DB mode.
 fn validateTaskToken(ctx: *zfinal.Context, token: []const u8) !bool {
     if (!deps.hasPool()) {
@@ -356,20 +356,20 @@ pub fn authBefore(ctx: *zfinal.Context) !bool {
             return false;
         },
         .cloud_node => {
-            // The Go server rejects `mcn_` tokens when the Multica
+            // The Go server rejects `1c_` tokens when the 1Person
             // Cloud Fleet verifier is not configured (failing closed
             // rather than silently downgrading auth). zserver has no
-            // Cloud integration, so every `mcn_` token is rejected.
+            // Cloud integration, so every `1c_` token is rejected.
             ctx.res_status = .unauthorized;
             try ctx.renderJson(.{ .@"error" = "invalid_token" });
             return false;
         },
         .daemon => {
-            // Daemon tokens (`mdt_<id>`) are validated by the
+            // Daemon tokens (`1d_<id>`) are validated by the
             // dedicated `DaemonAuth` middleware. The global auth
             // interceptor only needs to mark the token type so
             // downstream middleware can recognise it.
-            if (token.len < 5) { // "mdt_" + at least 1 char
+            if (token.len < 4) { // "1d_" + at least 1 char
                 ctx.res_status = .unauthorized;
                 try ctx.renderJson(.{ .@"error" = "invalid_token" });
                 return false;

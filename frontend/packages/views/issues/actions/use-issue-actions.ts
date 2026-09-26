@@ -14,7 +14,7 @@ import { copyText } from "@1person/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
-const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
+const BACKLOG_HINT_LS_KEY = "1person:backlog-agent-hint-dismissed";
 
 export interface UseIssueActionsResult {
   isPinned: boolean;

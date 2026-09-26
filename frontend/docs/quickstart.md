@@ -7,7 +7,7 @@
 ```bash
 cd zserver
 zig build
-JWT_SECRET=my-secret MULTICA_DEV_VERIFICATION_CODE=000000 \
+JWT_SECRET=my-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
   ./zig-out/bin/zserver server --port 8090
 ```
 

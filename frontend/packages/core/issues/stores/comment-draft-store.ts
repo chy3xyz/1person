@@ -66,7 +66,7 @@ export const useCommentDraftStore = create<CommentDraftStore>()(
         }),
     }),
     {
-      name: "multica_comment_drafts",
+      name: "1person_comment_drafts",
       storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
       onRehydrateStorage: () => (state) => {
         if (state) {

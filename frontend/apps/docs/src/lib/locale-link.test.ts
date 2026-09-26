@@ -29,8 +29,8 @@ describe("prefixLocale", () => {
   });
 
   it("leaves external URLs, anchors and relative paths alone", () => {
-    expect(prefixLocale("https://1person.ai/download", "zh")).toBe("https://1person.ai/download");
-    expect(prefixLocale("mailto:hello@1person.ai", "zh")).toBe("mailto:hello@1person.ai");
+    expect(prefixLocale("https://1person.xyz/download", "zh")).toBe("https://1person.xyz/download");
+    expect(prefixLocale("mailto:hello@1person.xyz", "zh")).toBe("mailto:hello@1person.xyz");
     expect(prefixLocale("#section", "zh")).toBe("#section");
     expect(prefixLocale("./sibling", "zh")).toBe("./sibling");
     expect(prefixLocale("../sibling", "zh")).toBe("../sibling");

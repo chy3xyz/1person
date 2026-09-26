@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { LOCALE_COOKIE } from "@1person/core/i18n";
 import {
-  MULTICA_LOCALE_HEADER,
+  ONEPERSON_LOCALE_HEADER,
   resolveLocaleFromSignals,
 } from "./lib/locale-routing";
 
@@ -34,7 +34,7 @@ function resolveLocale(req: NextRequest): string {
 // request — without it the value would only sit on the response.
 function nextWithLocale(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
-  headers.set(MULTICA_LOCALE_HEADER, resolveLocale(req));
+  headers.set(ONEPERSON_LOCALE_HEADER, resolveLocale(req));
   return NextResponse.next({ request: { headers } });
 }
 

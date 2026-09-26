@@ -40,7 +40,7 @@ pub const Config = struct {
     github_app_slug: ?[]const u8,
     /// Shared secret used by `RequireServiceOrWorkspaceRole` to bypass
     /// the workspace-role check. Empty string disables the bypass; set
-    /// `MULTICA_SERVICE_TOKEN` in the environment to enable it. The
+    /// `ONEPERSON_SERVICE_TOKEN` in the environment to enable it. The
     /// value is read-only and lives for the lifetime of the process.
     service_token: []const u8,
     app: AppConfig,
@@ -86,7 +86,7 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
     const db_url = blk: {
         if (opts.db_url) |u| break :blk try allocator.dupe(u8, u);
         break :blk getEnvOwned(allocator, environ, "DATABASE_URL") catch |err| switch (err) {
-            error.NotFound => try allocator.dupe(u8, "postgres://multica:multica@localhost:5432/multica?sslmode=disable"),
+            error.NotFound => try allocator.dupe(u8, "postgres://1person:1person@localhost:5432/1person?sslmode=disable"),
             else => return err,
         };
     };
@@ -131,18 +131,18 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
         break :blk try std.fmt.parseInt(u32, raw, 10);
     };
 
-    const public_url_raw = try getEnvOwnedDefault(allocator, environ, "MULTICA_PUBLIC_URL", "");
+    const public_url_raw = try getEnvOwnedDefault(allocator, environ, "ONEPERSON_PUBLIC_URL", "");
     const public_url_trimmed = std.mem.trimEnd(u8, std.mem.trim(u8, public_url_raw, &std.ascii.whitespace), "/");
     const public_url = try allocator.dupe(u8, public_url_trimmed);
 
     const allowed_origins = try splitCommaEnv(allocator, environ, "CORS_ALLOWED_ORIGINS", &.{ "http://localhost:3000", "http://localhost:5173", "http://localhost:5174" });
-    const trusted_proxies = try splitCommaEnv(allocator, environ, "MULTICA_TRUSTED_PROXIES", &.{});
+    const trusted_proxies = try splitCommaEnv(allocator, environ, "ONEPERSON_TRUSTED_PROXIES", &.{});
     const allowed_emails = try splitCommaEnv(allocator, environ, "ALLOWED_EMAILS", &.{});
     const allowed_email_domains = try splitCommaEnv(allocator, environ, "ALLOWED_EMAIL_DOMAINS", &.{});
 
     const dev_verification_code = blk: {
         if (std.ascii.eqlIgnoreCase(app_env, "production")) break :blk null;
-        const raw = try getEnvOwnedOptional(allocator, environ, "MULTICA_DEV_VERIFICATION_CODE");
+        const raw = try getEnvOwnedOptional(allocator, environ, "ONEPERSON_DEV_VERIFICATION_CODE");
         if (raw) |r| {
             const trimmed = std.mem.trim(u8, r, &std.ascii.whitespace);
             if (trimmed.len == 6) {
@@ -162,14 +162,14 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
     const google_client_id = try getEnvOwnedOptional(allocator, environ, "GOOGLE_CLIENT_ID");
     const google_client_secret = try getEnvOwnedOptional(allocator, environ, "GOOGLE_CLIENT_SECRET");
     const resend_api_key = try getEnvOwnedOptional(allocator, environ, "RESEND_API_KEY");
-    const resend_from_email = try getEnvOwnedDefault(allocator, environ, "RESEND_FROM_EMAIL", "noreply@1person.app");
+    const resend_from_email = try getEnvOwnedDefault(allocator, environ, "RESEND_FROM_EMAIL", "noreply@1person.xyz");
     const github_app_slug = try getEnvOwnedOptional(allocator, environ, "GITHUB_APP_SLUG");
 
-    // `MULTICA_SERVICE_TOKEN` enables the service-account bypass in
+    // `ONEPERSON_SERVICE_TOKEN` enables the service-account bypass in
     // `RequireServiceOrWorkspaceRole`. Empty / unset disables the bypass
     // (the default), so existing deployments keep their original
     // workspace-role-only behaviour.
-    const service_token = try getEnvOwnedDefault(allocator, environ, "MULTICA_SERVICE_TOKEN", "");
+    const service_token = try getEnvOwnedDefault(allocator, environ, "ONEPERSON_SERVICE_TOKEN", "");
 
     const app = try loadAppConfig(allocator, environ, app_env);
 
@@ -211,8 +211,8 @@ fn loadAppConfig(allocator: std.mem.Allocator, environ: *std.process.Environ.Map
     const disable_ws_env = try getEnvOwnedDefault(allocator, environ, "DISABLE_WORKSPACE_CREATION", "false");
     const workspace_creation_disabled = std.mem.eql(u8, disable_ws_env, "true");
 
-    const public_url = try getEnvOwnedDefault(allocator, environ, "MULTICA_PUBLIC_URL", "");
-    const app_url_env = try getEnvOwnedDefault(allocator, environ, "MULTICA_APP_URL", "");
+    const public_url = try getEnvOwnedDefault(allocator, environ, "ONEPERSON_PUBLIC_URL", "");
+    const app_url_env = try getEnvOwnedDefault(allocator, environ, "ONEPERSON_APP_URL", "");
 
     const daemon = daemonSetupURLs(allocator, environ, public_url, app_url_env);
 
@@ -285,11 +285,7 @@ fn normalizeURL(allocator: std.mem.Allocator, raw: []const u8) !?[]const u8 {
 
 fn isOfficialCloud(app_url: []const u8) bool {
     const host = canonicalURLHost(app_url);
-    // Both legacy (multica) and current (1person) cloud domains are
-    // recognised so self-hosted setups don't accidentally classify the
-    // official cloud as self-host.
-    return std.mem.eql(u8, host, "multica.ai") or std.mem.eql(u8, host, "app.multica.ai") or
-        std.mem.eql(u8, host, "1person.app") or std.mem.eql(u8, host, "app.1person.app");
+    return std.mem.eql(u8, host, "1person.xyz") or std.mem.eql(u8, host, "app.1person.xyz");
 }
 
 fn canonicalURLHost(raw: []const u8) []const u8 {

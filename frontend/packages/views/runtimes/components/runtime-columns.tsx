@@ -367,7 +367,7 @@ function CliCell({ runtime }: { runtime: AgentRuntime }) {
   const meta = runtime.metadata as Record<string, unknown> | null;
   // `version` is the agent's own underlying CLI tool version — distinct per
   // provider (e.g. "2.1.5 (Claude Code)", "codex-cli 0.118.0", "0.42.0").
-  // The separate `cli_version` is the shared multica daemon CLI, identical
+  // The separate `cli_version` is the shared 1person daemon CLI, identical
   // for every runtime on one machine; surfacing it here made all agents
   // show the same number (#3838). The daemon CLI version and its update
   // prompt belong to the machine — they live in the machine meta strip and
