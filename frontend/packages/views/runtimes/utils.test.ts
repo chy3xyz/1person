@@ -196,6 +196,73 @@ describe("estimateCost", () => {
     expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
   });
 
+  it("prices Claude Opus 5.5 at its published rate (MUL-7692)", () => {
+    // Verified against platform.claude.com/docs pricing 2026-09-27:
+    // Opus 5.5 is $4/$20 — a 20% cut vs Opus 5's $5/$25, NOT the same
+    // tier. Cache read is 0.05x input ($0.20) on this model, deeper than
+    // the 0.1x every other Anthropic SKU gets; 5m write is 1.25x ($5.00).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-5-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(4 + 20 + 0.20 + 5.00, 5);
+    expect(isModelPriced("claude-opus-5-5")).toBe(true);
+  });
+
+  it("prices Opus 5.5 below Opus 5 rather than inheriting its tier", () => {
+    // The regression this test exists for: the resolver does no
+    // startsWith fallback, so if `claude-opus-5-5` ever lost its own row
+    // it would surface as "unmapped" rather than silently costing 5/25.
+    // Assert the gap explicitly so a future Anthropic price change to
+    // either SKU has to be a deliberate edit on both tests.
+    const v55 = estimateCost({ ...zeroUsage, model: "claude-opus-5-5", input_tokens: 1_000_000 });
+    const v5 = estimateCost({ ...zeroUsage, model: "claude-opus-5", input_tokens: 1_000_000 });
+    expect(v55).toBeCloseTo(4, 5);
+    expect(v5).toBeCloseTo(5, 5);
+  });
+
+  it("prices GPT-6 Sol / Luna / Astra at their published list rates (MUL-7692)", () => {
+    // Verified against openai.com/api/pricing 2026-09-27. Long-term list
+    // prices, not a promo. Note Luna is two orders of magnitude below
+    // Sol on input — a stale row here would wildly mis-cost bulk runs.
+    const cases: Array<{ model: string; expected: number }> = [
+      { model: "gpt-6-astra", expected: 10 + 50 },
+      { model: "gpt-6-sol", expected: 2 + 10 },
+      { model: "gpt-6-luna", expected: 0.1 + 0.5 },
+    ];
+    for (const c of cases) {
+      const cost = estimateCost({
+        ...zeroUsage,
+        model: c.model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      });
+      expect(cost).toBeCloseTo(c.expected, 5);
+      expect(isModelPriced(c.model)).toBe(true);
+    }
+  });
+
+  it("prices GPT-6 cached input at the discounted rate", () => {
+    // OpenAI lists cached input separately (0.1x on Astra/Sol, 0.1x on
+    // Luna at $0.01). It does not bill cache writes, so cacheWrite
+    // mirrors input — a cached-heavy run must not be priced as if every
+    // token were fresh input.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "gpt-6-sol",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    // 2.00 input + 10.00 output + 0.20 cached read + 2.00 write(=input)
+    expect(cost).toBeCloseTo(2 + 10 + 0.20 + 2, 5);
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row

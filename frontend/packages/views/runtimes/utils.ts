@@ -162,6 +162,18 @@ const MODEL_PRICING: Record<
   "claude-opus-4-7":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
   "claude-opus-4-8":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
 
+  // -- Anthropic: 5.x cycle. Verified against platform.claude.com/docs
+  //    pricing on 2026-09-27: Opus 5.5 is $4/$20 (a 20% cut vs Opus 5's
+  //    $5/$25), cache read is 0.05x input ($0.20, deeper discount than the
+  //    usual 0.1x) and 5m cache write is 1.25x input. Sonnet 5 sits at
+  //    $2/$10. Fable/Mythos 5.1 share the 10/50 Mythos tier but get the
+  //    0.025x cache read ($0.25). --
+  "claude-opus-5-5":    { input: 4,    output: 20,   cacheRead: 0.20, cacheWrite: 5.00 },
+  "claude-opus-5":      { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
+  "claude-sonnet-5":    { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
+  "claude-fable-5-1":   { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
+  "claude-mythos-5-1":  { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
+
   // -- Anthropic: pre-4.5 Opus (legacy, still served at original price tier) --
   "claude-opus-4-1":    { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
   "claude-opus-4":      { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
@@ -185,6 +197,21 @@ const MODEL_PRICING: Record<
   "gpt-5-mini":         { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0.25 },
   "gpt-5-nano":         { input: 0.05, output: 0.40, cacheRead: 0.005, cacheWrite: 0.05 },
   "gpt-5":              { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
+
+  // -- OpenAI: GPT-6 family. Verified against openai.com/api/pricing on
+  //    2026-09-27 — these are long-term list prices, not a promo (50%+ below
+  //    the outgoing GPT-5.6 Sol/Luna rates). Three tiers:
+  //      Astra  10 / 50   — hardest end-to-end work
+  //      Sol     2 / 10   — complex coding + agentic workflows
+  //      Luna  0.1 / 0.5  — high-volume focused tasks
+  //    Cached input is 0.1x for Astra/Sol, 0.1x for Luna too ($0.01).
+  //    OpenAI does not bill cache writes separately, so cacheWrite mirrors
+  //    input (see the header note). Contexts over 272K tokens reprice the
+  //    whole request (2x input, 1.5x output) — aggregated usage rows don't
+  //    carry per-request prompt sizes, so we price at the standard tier. --
+  "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 10 },
+  "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2 },
+  "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.10 },
 
   // -- OpenAI: o-series reasoning models --
   "o3-mini":            { input: 1.10, output: 4.40, cacheRead: 0.55,  cacheWrite: 1.10 },
