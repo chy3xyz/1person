@@ -74,7 +74,7 @@ CREATE INDEX idx_lark_installation_lease ON lark_installation(ws_lease_expires_a
 --      lark_installation(id, workspace_id), so a binding row cannot
 --      claim a workspace different from its installation's workspace.
 --
---   2. The composite FK on (workspace_id, 1person_user_id) targets
+--   2. The composite FK on (workspace_id, lark_user_id) targets
 --      member(workspace_id, user_id) with ON DELETE CASCADE, so when a
 --      1Person user is removed from the workspace the stale Lark
 --      binding is removed in the same transaction. There is no path
@@ -82,7 +82,7 @@ CREATE INDEX idx_lark_installation_lease ON lark_installation(ws_lease_expires_a
 CREATE TABLE lark_user_binding (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id     UUID NOT NULL,
-    1person_user_id  UUID NOT NULL,
+    lark_user_id  UUID NOT NULL,
     installation_id  UUID NOT NULL,
     lark_open_id     TEXT NOT NULL,
     union_id         TEXT,
@@ -95,16 +95,16 @@ CREATE TABLE lark_user_binding (
         REFERENCES lark_installation(id, workspace_id)
         ON DELETE CASCADE,
     -- Workspace membership integrity. Composite FK guarantees the
-    -- (workspace_id, 1person_user_id) pair still exists in member; when
+    -- (workspace_id, lark_user_id) pair still exists in member; when
     -- the user is removed from the workspace, the binding cascades away.
     CONSTRAINT lark_user_binding_member_fk
-        FOREIGN KEY (workspace_id, 1person_user_id)
+        FOREIGN KEY (workspace_id, lark_user_id)
         REFERENCES member(workspace_id, user_id)
         ON DELETE CASCADE
 );
 
 CREATE INDEX idx_lark_user_binding_user
-    ON lark_user_binding(1person_user_id, workspace_id);
+    ON lark_user_binding(lark_user_id, workspace_id);
 CREATE INDEX idx_lark_user_binding_workspace_open
     ON lark_user_binding(workspace_id, lark_open_id);
 
