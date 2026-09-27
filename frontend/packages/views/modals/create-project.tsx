@@ -146,9 +146,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [customRepoUrl, setCustomRepoUrl] = useState("");
   const workspaceRepos = workspace?.repos ?? [];
   const repoQuery = repoSearch.trim().toLowerCase();
-  const filteredWorkspaceRepos = workspaceRepos.filter((repo) =>
-    repo.url.toLowerCase().includes(repoQuery),
-  );
+  // PATCH (MUL-7575 parity): description-backed search alongside the URL so
+  // users remember which repo is which after a couple of weeks.
+  const filteredWorkspaceRepos = workspaceRepos.filter((repo) => {
+    const haystacks = [
+      repo.url.toLowerCase(),
+      (repo.description ?? "").toLowerCase(),
+    ];
+    return haystacks.some((h) => h.includes(repoQuery));
+  });
 
   // A project's source is binary: either a set of GitHub repos OR a local
   // working directory — never both. Mode is the source of truth for what
@@ -636,18 +642,33 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               key={repo.url}
                               onClick={() => toggleRepo(repo.url)}
                               className={cn(
-                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
+                                "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
                                 checked && "bg-accent",
                               )}
+                              // PATCH (MUL-7575 parity): surface the repo
+                              // description as full text on hover so users
+                              // get the full context (description can be
+                              // long; `.line-clamp-2` keeps the row compact).
+                              // Only set the title when description is set
+                              // — otherwise we'd duplicate the tooltip that
+                              // RepoUrlText already provides on the URL span.
+                              {...(repo.description ? { title: repo.description } : {})}
                             >
                               <input
                                 type="checkbox"
                                 checked={checked}
                                 readOnly
-                                className="size-3.5"
+                                className="mt-0.5 size-3.5"
                               />
-                              <GithubIcon className="size-3.5" />
-                              <RepoUrlText url={repo.url} />
+                              <GithubIcon className="mt-0.5 size-3.5 shrink-0" />
+                              <div className="min-w-0 flex-1 text-left">
+                                <RepoUrlText url={repo.url} />
+                                {repo.description && (
+                                  <div className="mt-0.5 line-clamp-2 break-words text-[11px] text-muted-foreground">
+                                    {repo.description}
+                                  </div>
+                                )}
+                              </div>
                             </button>
                           );
                         })}
