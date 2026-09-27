@@ -6,6 +6,7 @@
 const std = @import("std");
 const zfinal = @import("zfinal");
 const out = @import("out.zig");
+const tls_error = @import("tls_error.zig");
 
 pub const Response = struct {
     status: u16,
@@ -105,7 +106,15 @@ pub const Client = struct {
     /// the returned slice (allocator.free). Errors on non-2xx.
     pub fn getRaw(self: *Client, allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         var resp = self.http.requestWith(.GET, path, null, &.{}) catch |err| {
-            out.printErr("request failed: {s}\n", .{@errorName(err)});
+            // PATCH (MUL-7466): classify the underlying std.crypto.tls / std.Io
+            // fault into something a self-host sysadmin can act on. Without
+            // this, a missing private CA surface as "request failed:
+            // CertificateIssuerMismatch" with no hint about where the CA bundle
+            // is mounted. Parse the host out of base_url for the message;
+            // a parser failure falls back to "?" rather than crashing.
+            var buf: [512]u8 = undefined;
+            const host = extractHost(self.http.base_url) orelse "?";
+            out.printErr("request failed: {s}\n", .{tls_error.describeTransportError(err, host, &buf)});
             return error.RequestFailed;
         };
         defer resp.deinit();
@@ -113,3 +122,17 @@ pub const Client = struct {
         return allocator.dupe(u8, resp.body);
     }
 };
+
+/// Strip the URL down to its `host[:port]` substring. Tolerates both bare
+/// host inputs and the `http://host:port` / `https://host` forms we pass
+/// to `Client.init`. Returns `null` if the input is empty (defensive — the
+/// printer in `describeTransportError` falls back to "?" anyway).
+fn extractHost(url: []const u8) ?[]const u8 {
+    if (url.len == 0) return null;
+    var s = url;
+    // Strip scheme.
+    if (std.mem.indexOf(u8, s, "://")) |i| s = s[i + 3 ..];
+    // Stop at the first path separator or query.
+    if (std.mem.indexOfAny(u8, s, "/?")) |i| return s[0..i];
+    return s;
+}

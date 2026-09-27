@@ -29,8 +29,24 @@ pub fn build(b: *std.Build) void {
         b.option([]const u8, "commit", "Git commit hash") orelse "unknown",
     );
 
+    // Transport-error translation (port of upstream multica MUL-7466 #8761).
+    // Lives under `src/cli/` next to its first consumer, but both binaries
+    // need it: the 1p CLI's module root is `src/cli/main.zig` (so a plain
+    // `@import("tls_error.zig")` works there), while zserver's root is
+    // `src/main.zig` and `src/cli/` sits outside its tree. Exposing it as
+    // a named module keeps a single implementation instead of duplicating
+    // the classifier per binary.
+    const tls_error_mod = b.createModule(.{
+        .root_source_file = b.path("src/cli/tls_error.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // `driver_pg = true` is what enables `zfinal.ConnectionPool`'s real
     // PostgreSQL driver (and the `zfinal.Model` ORM on top of it).
+    // The zfinal dep tree is patched so its zent peer data layer is dead-
+    // code (`if (false and enable_zent)` in deps-cache/zfinal-src/build.zig);
+    // zserver uses only DB/Model, never zent.
     const zfinal_dep = b.dependency("zfinal", .{
         .target = target,
         .optimize = optimize,
@@ -52,6 +68,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zfinal", .module = zfinal_mod },
             .{ .name = "zcli", .module = zcli_mod },
             .{ .name = "build_options", .module = build_options.createModule() },
+            .{ .name = "tls_error", .module = tls_error_mod },
         },
     });
     exe_mod.link_libc = true;
@@ -101,6 +118,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zfinal", .module = zfinal_mod },
             .{ .name = "zcli", .module = zcli_mod },
             .{ .name = "build_options", .module = build_options.createModule() },
+            .{ .name = "tls_error", .module = tls_error_mod },
         },
     });
     test_mod.link_libc = true;

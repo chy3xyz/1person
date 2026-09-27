@@ -965,15 +965,29 @@ pub fn createImportedSkill(allocator: std.mem.Allocator, workspace_id: []const u
 
 fn fetchURL(allocator: std.mem.Allocator, url: []const u8) !?[]u8 {
     const uri = std.Uri.parse(url) catch return null;
+    // PATCH (MUL-7466): skill imports hit third-party hosts (GitHub raw,
+    // skills.sh, clawhub). On an air-gapped or TLS-intercepted self-host
+    // box the raw std error gives the operator no next step; transcribe
+    // it into a one-liner naming the host and the fix.
+    const host = if (uri.host) |h| h.raw else "unknown-host";
     var client = std.http.Client{ .allocator = allocator, .io = zfinal.io_instance.io };
     defer client.deinit();
-    var req = try client.request(.GET, uri, .{
+    var req = client.request(.GET, uri, .{
         .headers = .{ .user_agent = .{ .override = "multica-zserver/0.1" } },
-    });
+    }) catch |err| {
+        logSkillTransportError(err, host);
+        return null;
+    };
     defer req.deinit();
-    try req.sendBodiless();
+    req.sendBodiless() catch |err| {
+        logSkillTransportError(err, host);
+        return null;
+    };
     var redirect_buf: [4096]u8 = undefined;
-    var response = try req.receiveHead(&redirect_buf);
+    var response = req.receiveHead(&redirect_buf) catch |err| {
+        logSkillTransportError(err, host);
+        return null;
+    };
     const status_class = response.head.status.class();
     if (status_class != .success) return null;
     var body: std.ArrayList(u8) = .empty;
@@ -986,6 +1000,20 @@ fn fetchURL(allocator: std.mem.Allocator, url: []const u8) !?[]u8 {
         try body.appendSlice(allocator, transfer_buf[0..n]);
     }
     return try body.toOwnedSlice(allocator);
+}
+
+/// Log the classified transport reason for a failed skill fetch. Skips
+/// the catch-all bucket so ordinary HTTP failures (404 on a moved repo,
+/// rate limit) don't spam the log with noise.
+fn logSkillTransportError(err: anyerror, host: []const u8) void {
+    const tls_error = @import("tls_error");
+    const kind = tls_error.transcribeTransportError(err);
+    if (kind == tls_error.TransportError.TransportUnknown) return;
+    var buf: [512]u8 = undefined;
+    std.log.warn(
+        "skill import fetch failed: {s}",
+        .{tls_error.describeTransportError(err, host, &buf)},
+    );
 }
 
 fn sanitizeSkillText(allocator: std.mem.Allocator, raw: []const u8) ![]const u8 {

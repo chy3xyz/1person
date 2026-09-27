@@ -139,17 +139,46 @@ fn sendVerificationEmail(
     const uri = std.Uri.parse("https://api.resend.com/emails") catch return error.EmailSendFailed;
     var client = std.http.Client{ .allocator = allocator, .io = zfinal.io_instance.io };
     defer client.deinit();
-    var req = try client.request(.POST, uri, .{
+    // PATCH (MUL-7466): on a self-hosted box behind a TLS-interception
+    // proxy, or with a private CA in the chain, the raw std error
+    // (`CertificateIssuerMismatch` / `TlsAlert`) tells the operator
+    // nothing actionable. Transcribe it into a one-liner that names the
+    // host and the fix.
+    var req = client.request(.POST, uri, .{
         .headers = .{
             .content_type = .{ .override = "application/json" },
             .authorization = .{ .override = bearer },
         },
-    });
+    }) catch |err| {
+        logTransportError("resend", err, "api.resend.com");
+        return error.EmailSendFailed;
+    };
     defer req.deinit();
-    try req.sendBodyComplete(body);
+    req.sendBodyComplete(body) catch |err| {
+        logTransportError("resend", err, "api.resend.com");
+        return error.EmailSendFailed;
+    };
     var redirect_buf: [4096]u8 = undefined;
-    var response = try req.receiveHead(&redirect_buf);
+    var response = req.receiveHead(&redirect_buf) catch |err| {
+        logTransportError("resend", err, "api.resend.com");
+        return error.EmailSendFailed;
+    };
     if (response.head.status.class() != .success) return error.EmailSendFailed;
+}
+
+/// Emit the classified transport diagnostic for an outbound call. Only
+/// logs when the error is actually TLS/transport-shaped — HTTP-level
+/// failures (bad status, malformed body) stay silent here because the
+/// caller's own message already covers them.
+fn logTransportError(label: []const u8, err: anyerror, host: []const u8) void {
+    const tls_error = @import("tls_error");
+    const kind = tls_error.transcribeTransportError(err);
+    if (kind == tls_error.TransportError.TransportUnknown) return;
+    var buf: [512]u8 = undefined;
+    std.log.warn(
+        "{s} call failed: {s}",
+        .{ label, tls_error.describeTransportError(err, host, &buf) },
+    );
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -311,9 +340,15 @@ fn exchangeGoogleCode(
     const uri = std.Uri.parse("https://oauth2.googleapis.com/token") catch return null;
     var client = std.http.Client{ .allocator = allocator, .io = zfinal.io_instance.io };
     defer client.deinit();
-    var req = try client.request(.POST, uri, .{
+    // PATCH (MUL-7466): a Google-OAuth failure caused by a corporate
+    // TLS-interception proxy looks identical to a bad client_secret from
+    // the outside, so log the classified transport reason separately.
+    var req = client.request(.POST, uri, .{
         .headers = .{ .content_type = .{ .override = "application/x-www-form-urlencoded" } },
-    });
+    }) catch |err| {
+        logTransportError("google oauth token", err, "oauth2.googleapis.com");
+        return null;
+    };
     defer req.deinit();
 
     // Build the form body: code, client_id, client_secret, redirect_uri,
@@ -367,13 +402,22 @@ fn fetchGoogleUserInfo(allocator: std.mem.Allocator, access_token: []const u8) !
     defer client.deinit();
     const bearer = try std.fmt.allocPrint(allocator, "Bearer {s}", .{access_token});
     defer allocator.free(bearer);
-    var req = try client.request(.GET, uri, .{
+    var req = client.request(.GET, uri, .{
         .headers = .{ .authorization = .{ .override = bearer } },
-    });
+    }) catch |err| {
+        logTransportError("google oauth userinfo", err, "www.googleapis.com");
+        return null;
+    };
     defer req.deinit();
-    try req.sendBodiless();
+    req.sendBodiless() catch |err| {
+        logTransportError("google oauth userinfo", err, "www.googleapis.com");
+        return null;
+    };
     var redirect_buf: [4096]u8 = undefined;
-    var response = try req.receiveHead(&redirect_buf);
+    var response = req.receiveHead(&redirect_buf) catch |err| {
+        logTransportError("google oauth userinfo", err, "www.googleapis.com");
+        return null;
+    };
     if (response.head.status.class() != .success) return null;
 
     var body: std.ArrayList(u8) = .empty;
