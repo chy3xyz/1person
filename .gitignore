@@ -86,6 +86,29 @@ backend/zserver/ci-timings.log
 backend/zserver/main.o
 backend/zserver/mutex_test
 
+# Pre-staged Zig framework sources, used only when the build host can't
+# reach GitHub's git smart-HTTP endpoint and `build.zig.zon` is
+# temporarily repointed at `.path = "deps-cache/..."` deps. The manifest
+# in git always uses `git+https://` — this directory is a local-only
+# fallback, never part of the build contract.
+backend/zserver/deps-cache/
+
 # Optional local clones of Zig framework deps (build uses git deps in
 # build.zig.zon). Never commit these.
 zig_ws/
+
+# Local dev scaffolding added when building zserver on a host that
+# can't reach GitHub's git smart-HTTP endpoint. The build resolves
+# zfinal/zcli through `.path` deps under `backend/zserver/deps-cache/`
+# instead of `git+https://`, and the desktop bundler expects a
+# repo-root-relative `zserver/` + `zig_ws/`. These symlinks bridge that
+# gap for the local tree only.
+#
+#   zserver           -> backend/zserver
+#   frontend/zserver  -> ../backend/zserver
+#   apps/desktop      -> ../../frontend/apps/desktop  (bundle-cli path shim)
+#
+# Nothing in CI or a normal checkout needs them.
+/zserver
+/frontend/zserver
+/apps/
