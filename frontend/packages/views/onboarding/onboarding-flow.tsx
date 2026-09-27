@@ -62,17 +62,22 @@ function coerceToArray<T extends string>(value: unknown): T[] {
  * record of the prior skip stays in the DB.
  */
 function mergeQuestionnaire(
-  raw: Record<string, unknown>,
+  raw: Record<string, unknown> | null | undefined,
 ): QuestionnaireAnswers {
+  // Defensive: the persisted questionnaire can be missing for older users
+  // (pre-v1 schema, or rows where the column was NULL during a migration).
+  // The spread already tolerates undefined — we only need to guard the
+  // direct field reads below.
+  const safeRaw = (raw ?? {}) as Partial<QuestionnaireAnswers>;
   const merged = {
     ...EMPTY_QUESTIONNAIRE,
-    ...(raw as Partial<QuestionnaireAnswers>),
+    ...safeRaw,
   };
   return {
     ...merged,
-    source: coerceToArray<QuestionnaireAnswers["source"][number]>(raw.source),
+    source: coerceToArray<QuestionnaireAnswers["source"][number]>(safeRaw.source),
     use_case: coerceToArray<QuestionnaireAnswers["use_case"][number]>(
-      raw.use_case,
+      safeRaw.use_case,
     ),
     source_skipped: false,
     role_skipped: false,
