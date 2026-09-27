@@ -292,6 +292,17 @@ pub const WorkspaceResponse = struct {
     slug: []const u8,
     description: ?[]const u8,
     context: ?[]const u8,
+    /// `settings` / `repos` hold raw JSON TEXT, so they must be spliced
+    /// into the response verbatim — a plain `[]const u8` would serialize
+    /// as an escaped JSON *string* (`"[{\"url\":…}]"`), which no client
+    /// schema can consume.
+    ///
+    /// `std.json.Stringify` only consults a `jsonStringify` hook for
+    /// unions, not structs, and there is no `std.json.Raw` escape hatch,
+    /// so the two fields are rendered here into a ready-to-write
+    /// `std.json.Value`-shaped form: a one-key object whose single member
+    /// is a `number_string`, which `Stringify` emits as bare text.
+    /// Callers unwrap it via `rawJsonValue`.
     settings: ?std.json.Value,
     repos: ?std.json.Value,
     issue_prefix: []const u8,
@@ -299,6 +310,14 @@ pub const WorkspaceResponse = struct {
     created_at: []const u8,
     updated_at: []const u8,
 };
+
+/// Wrap already-valid JSON text so `Stringify` emits it verbatim.
+/// `std.json.Value.number_string` is written with `jws.print("{s}", …)` —
+/// no quoting, no escaping — which is exactly the "raw passthrough" we
+/// need for `jsonb` columns.
+pub fn rawJsonValue(text: []const u8) std.json.Value {
+    return .{ .number_string = text };
+}
 
 /// `member` row joined with the corresponding `user` row, projected
 /// for the API. The `id` column is the `member.id`; the human-readable
@@ -419,6 +438,23 @@ pub fn parseCount(text: ?[]const u8) i64 {
     return std.fmt.parseInt(i64, t, 10) catch 0;
 }
 
+/// Take a `jsonb` column rendered as text and hand back an owned copy
+/// suitable for embedding directly in a response struct.
+///
+/// Unlike `parseJsonValue`, this returns a plain string: no arena, no
+/// `Value`, nothing whose validity depends on a scope the caller has to
+/// remember to keep alive. The text came out of Postgres already valid
+/// JSON, so re-validating and re-rendering it buys nothing but a place for
+/// a dangling pointer to hide. Returns null for NULL / empty input.
+///
+/// Caller owns the returned slice and frees it with `allocator`.
+pub fn renderJsonColumn(allocator: std.mem.Allocator, text: ?[]const u8) !?[]const u8 {
+    const t = text orelse return null;
+    const trimmed = std.mem.trim(u8, t, &std.ascii.whitespace);
+    if (trimmed.len == 0) return null;
+    return try allocator.dupe(u8, trimmed);
+}
+
 /// Parse a JSON text blob, returning the value on success and `null`
 /// on failure or NULL input. The caller is responsible for the
 /// `holder` lifetime because the returned `std.json.Value` references
@@ -426,11 +462,12 @@ pub fn parseCount(text: ?[]const u8) i64 {
 pub fn parseJsonValue(allocator: std.mem.Allocator, text: ?[]const u8, holder: *?std.json.Parsed(std.json.Value)) !?std.json.Value {
     const t = text orelse return null;
     if (t.len == 0) return null;
-    // Free the previous occupant before overwriting, otherwise callers
-    // that loop rows through a single long-lived holder (see
-    // `workspaceResponseFromRow` callers) leak one arena per row.
-    if (holder.*) |*prev| prev.deinit();
-    holder.* = null;
+    // `holder` is a slot the CALLER owns, expected to be freshly
+    // initialised for this value. It is deliberately NOT cleared here:
+    // callers that loop rows keep one slot per row (a single shared slot
+    // would free the previous row's arena while that row's response still
+    // points into it), so clobbering an occupied slot would reintroduce
+    // exactly the use-after-free this signature exists to prevent.
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, t, .{}) catch return null;
     holder.* = parsed;
     return parsed.value;
@@ -664,15 +701,24 @@ pub fn requireAccess(ctx: *zfinal.Context, db_handle: *zfinal.DB, workspace_id: 
 /// Project a `SELECT id::text, name, slug, description, context,
 /// settings::text, repos::text, issue_prefix, avatar_url,
 /// created_at, updated_at FROM workspace` row to the API
-/// response shape. `settings_holder` and `repos_holder` own the parsed
-/// `std.json.Value` arenas.
+/// response shape.
 ///
 /// The `::text` casts are mandatory: the driver requests binary result
 /// format, so an uncast `uuid` arrives as 16 raw bytes, `jsonb` as a
 /// version byte plus the document, and `timestamptz` as an i64. Reading
 /// those with `getText` yields non-UTF-8 garbage that PostgreSQL then
 /// rejects with SQLSTATE 22021 when it is fed back in as a text param.
-pub fn workspaceResponseFromRow(allocator: std.mem.Allocator, rs: zfinal.ResultSet, row: usize, settings_holder: *?std.json.Parsed(std.json.Value), repos_holder: *?std.json.Parsed(std.json.Value)) !WorkspaceResponse {
+///
+/// `rs` is a POINTER. Taking it by value copies the ResultSet (and its
+/// `rows` ArrayList) into this frame; `getText` on an `.int` / `.float`
+/// cell formats into that copy's per-Row `numeric_text` scratch, which
+/// dies with the frame — and the caller serializes every row after this
+/// returns, so `created_at` / `updated_at` would dangle for any result
+/// with more than one row.
+///
+/// `settings` / `repos` are owned strings (see `renderJsonColumn`); the
+/// caller frees them once the response has been written.
+pub fn workspaceResponseFromRow(allocator: std.mem.Allocator, rs: *zfinal.ResultSet, row: usize) !WorkspaceResponse {
     const r = &rs.rows.items[row];
     return WorkspaceResponse{
         .id = r.getText(0) orelse "",
@@ -680,13 +726,27 @@ pub fn workspaceResponseFromRow(allocator: std.mem.Allocator, rs: zfinal.ResultS
         .slug = r.getText(2) orelse "",
         .description = r.getText(3),
         .context = r.getText(4),
-        .settings = try parseJsonValue(allocator, r.getText(5), settings_holder),
-        .repos = try parseJsonValue(allocator, r.getText(6), repos_holder),
+        .settings = if (try renderJsonColumn(allocator, r.getText(5))) |s| rawJsonValue(s) else null,
+        .repos = if (try renderJsonColumn(allocator, r.getText(6))) |s| rawJsonValue(s) else null,
         .issue_prefix = r.getText(7) orelse "",
         .avatar_url = r.getText(8),
         .created_at = r.getText(9) orelse "",
         .updated_at = r.getText(10) orelse "",
     };
+}
+
+/// Free the allocator-owned fields of a `WorkspaceResponse` produced by
+/// `workspaceResponseFromRow`. Every other field borrows from the
+/// ResultSet and must NOT be freed.
+pub fn freeWorkspaceResponseJson(allocator: std.mem.Allocator, resp: *WorkspaceResponse) void {
+    if (resp.settings) |s| {
+        if (s == .number_string) allocator.free(s.number_string);
+    }
+    if (resp.repos) |s| {
+        if (s == .number_string) allocator.free(s.number_string);
+    }
+    resp.settings = null;
+    resp.repos = null;
 }
 
 // ──────────────────────────────────────────────────────────────────────

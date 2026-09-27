@@ -109,25 +109,12 @@ pub fn listWorkspaces(ctx: *zfinal.Context) !void {
 
         var list: std.ArrayList(model.WorkspaceResponse) = .empty;
         defer list.deinit(allocator);
-
-        // `settings_holder` / `repos_holder` own the arena that
-        // `WorkspaceResponse.settings` / `.repos` point INTO. They must
-        // live until AFTER `renderJson` — so hoist them out of the loop
-        // and let a single function-scope `defer` free them. Declaring
-        // them inside the loop body made each `defer` block-scoped, which
-        // freed the arena at the end of every iteration; the accumulated
-        // `list` then held dangling pointers and `renderJson` walked freed
-        // memory. Latent while `repos` stayed `[]` (empty arena → no
-        // deref); as soon as a workspace had a real repo entry the
-        // serializer segfaulted in `utf8ValidateSlice`.
-        var settings_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (settings_holder) |p| p.deinit();
-        var repos_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (repos_holder) |p| p.deinit();
-
         for (0..rs.rows.items.len) |i| {
-            try list.append(allocator, try model.workspaceResponseFromRow(allocator, rs, i, &settings_holder, &repos_holder));
+            try list.append(allocator, try model.workspaceResponseFromRow(allocator, &rs, i));
         }
+        // `settings` / `repos` are owned strings; free them only after
+        // the response has been written.
+        defer for (list.items) |*w| model.freeWorkspaceResponseJson(allocator, w);
 
         try ctx.renderJson(list.items);
     } else {
@@ -240,11 +227,9 @@ pub fn createWorkspace(ctx: *zfinal.Context) !void {
         };
         defer mres.deinit();
 
-        var settings_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (settings_holder) |p| p.deinit();
-        var repos_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (repos_holder) |p| p.deinit();
-        const resp = try model.workspaceResponseFromRow(allocator, wres, 0, &settings_holder, &repos_holder);
+        var resp: model.WorkspaceResponse = undefined;
+        defer model.freeWorkspaceResponseJson(allocator, &resp);
+        resp = try model.workspaceResponseFromRow(allocator, &wres, 0);
 
         ctx.res_status = .created;
         try ctx.renderJson(resp);
@@ -321,11 +306,9 @@ pub fn getWorkspace(ctx: *zfinal.Context) !void {
             return;
         }
 
-        var settings_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (settings_holder) |p| p.deinit();
-        var repos_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (repos_holder) |p| p.deinit();
-        const resp = try model.workspaceResponseFromRow(allocator, rs, 0, &settings_holder, &repos_holder);
+        var resp: model.WorkspaceResponse = undefined;
+        defer model.freeWorkspaceResponseJson(allocator, &resp);
+        resp = try model.workspaceResponseFromRow(allocator, &rs, 0);
         try ctx.renderJson(resp);
     } else {
         try model.memInit();
@@ -407,11 +390,9 @@ pub fn updateWorkspace(ctx: *zfinal.Context) !void {
             return;
         }
 
-        var settings_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (settings_holder) |p| p.deinit();
-        var repos_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (repos_holder) |p| p.deinit();
-        const resp = try model.workspaceResponseFromRow(allocator, rs, 0, &settings_holder, &repos_holder);
+        var resp: model.WorkspaceResponse = undefined;
+        defer model.freeWorkspaceResponseJson(allocator, &resp);
+        resp = try model.workspaceResponseFromRow(allocator, &rs, 0);
         try ctx.renderJson(resp);
     } else {
         try model.memInit();
@@ -1956,11 +1937,9 @@ pub fn createChildWorkspace(ctx: *zfinal.Context) !void {
         };
         defer mres.deinit();
 
-        var settings_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (settings_holder) |p| p.deinit();
-        var repos_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (repos_holder) |p| p.deinit();
-        const resp = try model.workspaceResponseFromRow(allocator, wres, 0, &settings_holder, &repos_holder);
+        var resp: model.WorkspaceResponse = undefined;
+        defer model.freeWorkspaceResponseJson(allocator, &resp);
+        resp = try model.workspaceResponseFromRow(allocator, &wres, 0);
 
         ctx.res_status = .created;
         try ctx.renderJson(resp);
@@ -2040,17 +2019,11 @@ pub fn getChildren(ctx: *zfinal.Context) !void {
         var list: std.ArrayList(model.WorkspaceResponse) = .empty;
         defer list.deinit(allocator);
 
-        // Hoisted out of the loop for the same reason as listWorkspaces:
-        // block-scoped `defer` inside the loop body freed the JSON arena
-        // every iteration while `list` still referenced it.
-        var settings_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (settings_holder) |p| p.deinit();
-        var repos_holder: ?std.json.Parsed(std.json.Value) = null;
-        defer if (repos_holder) |p| p.deinit();
-
         for (0..rs.rows.items.len) |i| {
-            try list.append(allocator, try model.workspaceResponseFromRow(allocator, rs, i, &settings_holder, &repos_holder));
+            try list.append(allocator, try model.workspaceResponseFromRow(allocator, &rs, i));
         }
+        // Owned JSON strings — see listWorkspaces.
+        defer for (list.items) |*w| model.freeWorkspaceResponseJson(allocator, w);
 
         try ctx.renderJson(list.items);
     } else {
