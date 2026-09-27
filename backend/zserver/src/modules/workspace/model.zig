@@ -426,6 +426,11 @@ pub fn parseCount(text: ?[]const u8) i64 {
 pub fn parseJsonValue(allocator: std.mem.Allocator, text: ?[]const u8, holder: *?std.json.Parsed(std.json.Value)) !?std.json.Value {
     const t = text orelse return null;
     if (t.len == 0) return null;
+    // Free the previous occupant before overwriting, otherwise callers
+    // that loop rows through a single long-lived holder (see
+    // `workspaceResponseFromRow` callers) leak one arena per row.
+    if (holder.*) |*prev| prev.deinit();
+    holder.* = null;
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, t, .{}) catch return null;
     holder.* = parsed;
     return parsed.value;
