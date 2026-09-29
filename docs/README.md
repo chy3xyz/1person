@@ -9,6 +9,17 @@
 | [www.1person.xyz/docs](https://www.1person.xyz/docs) | Canonical user-facing documentation site (English, 简体中文, 日本語, 한국어) |
 | [`frontend/apps/docs/`](../frontend/apps/docs/) | Source of the docs site (SolidStart + MDX, content under `content/docs/`) |
 
+## Brand assets
+
+| Path | What it is |
+|------|------------|
+| [`assets/banner.jpg`](assets/banner.jpg) · [`assets/hero-screenshot.png`](assets/hero-screenshot.png) | README header art |
+| [`assets/logo-light.svg`](assets/logo-light.svg) · [`assets/logo-dark.svg`](assets/logo-dark.svg) | 1Person mark (light / dark) |
+| [`assets/favicon.svg`](assets/favicon.svg) | Canonical adaptive favicon (flips with `prefers-color-scheme`) |
+| [`../scripts/generate-brand-assets.mjs`](../scripts/generate-brand-assets.mjs) | Regenerates favicon/PWA icons into `frontend/apps/{web,docs}/public/` |
+
+To regenerate: `pnpm --dir frontend install && node scripts/generate-brand-assets.mjs`. The mark geometry is duplicated inline in `frontend/packages/ui/components/common/app-icon.tsx`, the docs sidebar, and `frontend/apps/mobile/components/brand/person-logo.tsx` — keep them in sync.
+
 ## Repository docs by tree
 
 | Location | Audience | Contents |

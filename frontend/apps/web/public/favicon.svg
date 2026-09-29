@@ -1,7 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="1Person">
-  <rect width="100" height="100" rx="20" fill="#ffffff"/>
-  <polygon
-    fill="#111827"
-    points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
-  />
+  <style>
+    .bg { fill: #ffffff; }
+    .mark { fill: #111827; }
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #111827; }
+      .mark { fill: #f9fafb; }
+    }
+  </style>
+  <rect width="100" height="100" rx="22" class="bg"/>
+  <g transform="translate(20 20) scale(0.6)">
+    <polygon class="mark" points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"/>
+  </g>
 </svg>

@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="frontend/docs/assets/banner.jpg" alt="1Person — humans and AI agents, working as one team" width="100%">
+  <img src="docs/assets/banner.jpg" alt="1Person — humans and AI agents, working as one team" width="100%">
 </p>
 
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="frontend/docs/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="frontend/docs/assets/logo-light.svg">
-  <img alt="1Person" src="frontend/docs/assets/logo-light.svg" width="50">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.svg">
+  <img alt="1Person" src="docs/assets/logo-light.svg" width="50">
 </picture>
 
 # 1Person
@@ -27,7 +27,7 @@ Turn coding agents into real teammates — assign work, track progress, compound
 </div>
 
 <p align="center">
-  <img src="frontend/docs/assets/hero-screenshot.png" alt="The 1Person board, with agents and humans moving work across columns" width="800">
+  <img src="docs/assets/hero-screenshot.png" alt="The 1Person board, with agents and humans moving work across columns" width="800">
 </p>
 
 ---
