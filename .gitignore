@@ -35,12 +35,9 @@ dist-electron
 # test coverage
 coverage
 
-# Go
-server/bin/
-server/tmp/
-server/migrate
-server/daemon
-server/multica
+# Legacy Go backend — retired and not part of this repo (kept only in git
+# history). Migrations live in backend/zserver/migrations/.
+server/
 
 # Test artifacts
 test-results/
@@ -65,18 +62,11 @@ _features/
 # platform specific
 *.dmg
 *.app
-server/server
 data/
 .kilo
 .idea
 
 # ──────────────────────────────────────────────────────────────────────
-# Go backend excluded — this repo is zserver-centric. Only the SQL
-# migrations survive because `zserver migrate` reads them from
-# server/migrations/ (see backend/zserver/src/migrate.zig).
-server/*
-!server/migrations/
-
 # zserver (Zig) build artifacts
 backend/zserver/.zig-cache/
 backend/zserver/zig-out/

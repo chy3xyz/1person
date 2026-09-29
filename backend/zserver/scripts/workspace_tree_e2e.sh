@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end HTTP test for workspace multi-tenancy V2 endpoints.
+# Served by src/modules/workspace/routes.zig (the standalone workspace_tree
+# module was folded into workspace).
 #
 # Boots a fresh zserver (no-DB mode), authenticates a dev user,
 # creates a root workspace, then exercises:

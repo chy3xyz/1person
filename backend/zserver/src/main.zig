@@ -23,7 +23,7 @@ const ServerCmd = struct {
 };
 
 const MigrateCmd = struct {
-    //! Apply SQL migrations from server/migrations/.
+    //! Apply SQL migrations from backend/zserver/migrations/.
 
     db_url: ?[]const u8 = null,
 

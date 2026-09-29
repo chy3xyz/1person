@@ -1,4 +1,4 @@
-//! `zserver migrate` — apply all SQL files in `server/migrations/` in
+//! `zserver migrate` — apply all SQL files in `migrations/` in
 //! order, using the process-wide `zfinal.ConnectionPool` (the same pool
 //! the HTTP server uses). Bootstrap-on-startup style, since zfinal does
 //! not ship a real migration runner.
@@ -17,8 +17,6 @@ const SqlParam = zfinal.SqlParam;
 const deps = @import("deps.zig");
 
 const log = std.log.scoped(.migrate);
-
-const migration_dir_rel = "../../server/migrations";
 
 /// Run the `migrate` command. `db_url` may be null, in which case the
 /// command exits 0 after printing a clear "no DB configured" message.

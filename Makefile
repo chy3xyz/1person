@@ -320,5 +320,5 @@ sqlc: ## (retired) sqlc codegen was Go-specific; zserver uses handwritten models
 # Cleanup
 ##@ Cleanup
 
-clean: ## Remove generated server binaries and temp files
-	rm -rf server/bin server/tmp
+clean: ## Remove generated zserver build outputs and temp files
+	rm -rf $(BACKEND_DIR)/zig-out $(BACKEND_DIR)/.zig-cache

@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# End-to-end test for dashboard V2 configurable analytics endpoints.
+# End-to-end test for dashboard V2 configurable analytics endpoints
+# (/dashboard/config, /dashboard/widget/:name — served by
+# src/modules/dashboard/routes.zig; the standalone dashboard_v2 module was
+# folded into dashboard).
 set -euo pipefail
 PORT="${PORT:-18087}"
 BASE="http://127.0.0.1:${PORT}"
