@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { LandingPage as HomePage } from "@/features/landing/components/multica-landing";
+import { LandingPage as HomePage } from "@/features/landing/components/landing-page";
 import { RedirectIfAuthenticated } from "@/features/landing/components/redirect-if-authenticated";
 
 export const metadata: Metadata = {

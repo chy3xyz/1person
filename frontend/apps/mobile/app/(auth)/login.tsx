@@ -6,7 +6,7 @@ import * as Haptics from "expo-haptics";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { Button } from "@/components/ui/button";
-import { PersonLogo } from "@/components/brand/multica-logo";
+import { PersonLogo } from "@/components/brand/person-logo";
 import { useAuthStore } from "@/data/auth-store";
 import { mapAuthError } from "@/lib/auth-error";
 
