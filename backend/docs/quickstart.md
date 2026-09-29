@@ -165,6 +165,6 @@ make ci
 
 ## 下一步
 
-- 阅读 [`backend/docs/common-infrastructure.md`](../../backend/docs/common-infrastructure.md) 了解各模块的实现细节
-- 阅读 [`backend/docs/`](../../backend/docs/) 下的方案文档选择你的业务方向
+- 阅读 [`common-infrastructure.md`](common-infrastructure.md) 了解各模块的实现细节
+- 阅读 [`backend/docs/`](../docs/) 下的方案文档选择你的业务方向
 - 写 Pipeline YAML + Agent Skill → 1 天内从零到上线

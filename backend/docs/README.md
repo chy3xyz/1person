@@ -8,10 +8,11 @@ Notes for `backend/zserver`, daemon/CLI, deployment, and infrastructure.
 
 | Doc | What it is |
 |-----|------------|
+| [quickstart.md](quickstart.md) | API-level quickstart: curl through pipeline, roles, referral, token economy, content matrix |
 | [deployment.md](deployment.md) | Deployment modes (no-DB / Postgres / multi-instance) |
 | [zig-daemon-plan.md](zig-daemon-plan.md) | Zig `1p` CLI + daemon roadmap |
 | [timezone-architecture-rfc.md](timezone-architecture-rfc.md) | Timezone architecture RFC |
-| [common-infrastructure.md](common-infrastructure.md) | Shared infra notes |
+| [common-infrastructure.md](common-infrastructure.md) | Shared infra notes (historical plan) |
 | [common-gaps.md](common-gaps.md) | Known gaps |
 | [codex-sandbox-troubleshooting.md](codex-sandbox-troubleshooting.md) | Codex sandbox troubleshooting |
 
@@ -19,7 +20,7 @@ Notes for `backend/zserver`, daemon/CLI, deployment, and infrastructure.
 
 | Doc | What it is |
 |-----|------------|
-| [plans/](plans/) | Backend-scoped historical plans (e.g. zserver alignment) |
+| [`../../docs/plans/backend/`](../../docs/plans/backend/) | Backend-scoped historical plans (e.g. zserver alignment) |
 
 ## Also see
 

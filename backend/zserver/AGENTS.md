@@ -105,9 +105,10 @@ Every business endpoint lives under
 from `src/router.zig`, and every endpoint the frontend calls resolves.
 
 The historical record of the migration is in
-`docs/handler-migration-guide-historical.md` (the old
-`HANDLER_MIGRATION_GUIDE.md` moved out of `src/` when `src/handlers/`
-was deleted; the document reflects only the migration-time state).
+[`archive/handler-migration-guide-historical.md`](../../archive/handler-migration-guide-historical.md)
+(the old `HANDLER_MIGRATION_GUIDE.md` moved out of `src/` when
+`src/handlers/` was deleted; the document reflects only the
+migration-time state).
 
 **No stubs remain.** The issue module (and every other module) is fully
 implemented with DB branches and no-DB in-memory fallbacks. Modules

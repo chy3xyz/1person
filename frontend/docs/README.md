@@ -13,7 +13,6 @@ The published user-facing docs site is built from **`frontend/apps/docs/`** (Sol
 | [PRD.md](PRD.md) | Reverse-engineered product requirements (implemented behavior) |
 | [product-overview.md](product-overview.md) | Broader product overview |
 | [design.md](design.md) | Design system / UI notes |
-| [quickstart.md](quickstart.md) | Short getting-started notes |
 | [analytics.md](analytics.md) | Product analytics instrumentation |
 
 ## Active / recent plans
@@ -23,8 +22,7 @@ The published user-facing docs site is built from **`frontend/apps/docs/`** (Sol
 | [onboarding-refactor-plan.md](onboarding-refactor-plan.md) | Onboarding v3 refactor |
 | [agent-quick-create-plan.md](agent-quick-create-plan.md) | Agent quick-create from templates |
 | [docs-outline.md](docs-outline.md) | External docs site outline |
-| [docs-rewrite-plan.md](docs-rewrite-plan.md) | Docs site rewrite plan |
-| [plans/](plans/) | Older frontend-scoped plans |
+| [docs-rewrite-plan.md](docs-rewrite-plan.md) | Docs site rewrite plan (historical — site shipped on SolidStart) |
 
 ## Also see
 

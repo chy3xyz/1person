@@ -1,5 +1,8 @@
 # 1Person Docs 站重写规划（v2）
 
+> **状态：历史规划。** 文档站最终落在 `frontend/apps/docs/`（SolidStart + MDX），而不是本文
+> 描述的 Fumadocs + Next.js 方案；当前文档结构以 `frontend/apps/docs/content/docs/` 为准。
+
 
 > **Path note (2026-08):** repo layout is `frontend/{apps,packages}` and `backend/zserver`. Older `apps/` / `packages/` / `zserver/` mentions in this file mean those new locations.
 > **本规划是什么**：1Person 对外 doc 站（`apps/docs/`，Fumadocs + Next.js）的从零重写方案。它替换 v1 规划——v1 之前在代码调研之前写的，很多对概念的切分现在看是错的。
