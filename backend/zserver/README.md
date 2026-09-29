@@ -44,7 +44,7 @@ Run tests:
 zig build test                # unit tests
 ./scripts/smoke_test.sh       # health/auth/workspace checks (DB mode when DATABASE_URL is set, else no-DB)
 node scripts/integration.mjs http://127.0.0.1:18099   # frontend call-pattern checks
-scripts/<module>_e2e.sh       # 30 per-module e2e suites (no-DB by default; set DATABASE_URL for DB mode)
+scripts/<module>_e2e.sh       # 39 e2e suites (no-DB by default; set DATABASE_URL for DB mode); `make ci` runs the 24-suite gate
 ```
 
 The e2e suites default to deterministic no-DB mode (`DATABASE_URL=""` when
@@ -100,7 +100,7 @@ middleware).
 | `src/deps.zig` | Global `zfinal.ConnectionPool` |
 | `src/common/` | Shared helpers: `response.zig`, `validation.zig`, `pagination.zig`, `mem.zig`, `ctx.zig` |
 | `src/modules/<name>/` | Per-domain `handler` / `service` / `model` / `routes` |
-| `scripts/` | 30 per-module e2e suites + smoke + frontend integration |
+| `scripts/` | 39 e2e suites + smoke + frontend integration |
 
 ## Production readiness — known gaps
 
@@ -151,7 +151,7 @@ Environment variables (with defaults):
 - `zig build test` — unit tests (37 pass / 19 skip, no DB required)
 - `scripts/smoke_test.sh` — no-DB health/auth/workspace flow
 - `scripts/integration.mjs` — mirrors frontend client.ts call patterns (30 checks)
-- `scripts/*_e2e.sh` — 30 module suites (no-DB, in-memory state)
+- `scripts/*_e2e.sh` — 39 e2e suites (no-DB, in-memory state)
 
 ## Notes
 

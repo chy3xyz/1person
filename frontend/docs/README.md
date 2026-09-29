@@ -1,7 +1,7 @@
 # Frontend / product docs
 
 Internal notes for product, design, and frontend engineering.  
-Published user-facing docs live in **`frontend/apps/docs/`** (Fumadocs).
+The published user-facing docs site is built from **`frontend/apps/docs/`** (SolidStart + MDX) and served at [www.1person.xyz/docs](https://www.1person.xyz/docs).
 
 > Paths in older plan files may still say `apps/` / `packages/` / `zserver/`.  
 > Current layout: `frontend/{apps,packages}` and `backend/zserver`.
@@ -31,3 +31,4 @@ Published user-facing docs live in **`frontend/apps/docs/`** (Fumadocs).
 - Backend / ops: [`../../backend/docs/`](../../backend/docs/)
 - Shared engineering plans: [`../../docs/plans/`](../../docs/plans/)
 - Archive (non-1person product notes): [`../../archive/`](../../archive/)
+- Full doc index: [`../../docs/README.md`](../../docs/README.md)

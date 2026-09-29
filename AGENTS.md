@@ -12,7 +12,7 @@ This file provides guidance to AI agents when working with code in this reposito
 
 Monorepo: `frontend/` (pnpm workspaces + Turborepo) + `backend/zserver/` (Zig).
 
-- `backend/zserver/` — Zig backend (zfinal framework, 43 modules, 24 e2e suites; canonical backend)
+- `backend/zserver/` — Zig backend (zfinal framework, 50 modules, 39 e2e scripts; canonical backend)
 - `frontend/apps/web/` — Next.js frontend (App Router)
 - `frontend/apps/desktop/` — Electron desktop app
 - `frontend/packages/core/` — Headless business logic (React Query hooks, API client)

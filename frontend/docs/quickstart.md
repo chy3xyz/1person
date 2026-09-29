@@ -1,11 +1,15 @@
 # 1person 快速开始
 
+> 本文是 **zserver API 级**入门：用 curl 走通 Pipeline、角色分润、裂变、代币、内容矩阵等
+> 业务基础设施模块。产品使用（安装 CLI、连接 Runtime、创建 Agent）见
+> [README](../../README.md) 与[文档站](https://www.1person.xyz/docs/zh)。
+
 ## 10 分钟从零到第一个 Pipeline
 
 ### 1. 启动 zserver
 
 ```bash
-cd zserver
+cd backend/zserver
 zig build
 JWT_SECRET=my-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
   ./zig-out/bin/zserver server --port 8090
@@ -152,15 +156,15 @@ curl -X POST -H "Content-Type: application/json" -H "$AUTH" -H "$HWS" \
 ### 10. 运行全部 e2e 验证
 
 ```bash
-cd zserver
+cd backend/zserver
 make ci
-# 输出: 24 套 e2e + 30 前端集成检查, 全部 PASS
+# 24 套核心 e2e（含前端集成检查）；scripts/ 下共 39 套 e2e 脚本
 ```
 
 ---
 
 ## 下一步
 
-- 阅读 `docs/common-infrastructure.md` 了解各模块的实现细节
-- 阅读 `docs/` 下的方案文档选择你的业务方向
+- 阅读 [`backend/docs/common-infrastructure.md`](../../backend/docs/common-infrastructure.md) 了解各模块的实现细节
+- 阅读 [`backend/docs/`](../../backend/docs/) 下的方案文档选择你的业务方向
 - 写 Pipeline YAML + Agent Skill → 1 天内从零到上线

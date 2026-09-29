@@ -25,5 +25,7 @@ Notes for `backend/zserver`, daemon/CLI, deployment, and infrastructure.
 
 - Product / frontend docs: [`../../frontend/docs/`](../../frontend/docs/)
 - Shared plans: [`../../docs/plans/`](../../docs/plans/)
+- CLI & daemon (repo root): `CLI_AND_DAEMON.md`, `CLI_INSTALL.md`
 - Self-hosting (repo root): `SELF_HOSTING.md`, `SELF_HOSTING_ADVANCED.md`
 - Backend code guide: [`../zserver/AGENTS.md`](../zserver/AGENTS.md)
+- Full doc index: [`../../docs/README.md`](../../docs/README.md)

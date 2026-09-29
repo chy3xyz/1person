@@ -1,5 +1,10 @@
 # 共性基础设施 · zserver 实现方案
 
+> **状态：历史规划文档。** 本文记录共性基础设施模块的初始设计方案；zserver 现已落地
+> 50 个模块（模块清单与生产就绪状态以 [`../zserver/README.md`](../zserver/README.md) 和
+> [`common-gaps.md`](common-gaps.md) 为准）。文中出现的模块数量、e2e 数量、`dashboard_v2`
+> 等早期命名可能与当前代码不一致。
+
 > 基于 zserver (Zig) + apps/web (Next.js) + packages/{core,ui,views}，
 > 将 9 个共性模块落地为可复用的基础设施。
 > 一次建设，七项目共用。
