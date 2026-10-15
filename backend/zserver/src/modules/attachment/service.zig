@@ -44,12 +44,35 @@ fn drainBody(ctx: *zfinal.Context) void {
     if (ctx.getBodyText()) |b| ctx.allocator.free(b) else |_| {}
 }
 
-/// Equivalent of `ctx.getFile(field)`: parse the multipart body and return
-/// an owned copy of the file uploaded under `field`, or null when absent.
-/// Still needed on zfinal v0.25.0 — upstream `getFile` binds the file list
-/// to `const` then calls mutating `deinit` (`*const` vs `*T` error).
+/// Parse the multipart request body and return an owned copy of the file
+/// uploaded under `field`, or null when absent.
+///
+/// `ctx.getFiles()` cannot be used here. It finds the Content-Type by walking
+/// the raw header block off the request reader, and zfinal's own `Context`
+/// phase contract documents that `req.iterateHeaders()` panics once the body
+/// has been read — the handler is past P1 by then. A multipart upload panics
+/// the whole server on every attempt, which is why attachments could never be
+/// uploaded at all. zfinal does cache request headers at dispatch
+/// (`cacheHeaders`, the same snapshot backing `ctx.getHeader`), so read
+/// Content-Type through that instead.
+///
+/// This mirrors what the Go server does in one line —
+/// `r.ParseMultipartForm(...)` then `r.FormFile("file")`: Go reads
+/// Content-Type from the already-parsed request, never from the raw reader at
+/// handler time.
 fn takeUploadedFile(ctx: *zfinal.Context, field: []const u8) !?zfinal.UploadFile {
-    var files = try ctx.getFiles();
+    const content_type = ctx.getHeader("content-type") orelse return null;
+    if (!std.mem.startsWith(u8, content_type, "multipart/form-data")) return null;
+
+    var read_buf: [4096]u8 = undefined;
+    const body = try ctx.req.readerExpectNone(&read_buf).allocRemaining(
+        ctx.allocator,
+        std.Io.Limit.limited(ctx.max_body_size),
+    );
+    defer ctx.allocator.free(body);
+
+    var parser = try zfinal.MultipartParser.init(ctx.allocator, content_type);
+    var files = try parser.parse(body);
     defer {
         for (files.items) |*f| f.deinit();
         files.deinit(ctx.allocator);
@@ -608,19 +631,23 @@ pub fn uploadFile(ctx: *zfinal.Context) !void {
                     .{ .text = url },
                     .{ .text = content_type },
                     .{ .text = size_param },
-                    .{ .text = issue_id orelse "" },
-                    .{ .text = comment_id orelse "" },
-                    .{ .text = chat_session_id orelse "" },
+                    // Absent parents must bind as SQL NULL, not "": the columns
+                    // are uuid and PostgreSQL rejects ''::uuid with 22P02, which
+                    // used to fail the whole INSERT for any attachment that was
+                    // not attached to an issue yet.
+                    if (issue_id) |v| SqlParam{ .text = v } else .null,
+                    if (comment_id) |v| SqlParam{ .text = v } else .null,
+                    if (chat_session_id) |v| SqlParam{ .text = v } else .null,
                 },
             ) catch |err| {
+                // The file itself is on disk, but with no DB row there is no
+                // metadata to serve it by — every download endpoint resolves
+                // through that row. Reporting 200 with an empty id would hand
+                // the client a link that can never resolve, so fail loudly and
+                // let the caller retry.
                 log.err("failed to create attachment record: {}", .{err});
-                // Upload succeeded but DB failed — still return the link so the file is usable.
-                ctx.res_status = .ok;
-                try ctx.renderJson(.{
-                    .id = "",
-                    .url = url,
-                    .filename = file.filename,
-                });
+                ctx.res_status = .internal_server_error;
+                try ctx.renderJson(.{ .@"error" = "failed to store attachment metadata" });
                 return;
             };
             defer insert_rs.deinit();
@@ -789,7 +816,18 @@ pub fn downloadAttachment(ctx: *zfinal.Context) !void {
     var workspace_id: []const u8 = "";
     var filename: []const u8 = "";
     var content_type: []const u8 = "application/octet-stream";
-    var size_bytes: i64 = 0;
+
+    // `getText` returns a borrowed slice into the ResultSet's cell buffers, and
+    // `rs.deinit()` frees them when this block ends — but the response headers
+    // built below still read these. Copy them out before that happens; without
+    // it the download serves `Content-Type: UUUUUU` (Zig's freed-memory fill)
+    // and a garbage filename.
+    var owned_filename: ?[]u8 = null;
+    var owned_content_type: ?[]u8 = null;
+    defer {
+        if (owned_filename) |s| ctx.allocator.free(s);
+        if (owned_content_type) |s| ctx.allocator.free(s);
+    }
 
     if (model.borrowDb()) |d| {
         defer deps.releaseBack(d);
@@ -804,9 +842,10 @@ pub fn downloadAttachment(ctx: *zfinal.Context) !void {
             return;
         }
         workspace_id = rs.rows.items[0].getText(0) orelse "";
-        filename = rs.rows.items[0].getText(1) orelse "";
-        content_type = rs.rows.items[0].getText(2) orelse "application/octet-stream";
-        size_bytes = @intCast(std.fmt.parseInt(i64, rs.rows.items[0].getText(3) orelse "0", 10) catch 0);
+        owned_filename = try ctx.allocator.dupe(u8, rs.rows.items[0].getText(1) orelse "");
+        owned_content_type = try ctx.allocator.dupe(u8, rs.rows.items[0].getText(2) orelse "application/octet-stream");
+        filename = owned_filename.?;
+        content_type = owned_content_type.?;
 
         if (workspace_id.len == 0 or !model.isWorkspaceMember(user_id, workspace_id)) {
             ctx.res_status = .not_found;
@@ -826,7 +865,6 @@ pub fn downloadAttachment(ctx: *zfinal.Context) !void {
         workspace_id = entry.workspace_id;
         filename = entry.filename;
         content_type = entry.content_type;
-        size_bytes = entry.size_bytes;
 
         if (workspace_id.len == 0) {
             ctx.res_status = .not_found;
@@ -860,11 +898,11 @@ pub fn downloadAttachment(ctx: *zfinal.Context) !void {
     defer allocator.free(disp);
     try headers.append(allocator, .{ .name = "Content-Disposition", .value = disp });
 
-    if (size_bytes >= 0) {
-        const cl = try std.fmt.allocPrint(allocator, "{d}", .{size_bytes});
-        defer allocator.free(cl);
-        try headers.append(allocator, .{ .name = "Content-Length", .value = cl });
-    }
+    // No manual Content-Length: `ctx.req.respond` already emits one from the
+    // body's real length. Adding a second here both duplicated the header and
+    // dangled — `cl` was freed by its own block-scoped `defer` before the
+    // headers were written, so the response framed `Content-Length: UU`
+    // (freed-memory fill) and clients aborted with no body.
 
     try headers.append(allocator, .{ .name = "Cache-Control", .value = "no-store" });
     try headers.append(allocator, .{ .name = "X-Content-Type-Options", .value = "nosniff" });
