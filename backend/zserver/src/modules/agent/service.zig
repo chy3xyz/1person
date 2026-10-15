@@ -786,7 +786,10 @@ pub fn cancelTasks(ctx: *zfinal.Context) !void {
             "UPDATE agent_task_queue SET status = 'cancelled', completed_at = now() WHERE agent_id = $1::uuid AND status IN ('queued', 'dispatched', 'running')",
             &[_]SqlParam{.{ .text = agent_id }},
         );
-        const cancelled: i32 = @intCast(db.affectedRows());
+        // zfinal >=0.28 guards the connection before reading the count, so a
+        // dead connection now surfaces as an error instead of silently
+        // reporting the previous statement's row count.
+        const cancelled: i32 = @intCast(try db.affectedRows());
         try ctx.renderJson(model.CancelTasksResponse{ .cancelled = cancelled });
         return;
     }

@@ -10,8 +10,8 @@
         //   zig fetch 'git+https://github.com/chy3xyz/<repo>?ref=<tag>#<commit>'
         // then paste .url / .hash below (avoid --save: it may write .path by mistake).
         .zfinal = .{
-            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.25.0#fa9d4c509eb06224cba18d83250a14ff88ccd843",
-            .hash = "zfinal-0.25.0-6AOMdZ3ybACPNWReg6SKD7rtEKi2pK4pJUO2dovIGguq",
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.2#e836dc16576b6727a923e22e35345cd6efddb5db",
+            .hash = "zfinal-0.28.2-6AOMdaSScABduEbkWjBAN2qxwqCOjtUv5QqN6r_HOT_D",
         },
         // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
         .zcli = .{
