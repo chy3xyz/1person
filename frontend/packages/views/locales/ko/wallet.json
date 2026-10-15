@@ -1,0 +1,18 @@
+{
+  "header": {
+    "title": "역지갑"
+  },
+  "balance": {
+    "fiat": "화페",
+    "rewards": "리워드"
+  },
+  "action": {
+    "deposit": "충전",
+    "withdraw": "출금",
+    "reward": "리워드"
+  },
+  "transactions": {
+    "title": "거래 내역",
+    "empty": "아직 거래 내역이 없습니다."
+  }
+}

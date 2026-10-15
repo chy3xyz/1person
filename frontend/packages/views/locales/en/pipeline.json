@@ -1,0 +1,10 @@
+{
+  "empty": {
+    "description": "No pipelines configured yet.",
+    "action": "Create your first pipeline"
+  },
+  "item": {
+    "meta_one": "{{count}} phase · Created {{date}}",
+    "meta_other": "{{count}} phases · Created {{date}}"
+  }
+}

@@ -27,6 +27,10 @@ import type layout from "../locales/en/layout.json";
 import type usage from "../locales/en/usage.json";
 import type squads from "../locales/en/squads.json";
 import type billing from "../locales/en/billing.json";
+import type roles from "../locales/en/roles.json";
+import type wallet from "../locales/en/wallet.json";
+import type pipeline from "../locales/en/pipeline.json";
+import type commission from "../locales/en/commission.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.signin.title)` resolves to the value in en/auth.json.
@@ -68,6 +72,10 @@ declare global {
     usage: typeof usage;
     squads: typeof squads;
     billing: typeof billing;
+    roles: typeof roles;
+    wallet: typeof wallet;
+    pipeline: typeof pipeline;
+    commission: typeof commission;
   }
 }
 

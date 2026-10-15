@@ -1,0 +1,9 @@
+{
+  "empty": {
+    "description": "아직 파이프라인을 설정하지 않았습니다.",
+    "action": "첫 파이프라인 만들기"
+  },
+  "item": {
+    "meta_other": "단계 {{count}}개 · 생성일 {{date}}"
+  }
+}

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Shield, GitBranch } from "lucide-react";
 import { useWorkspaceId } from "@1person/core/hooks";
+import { useT } from "../i18n";
 
 function TabButton({
   active,
@@ -35,6 +36,7 @@ function TabButton({
 }
 
 export function RolesPage() {
+  const { t } = useT("roles");
   const wsId = useWorkspaceId();
   const [tab, setTab] = useState<"definitions" | "members" | "hierarchy">("definitions");
 
@@ -68,7 +70,7 @@ export function RolesPage() {
       <header className="flex items-center justify-between px-5 py-3">
         <div className="flex items-center gap-2">
           <Shield className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">Roles</h1>
+          <h1 className="text-sm font-medium">{t(($) => $.header.title)}</h1>
         </div>
       </header>
 
@@ -99,7 +101,7 @@ export function RolesPage() {
             {(members.data as any[])?.map((m: any) => (
               <div key={m.user_id} className="rounded-lg border p-3 mb-2">
                 <span className="font-medium">{m.user_id}</span>
-                <span className="ml-2 text-xs">role: {m.role}</span>
+                <span className="ml-2 text-xs">{t(($) => $.member.role_label, { role: m.role })}</span>
                 <span className="ml-2 text-xs text-muted-foreground">L{m.level}</span>
               </div>
             ))}
@@ -109,7 +111,7 @@ export function RolesPage() {
         {tab === "hierarchy" && (
           <div className="p-8 text-center text-muted-foreground">
             <GitBranch className="h-8 w-8 mx-auto mb-2 opacity-30" />
-            <p>Select a member to view their hierarchy tree.</p>
+            <p>{t(($) => $.hierarchy.empty)}</p>
           </div>
         )}
       </div>

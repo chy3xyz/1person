@@ -1,0 +1,11 @@
+{
+  "header": {
+    "title": "角色"
+  },
+  "member": {
+    "role_label": "角色：{{role}}"
+  },
+  "hierarchy": {
+    "empty": "选择一位成员，查看其层级关系。"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "empty": {
+    "description": "还没有配置流水线。",
+    "action": "创建第一条流水线"
+  },
+  "item": {
+    "meta_other": "{{count}} 个阶段 · 创建于 {{date}}"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "empty": {
+    "description": "まだパイプラインが設定されていません。",
+    "action": "最初のパイプラインを作成"
+  },
+  "item": {
+    "meta_other": "フェーズ {{count}} 件 · 作成日 {{date}}"
+  }
+}

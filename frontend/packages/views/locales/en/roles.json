@@ -1,0 +1,11 @@
+{
+  "header": {
+    "title": "Roles"
+  },
+  "member": {
+    "role_label": "role: {{role}}"
+  },
+  "hierarchy": {
+    "empty": "Select a member to view their hierarchy tree."
+  }
+}

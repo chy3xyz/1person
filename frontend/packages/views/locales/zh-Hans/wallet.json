@@ -1,0 +1,18 @@
+{
+  "header": {
+    "title": "钱包"
+  },
+  "balance": {
+    "fiat": "法币",
+    "rewards": "奖励"
+  },
+  "action": {
+    "deposit": "充值",
+    "withdraw": "提现",
+    "reward": "奖励"
+  },
+  "transactions": {
+    "title": "交易记录",
+    "empty": "还没有交易记录。"
+  }
+}

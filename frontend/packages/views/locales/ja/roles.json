@@ -1,0 +1,11 @@
+{
+  "header": {
+    "title": "ロール"
+  },
+  "member": {
+    "role_label": "ロール: {{role}}"
+  },
+  "hierarchy": {
+    "empty": "メンバーを選択すると、階層ツリーが表示されます。"
+  }
+}

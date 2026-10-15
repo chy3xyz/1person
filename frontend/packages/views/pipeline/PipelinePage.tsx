@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@1person/core/hooks";
 import type { PipelineConfig } from "@1person/core/types";
 import { Button } from "@1person/ui/components/ui/button";
+import { useT } from "../i18n";
 
 export function PipelinePage() {
+  const { t } = useT("pipeline");
   const wsId = useWorkspaceId();
 
   const { data = [] } = useQuery<PipelineConfig[]>({
@@ -23,10 +25,10 @@ export function PipelinePage() {
   if (!data.length) {
     return (
       <div className="p-8 text-center text-muted-foreground">
-        No pipelines configured yet.
+        {t(($) => $.empty.description)}
         <br />
         <Button variant="outline" className="mt-4">
-          Create your first pipeline
+          {t(($) => $.empty.action)}
         </Button>
       </div>
     );
@@ -40,7 +42,7 @@ export function PipelinePage() {
           <p className="text-sm text-muted-foreground">{pipe.description}</p>
           <div className="mt-2 flex items-center gap-2">
             <span className="text-xs text-muted-foreground">
-              {pipe.phase_count} phases · Created {pipe.created_at}
+              {t(($) => $.item.meta, { count: pipe.phase_count, date: pipe.created_at })}
             </span>
           </div>
         </div>

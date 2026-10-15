@@ -24,6 +24,10 @@ import enUsage from "./en/usage.json";
 import enUi from "./en/ui.json";
 import enSquads from "./en/squads.json";
 import enBilling from "./en/billing.json";
+import enRoles from "./en/roles.json";
+import enWallet from "./en/wallet.json";
+import enPipeline from "./en/pipeline.json";
+import enCommission from "./en/commission.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansSettings from "./zh-Hans/settings.json";
@@ -49,6 +53,10 @@ import zhHansUsage from "./zh-Hans/usage.json";
 import zhHansUi from "./zh-Hans/ui.json";
 import zhHansSquads from "./zh-Hans/squads.json";
 import zhHansBilling from "./zh-Hans/billing.json";
+import zhHansRoles from "./zh-Hans/roles.json";
+import zhHansWallet from "./zh-Hans/wallet.json";
+import zhHansPipeline from "./zh-Hans/pipeline.json";
+import zhHansCommission from "./zh-Hans/commission.json";
 import koCommon from "./ko/common.json";
 import koAuth from "./ko/auth.json";
 import koSettings from "./ko/settings.json";
@@ -74,6 +82,10 @@ import koUsage from "./ko/usage.json";
 import koUi from "./ko/ui.json";
 import koSquads from "./ko/squads.json";
 import koBilling from "./ko/billing.json";
+import koRoles from "./ko/roles.json";
+import koWallet from "./ko/wallet.json";
+import koPipeline from "./ko/pipeline.json";
+import koCommission from "./ko/commission.json";
 import jaCommon from "./ja/common.json";
 import jaAuth from "./ja/auth.json";
 import jaSettings from "./ja/settings.json";
@@ -99,6 +111,10 @@ import jaUsage from "./ja/usage.json";
 import jaUi from "./ja/ui.json";
 import jaSquads from "./ja/squads.json";
 import jaBilling from "./ja/billing.json";
+import jaRoles from "./ja/roles.json";
+import jaWallet from "./ja/wallet.json";
+import jaPipeline from "./ja/pipeline.json";
+import jaCommission from "./ja/commission.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
 // desktop App.tsx) import from here so adding a locale or namespace happens
@@ -130,6 +146,10 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: enUi,
     squads: enSquads,
     billing: enBilling,
+    roles: enRoles,
+    wallet: enWallet,
+    pipeline: enPipeline,
+    commission: enCommission,
   },
   "zh-Hans": {
     common: zhHansCommon,
@@ -157,6 +177,10 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: zhHansUi,
     squads: zhHansSquads,
     billing: zhHansBilling,
+    roles: zhHansRoles,
+    wallet: zhHansWallet,
+    pipeline: zhHansPipeline,
+    commission: zhHansCommission,
   },
   ko: {
     common: koCommon,
@@ -184,6 +208,10 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: koUi,
     squads: koSquads,
     billing: koBilling,
+    roles: koRoles,
+    wallet: koWallet,
+    pipeline: koPipeline,
+    commission: koCommission,
   },
   ja: {
     common: jaCommon,
@@ -211,5 +239,9 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     ui: jaUi,
     squads: jaSquads,
     billing: jaBilling,
+    roles: jaRoles,
+    wallet: jaWallet,
+    pipeline: jaPipeline,
+    commission: jaCommission,
   },
 };

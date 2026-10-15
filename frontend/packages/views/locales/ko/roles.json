@@ -1,0 +1,11 @@
+{
+  "header": {
+    "title": "역할"
+  },
+  "member": {
+    "role_label": "역할: {{role}}"
+  },
+  "hierarchy": {
+    "empty": "멤버를 선택하면 계층 트리가 표시됩니다."
+  }
+}

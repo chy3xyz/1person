@@ -1,0 +1,18 @@
+{
+  "header": {
+    "title": "Wallet"
+  },
+  "balance": {
+    "fiat": "fiat",
+    "rewards": "rewards"
+  },
+  "action": {
+    "deposit": "Deposit",
+    "withdraw": "Withdraw",
+    "reward": "Reward"
+  },
+  "transactions": {
+    "title": "Transactions",
+    "empty": "No transactions yet."
+  }
+}

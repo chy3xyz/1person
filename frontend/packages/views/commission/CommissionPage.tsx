@@ -4,8 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@1person/core/hooks";
 import type { CommissionRule } from "@1person/core/types";
 import { Button } from "@1person/ui/components/ui/button";
+import { useT } from "../i18n";
 
 export function CommissionPage() {
+  const { t } = useT("commission");
   const wsId = useWorkspaceId();
 
   const { data: rules = [] } = useQuery<CommissionRule[]>({
@@ -23,10 +25,10 @@ export function CommissionPage() {
   if (!rules.length) {
     return (
       <div className="p-8 text-center text-muted-foreground">
-        No commission rules configured yet.
+        {t(($) => $.empty.description)}
         <br />
         <Button variant="outline" className="mt-4">
-          Create your first rule
+          {t(($) => $.empty.action)}
         </Button>
       </div>
     );

@@ -1,0 +1,18 @@
+{
+  "header": {
+    "title": "ウォレット"
+  },
+  "balance": {
+    "fiat": "法定通貨",
+    "rewards": "リワード"
+  },
+  "action": {
+    "deposit": "入金",
+    "withdraw": "出金",
+    "reward": "リワード"
+  },
+  "transactions": {
+    "title": "取引履歴",
+    "empty": "まだ取引がありません。"
+  }
+}
