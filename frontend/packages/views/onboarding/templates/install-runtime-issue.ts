@@ -85,24 +85,27 @@ const zh = `欢迎来到 1Person。
 
 完整文档:https://1person.xyz/docs/install-agent-runtime
 
-中文用户建议先装 Kimi CLI:
+中文用户建议先装 Kimi Code CLI（旧版 Kimi CLI 已停止维护）。
 
-1. 在 macOS / Linux 终端安装 Kimi CLI:
-   curl -LsSf https://code.kimi.com/install.sh | bash
-   Windows PowerShell:
-   Invoke-RestMethod https://code.kimi.com/install.ps1 | Invoke-Expression
-2. 确认终端能找到 Kimi:
+Windows 用户请先安装 [Git for Windows](https://gitforwindows.org/)，Kimi Code CLI 需要其中的 Git Bash。若 Git Bash 安装在非标准路径，请将 KIMI_SHELL_PATH 设为 bash.exe 的绝对路径。
+
+1. 安装 Kimi Code CLI：
+   Linux / macOS：
+   curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash
+   Windows PowerShell：
+   irm https://code.kimi.com/kimi-code/install.ps1 | iex
+2. 重新打开终端，让安装时修改的 PATH 生效，再确认能找到 Kimi：
    kimi --version
-3. 在你想让 Kimi 工作的项目目录里启动一次:
+3. 在你想让 Kimi 工作的项目目录里启动一次：
    kimi
-4. 首次启动后输入 /login,按提示完成 Kimi Code 或 API key 配置。
-5. 重启 1Person 守护进程:
+4. 首次启动后输入 /login，按提示完成 Kimi Code 或 API key 配置。
+5. 重启 1Person 守护进程：
    1person daemon restart
-   如果你用桌面端,重启 app 即可。
+   如果你用桌面端，重启 app 即可。
 6. 回到 Runtimes 页面刷新。你应该能看到一个在线的 Kimi 运行时。
-7. 用这个运行时创建第一个智能体,再把一个 issue 分配给它,并把状态切到 todo。
+7. 用这个运行时创建第一个智能体，再把一个 issue 分配给它，并把状态切到 todo。
 
-Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html
+Kimi Code CLI 官方文档：https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html
 
 运行时连上后,你就可以创建 1Person Helper,开始一次有智能体参与的上手引导。`;
 
