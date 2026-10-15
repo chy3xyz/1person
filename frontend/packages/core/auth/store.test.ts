@@ -36,9 +36,14 @@ function makeApi(getMe: () => Promise<User>): ApiClient {
   } as unknown as ApiClient;
 }
 
+// The storage key the store writes. It starts with a digit, so it can only
+// ever appear as a quoted string — bind it once instead of repeating a bare
+// identifier, which is not valid syntax.
+const TOKEN_KEY = "1person_token";
+
 describe("authStore.initialize — token mode", () => {
   it("keeps the stored token when getMe fails with a non-401 ApiError (e.g. 500)", async () => {
-    const storage = makeStorage({ 1person_token: "t" });
+    const storage = makeStorage({ [TOKEN_KEY]: "t" });
     const api = makeApi(() =>
       Promise.reject(new ApiError("server error", 500, "Internal Server Error")),
     );
@@ -48,18 +53,18 @@ describe("authStore.initialize — token mode", () => {
 
     expect(store.getState().user).toBeNull();
     expect(store.getState().isLoading).toBe(false);
-    expect(storage.snapshot().1person_token).toBe("t");
+    expect(storage.snapshot()[TOKEN_KEY]).toBe("t");
   });
 
   it("keeps the stored token on a network failure (non-ApiError throw)", async () => {
-    const storage = makeStorage({ 1person_token: "t" });
+    const storage = makeStorage({ [TOKEN_KEY]: "t" });
     const api = makeApi(() => Promise.reject(new TypeError("fetch failed")));
     const store = createAuthStore({ api, storage });
 
     await store.getState().initialize();
 
     expect(store.getState().user).toBeNull();
-    expect(storage.snapshot().1person_token).toBe("t");
+    expect(storage.snapshot()[TOKEN_KEY]).toBe("t");
   });
 
   it("on 401, leaves storage cleanup to ApiClient.onUnauthorized and resets state", async () => {
@@ -67,9 +72,9 @@ describe("authStore.initialize — token mode", () => {
     // removes the token from storage. The store's catch block must not
     // duplicate or short-circuit this — it should only reset in-memory
     // auth state.
-    const storage = makeStorage({ 1person_token: "t" });
+    const storage = makeStorage({ [TOKEN_KEY]: "t" });
     const api = makeApi(() => {
-      storage.removeItem("1person_token"); // stand-in for onUnauthorized
+      storage.removeItem(TOKEN_KEY); // stand-in for onUnauthorized
       return Promise.reject(new ApiError("unauthorized", 401, "Unauthorized"));
     });
     const store = createAuthStore({ api, storage });
@@ -77,17 +82,17 @@ describe("authStore.initialize — token mode", () => {
     await store.getState().initialize();
 
     expect(store.getState().user).toBeNull();
-    expect(storage.snapshot().1person_token).toBeUndefined();
+    expect(storage.snapshot()[TOKEN_KEY]).toBeUndefined();
   });
 
   it("populates user when getMe succeeds", async () => {
-    const storage = makeStorage({ 1person_token: "t" });
+    const storage = makeStorage({ [TOKEN_KEY]: "t" });
     const api = makeApi(() => Promise.resolve(fakeUser));
     const store = createAuthStore({ api, storage });
 
     await store.getState().initialize();
 
     expect(store.getState().user).toEqual(fakeUser);
-    expect(storage.snapshot().1person_token).toBe("t");
+    expect(storage.snapshot()[TOKEN_KEY]).toBe("t");
   });
 });
