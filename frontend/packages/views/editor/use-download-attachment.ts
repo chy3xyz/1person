@@ -67,16 +67,26 @@ function hasDesktopDownloadBridge(): boolean {
  *   the Linux/Ubuntu issue where HTML files are rendered inline instead
  *   of being downloaded.
  */
-export function useDownloadAttachment(): (attachmentId: string) => Promise<void> {
+export function useDownloadAttachment(
+  source: "workspace" | "markdown-link" = "workspace",
+): (attachmentId: string) => Promise<void> {
   const { t } = useT("editor");
   const workspaceSlug = useWorkspaceSlug();
   return useCallback(
     async (attachmentId: string) => {
       const failed = () => toast.error(t(($) => $.attachment.download_failed));
+      // A Markdown link carries only an id and must keep working when pasted
+      // into another workspace, so it resolves through the endpoint that reads
+      // the attachment's own workspace. Everything else is opened from inside
+      // the current workspace, where the header-scoped lookup is correct.
+      const fetchMetadata = () =>
+        source === "markdown-link"
+          ? api.getAttachmentForDownload(attachmentId)
+          : api.getAttachment(attachmentId);
 
       if (hasDesktopDownloadBridge()) {
         try {
-          const fresh = await api.getAttachment(attachmentId);
+          const fresh = await fetchMetadata();
           // Server may return a server-relative `download_url`
           // (`/api/attachments/{id}/download`) when no CloudFront
           // signer is configured — the unified download endpoint chooses
@@ -106,7 +116,7 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
         // not use `download_url` here: in CloudFront mode it may already be a
         // signed CDN URL, while the unified endpoint is the stable browser
         // entry point that chooses cloudfront / presign / proxy server-side.
-        await api.getAttachment(attachmentId);
+        await fetchMetadata();
         if (typeof document === "undefined") {
           failed();
           return;
@@ -122,6 +132,6 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
         failed();
       }
     },
-    [t, workspaceSlug],
+    [t, workspaceSlug, source],
   );
 }

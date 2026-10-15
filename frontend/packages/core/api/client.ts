@@ -1974,6 +1974,18 @@ export class ApiClient {
     });
   }
 
+  // The Markdown download path resolves the attachment's own workspace and
+  // checks membership there, because a durable link can be pasted into another
+  // workspace. `getAttachment` above resolves through the X-Workspace-ID
+  // header instead, which would 404 on exactly the links this endpoint exists
+  // to keep working.
+  async getAttachmentForDownload(id: string): Promise<Attachment> {
+    const raw = await this.fetch<unknown>(`/api/attachments/${id}/download-metadata`);
+    return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
+      endpoint: "GET /api/attachments/{id}/download-metadata",
+    });
+  }
+
   async deleteAttachment(id: string): Promise<void> {
     await this.fetch(`/api/attachments/${id}`, { method: "DELETE" });
   }

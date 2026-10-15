@@ -24,6 +24,10 @@ pub fn getAttachmentByID(ctx: *zfinal.Context) !void {
     try service.getAttachmentByID(ctx);
 }
 
+pub fn getAttachmentForDownload(ctx: *zfinal.Context) !void {
+    try service.getAttachmentForDownload(ctx);
+}
+
 pub fn getAttachmentContent(ctx: *zfinal.Context) !void {
     try service.getAttachmentContent(ctx);
 }

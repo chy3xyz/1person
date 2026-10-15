@@ -3,6 +3,11 @@ import { useStore } from "zustand";
 
 interface ConfigState {
   cdnDomain: string;
+  // Origin this deployment uses for durable attachment links persisted into
+  // Markdown bodies. Empty when the server has no public URL, in which case
+  // those links are server-relative. Used only to scope link interception —
+  // another instance may serve the same path shape with unrelated ids.
+  attachmentPublicUrl: string;
   allowSignup: boolean;
   googleClientId: string;
   daemonServerUrl: string;
@@ -12,6 +17,7 @@ interface ConfigState {
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
   setCdnDomain: (domain: string) => void;
+  setAttachmentPublicUrl: (url?: string) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
     googleClientId?: string;
@@ -25,12 +31,14 @@ interface ConfigState {
 
 export const configStore = createStore<ConfigState>((set) => ({
   cdnDomain: "",
+  attachmentPublicUrl: "",
   allowSignup: true,
   googleClientId: "",
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   setCdnDomain: (domain) => set({ cdnDomain: domain }),
+  setAttachmentPublicUrl: (url = "") => set({ attachmentPublicUrl: url }),
   setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
     set({ allowSignup, googleClientId, workspaceCreationDisabled }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>

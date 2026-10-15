@@ -27,6 +27,9 @@ pub fn getConfig(ctx: *zfinal.Context) !void {
     try ctx.renderJson(model.PublicConfig{
         .allow_signup = cfg.app.allow_signup,
         .google_client_id = cfg.app.google_client_id,
+        // Empty when ONEPERSON_PUBLIC_URL is unset: the frontend then treats
+        // every attachment link as its own-origin relative path.
+        .attachment_public_url = if (cfg.public_url.len == 0) null else cfg.public_url,
         .workspace_creation_disabled = cfg.app.workspace_creation_disabled,
         .daemon_server_url = cfg.app.daemon_server_url,
         .daemon_app_url = cfg.app.daemon_app_url,

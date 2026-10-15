@@ -1011,6 +1011,67 @@ pub fn serveUploads(ctx: *zfinal.Context) !void {
     });
 }
 
+/// Metadata for a Markdown download link.
+///
+/// `getAttachmentByID` resolves the attachment through the `X-Workspace-ID`
+/// header, which is correct for the editor surfaces. A durable Markdown link
+/// is different: it carries only an id, and it is meant to keep working
+/// after being pasted into a different issue or workspace. So resolve the
+/// owning workspace from the attachment row and apply exactly the membership
+/// check the protected `/download` endpoint applies — the caller's current
+/// workspace header must not decide what the link points at.
+pub fn getAttachmentForDownload(ctx: *zfinal.Context) !void {
+    const user_id = getUserId(ctx) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "unauthorized" });
+        return;
+    };
+    const attachment_id = ctx.getPathParam("id") orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "attachment_id is required" });
+        return;
+    };
+
+    if (model.borrowDb()) |d| {
+        defer deps.releaseBack(d);
+        var rs = try d.queryParams(
+            "SELECT id, workspace_id, issue_id, comment_id, chat_session_id, chat_message_id, " ++
+                "uploader_type, uploader_id, filename, url, content_type, size_bytes, created_at " ++
+                "FROM attachment WHERE id = $1::uuid",
+            &[_]SqlParam{.{ .text = attachment_id }},
+        );
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "attachment not found" });
+            return;
+        }
+        const workspace_id = rs.rows.items[0].getText(1) orelse "";
+        if (workspace_id.len == 0 or !model.isWorkspaceMember(user_id, workspace_id)) {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "attachment not found" });
+            return;
+        }
+        try ctx.renderJson(model.attachmentResponseFromRow(&rs, 0));
+    } else {
+        try memInit();
+        try mem_mutex.lock(zfinal.io_instance.io);
+        defer mem_mutex.unlock(zfinal.io_instance.io);
+
+        const entry = mem_attachments.?.get(attachment_id) orelse {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "attachment not found" });
+            return;
+        };
+        if (entry.workspace_id.len == 0 or !model.isWorkspaceMember(user_id, entry.workspace_id)) {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "attachment not found" });
+            return;
+        }
+        try ctx.renderJson(model.attachmentResponseFromEntry(entry));
+    }
+}
+
 pub fn getAttachmentByID(ctx: *zfinal.Context) !void {
     const workspace_id = getWorkspaceId(ctx) orelse {
         ctx.res_status = .bad_request;

@@ -31,7 +31,10 @@ import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@1person/ui/lib/utils";
 import { useWorkspacePaths, useWorkspaceSlug } from "@1person/core/paths";
+import { api } from "@1person/core/api";
+import { useConfigStore } from "@1person/core/config";
 import type { Attachment } from "@1person/core/types";
+import { attachmentIdFromDownloadURL } from "@1person/core/types/attachment-url";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ProjectChip } from "../projects/components/project-chip";
@@ -43,6 +46,7 @@ import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
+import { useDownloadAttachment } from "./use-download-attachment";
 import { Attachment as AttachmentRenderer } from "./attachment";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
@@ -156,6 +160,42 @@ function ProjectMentionLink({ projectId, label }: { projectId: string; label?: s
   );
 }
 
+/**
+ * The attachment id a Markdown link points at, or `undefined` when the link
+ * is not an attachment download of THIS deployment.
+ *
+ * `attachmentIdFromDownloadURL` only reads the path and the UUID. On its own
+ * that is not enough to establish ownership: another 1Person instance may use
+ * the same path shape with entirely unrelated attachment ids, and a bare
+ * navigation to it would hit that instance's endpoint. Absolute links are
+ * therefore matched against the origins this deployment actually serves from —
+ * the configured API base (empty on web, where the app proxies `/api/*` itself)
+ * and the public URL the server uses when minting durable links. Relative links
+ * are already same-origin by construction.
+ */
+function ownAttachmentDownloadId(href: string, attachmentPublicUrl: string): string | undefined {
+  const id = attachmentIdFromDownloadURL(href);
+  if (!id) return undefined;
+  if (href.startsWith("/") && !href.startsWith("//")) return id;
+
+  try {
+    const target = new URL(href);
+    if (target.username || target.password) return undefined;
+    return [api.getBaseUrl?.(), attachmentPublicUrl].some((base) => {
+      if (!base) return false;
+      try {
+        return new URL(base).origin === target.origin;
+      } catch {
+        return false;
+      }
+    })
+      ? id
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Named component so it can call useWorkspaceSlug() — arrow function inlined
 // inside `components` below would still work, but extracting it keeps the
 // hook usage explicit and avoids hook-in-object-literal surprises.
@@ -167,6 +207,8 @@ function ReadonlyLink({
   children?: React.ReactNode;
 }) {
   const slug = useWorkspaceSlug();
+  const attachmentPublicUrl = useConfigStore((s) => s.attachmentPublicUrl);
+  const downloadAttachment = useDownloadAttachment("markdown-link");
 
   if (href?.startsWith("slash://skill/")) {
     return <span className="slash-command">{children}</span>;
@@ -196,12 +238,30 @@ function ReadonlyLink({
     return <span className="mention">{children}</span>;
   }
 
+  // An attachment download URL written as a plain link — the shape the server
+  // persists into bodies via `buildMarkdownURL`, which is ABSOLUTE whenever
+  // `ONEPERSON_PUBLIC_URL` is set. A bare navigation there cannot authenticate:
+  // web's session cookie is host-locked to the API origin and SameSite=Strict,
+  // and Desktop/mobile carry a bearer token no <a> can send. The user gets a
+  // 401 body saved as their download instead of the file. Route through the
+  // download hook instead — same click-time re-sign the file-card renderer
+  // already does.
+  const attachmentId = href
+    ? ownAttachmentDownloadId(href, attachmentPublicUrl)
+    : undefined;
+
   // Regular links — open directly on click
   return (
     <a
       href={href}
       onClick={(e) => {
         e.preventDefault();
+        // Modified clicks stay native: the browser owns "open in background
+        // tab", and the raw URL remains the durable reference.
+        if (attachmentId && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+          void downloadAttachment(attachmentId);
+          return;
+        }
         if (href) openLink(href, slug);
       }}
     >

@@ -63,6 +63,11 @@ import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  // Origin used to build durable attachment links persisted into Markdown
+  // bodies. Absent when the server has no public URL configured, in which
+  // case those links stay server-relative. Clients use it only to recognise
+  // links belonging to THIS deployment.
+  attachment_public_url?: string;
   allow_signup: boolean;
   google_client_id?: string;
   posthog_key?: string;
@@ -201,6 +206,7 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  attachment_public_url: OptionalStringSchema,
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
   posthog_key: OptionalStringSchema,
@@ -213,6 +219,7 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  attachment_public_url: "",
   allow_signup: true,
   google_client_id: "",
   daemon_server_url: "",

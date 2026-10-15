@@ -4,12 +4,24 @@ import type { ReactElement } from "react";
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { getAttachmentTextContentMock } = vi.hoisted(() => ({
+const {
+  getAttachmentTextContentMock,
+  getAttachmentForDownloadMock,
+  getBaseUrlMock,
+  openLinkMock,
+} = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
+  getAttachmentForDownloadMock: vi.fn(),
+  getBaseUrlMock: vi.fn(() => ""),
+  openLinkMock: vi.fn(),
 }));
 
 vi.mock("@1person/core/api", () => ({
-  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  api: {
+    getAttachmentTextContent: getAttachmentTextContentMock,
+    getAttachmentForDownload: getAttachmentForDownloadMock,
+    getBaseUrl: getBaseUrlMock,
+  },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
 }));
@@ -41,7 +53,7 @@ vi.mock("./link-hover-card", () => ({
 }));
 
 vi.mock("./utils/link-handler", () => ({
-  openLink: vi.fn(),
+  openLink: openLinkMock,
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
 }));
 
@@ -63,6 +75,7 @@ Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
 });
 
 import mermaid from "mermaid";
+import { configStore } from "@1person/core/config";
 import { ReadonlyContent } from "./readonly-content";
 
 beforeEach(() => {
@@ -490,5 +503,101 @@ describe("ReadonlyContent slash command rendering", () => {
 
     expect(container.querySelector(".slash-command")).toBeNull();
     expect(container.querySelector("a")).not.toBeNull();
+  });
+});
+
+describe("ReadonlyContent attachment download links", () => {
+  const ID = "11111111-2222-4333-8444-555555555555";
+  const rel = `/api/attachments/${ID}/download`;
+
+  beforeEach(() => {
+    configStore.getState().setAttachmentPublicUrl("");
+    getBaseUrlMock.mockReturnValue("");
+    openLinkMock.mockClear();
+    getAttachmentForDownloadMock.mockResolvedValue({ id: ID });
+  });
+
+  function clickLink(container: HTMLElement, init: MouseEventInit = {}) {
+    const anchor = container.querySelector("a");
+    expect(anchor).not.toBeNull();
+    fireEvent.click(anchor!, init);
+  }
+
+  it("downloads a relative attachment link instead of navigating to it", () => {
+    const { container } = render(<ReadonlyContent content={`[file](${rel})`} />);
+
+    clickLink(container);
+
+    // The bare navigation is what 401s: no <a> can carry the bearer token,
+    // and web's cookie is host-locked to the API origin.
+    expect(openLinkMock).not.toHaveBeenCalled();
+    expect(getAttachmentForDownloadMock).toHaveBeenCalledWith(ID);
+  });
+
+  it("downloads an absolute link pinned to this deployment's public URL", () => {
+    configStore.getState().setAttachmentPublicUrl("https://api.example.test");
+    const { container } = render(
+      <ReadonlyContent content={`[file](https://api.example.test${rel})`} />,
+    );
+
+    clickLink(container);
+
+    expect(openLinkMock).not.toHaveBeenCalled();
+    expect(getAttachmentForDownloadMock).toHaveBeenCalledWith(ID);
+  });
+
+  it("downloads an absolute link on the configured API base (desktop)", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const { container } = render(
+      <ReadonlyContent content={`[file](https://api.example.test${rel})`} />,
+    );
+
+    clickLink(container);
+
+    expect(openLinkMock).not.toHaveBeenCalled();
+    expect(getAttachmentForDownloadMock).toHaveBeenCalledWith(ID);
+  });
+
+  it("leaves another deployment's attachment URL alone", () => {
+    // Same path shape, unrelated id space. Intercepting it would send the
+    // click to OUR metadata endpoint and download the wrong file — or nothing.
+    configStore.getState().setAttachmentPublicUrl("https://api.example.test");
+    const { container } = render(
+      <ReadonlyContent content={`[file](https://other.example.test${rel})`} />,
+    );
+
+    clickLink(container);
+
+    expect(getAttachmentForDownloadMock).not.toHaveBeenCalled();
+    expect(openLinkMock).toHaveBeenCalledWith(`https://other.example.test${rel}`, "test");
+  });
+
+  it("leaves a non-attachment link alone", () => {
+    const { container } = render(<ReadonlyContent content="[docs](https://example.com)" />);
+
+    clickLink(container);
+
+    expect(getAttachmentForDownloadMock).not.toHaveBeenCalled();
+    expect(openLinkMock).toHaveBeenCalledWith("https://example.com", "test");
+  });
+
+  it("leaves a non-UUID attachment-shaped path alone", () => {
+    const { container } = render(
+      <ReadonlyContent content="[x](/api/attachments/not-a-uuid/download)" />,
+    );
+
+    clickLink(container);
+
+    expect(getAttachmentForDownloadMock).not.toHaveBeenCalled();
+    expect(openLinkMock).toHaveBeenCalledWith("/api/attachments/not-a-uuid/download", "test");
+  });
+
+  it("leaves a modified click native so the raw URL stays the durable ref", () => {
+    const { container } = render(<ReadonlyContent content={`[file](${rel})`} />);
+
+    clickLink(container, { metaKey: true });
+
+    expect(getAttachmentForDownloadMock).not.toHaveBeenCalled();
+    expect(openLinkMock).toHaveBeenCalledWith(rel, "test");
   });
 });

@@ -15,6 +15,12 @@ pub fn register(app: *zfinal.ZFinal) !void {
     // Auth-only endpoints (no workspace middleware in Go; keep parity here).
     try app.post("/api/upload-file", handler.uploadFile);
     try app.get("/api/attachments/:id/download", handler.downloadAttachment);
+    // Markdown download links resolve their own workspace, so this one
+    // deliberately sits outside the RequireWorkspaceMember group below — that
+    // interceptor would reject a link opened from a different workspace, which
+    // is exactly the case durable links have to survive. Authorization lives
+    // in the handler: membership of the attachment's OWN workspace.
+    try app.get("/api/attachments/:id/download-metadata", handler.getAttachmentForDownload);
 
     // Top-level upload serving endpoint. Registered at the app
     // level (not under the workspace-scoped group) because uploads

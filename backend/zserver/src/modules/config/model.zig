@@ -16,6 +16,13 @@ const std = @import("std");
 pub const PublicConfig = struct {
     allow_signup: bool,
     google_client_id: []const u8,
+    /// Origin used to build durable attachment links persisted into Markdown
+    /// bodies (see `attachment.buildMarkdownURL`). Empty when
+    /// `ONEPERSON_PUBLIC_URL` is unset, in which case those links stay
+    /// server-relative. Clients use this only to recognise links that belong
+    /// to THIS deployment — another instance may serve the same path shape
+    /// with unrelated attachment ids.
+    attachment_public_url: ?[]const u8,
     workspace_creation_disabled: bool,
     daemon_server_url: ?[]const u8,
     daemon_app_url: ?[]const u8,
