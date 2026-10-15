@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The self-host stack is repo-root level: `.env.example`,
+# `docker-compose.selfhost.yml` and `scripts/local-env.sh` all live at the
+# root. Resolving one level up (`backend/`) — as this did before the scripts
+# were split — pointed every reference below at files that do not exist there,
+# so the test died on the first missing path instead of checking anything.
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT_DIR"
 
 require_config() {
