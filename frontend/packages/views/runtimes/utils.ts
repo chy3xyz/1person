@@ -128,17 +128,19 @@ export function formatTokens(n: number): string {
 // or adjust prices.
 //
 //   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
-//   OpenAI:    https://openai.com/api/pricing
+//   OpenAI:    https://developers.openai.com/api/docs/models
 //   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
 //   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
 //   Zhipu:     https://docs.z.ai/guides/overview/pricing
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
-// the safest / cheapest assumption (matches the API default). OpenAI,
-// DeepSeek, Moonshot and Zhipu do not bill cache writes separately (cached
-// input is just discounted on subsequent reads), so cacheWrite mirrors
-// input there.
+// the safest / cheapest assumption (matches the API default). DeepSeek,
+// Moonshot and Zhipu do not bill cache writes separately (cached input is
+// just discounted on subsequent reads), so cacheWrite mirrors input there.
+// OpenAI followed Anthropic from the GPT-5.6 generation onward: cache writes
+// cost 1.25× input, so its pre-5.6 rows mirror input and its newer ones do
+// not.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -198,20 +200,24 @@ const MODEL_PRICING: Record<
   "gpt-5-nano":         { input: 0.05, output: 0.40, cacheRead: 0.005, cacheWrite: 0.05 },
   "gpt-5":              { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
 
-  // -- OpenAI: GPT-6 family. Verified against openai.com/api/pricing on
-  //    2026-09-27 — these are long-term list prices, not a promo (50%+ below
-  //    the outgoing GPT-5.6 Sol/Luna rates). Three tiers:
-  //      Astra  10 / 50   — hardest end-to-end work
-  //      Sol     2 / 10   — complex coding + agentic workflows
-  //      Luna  0.1 / 0.5  — high-volume focused tasks
-  //    Cached input is 0.1x for Astra/Sol, 0.1x for Luna too ($0.01).
-  //    OpenAI does not bill cache writes separately, so cacheWrite mirrors
-  //    input (see the header note). Contexts over 272K tokens reprice the
-  //    whole request (2x input, 1.5x output) — aggregated usage rows don't
-  //    carry per-request prompt sizes, so we price at the standard tier. --
-  "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 10 },
-  "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2 },
-  "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.10 },
+  // -- OpenAI: GPT-6 family. Verified against developers.openai.com/api/docs
+  //    models (2026-10-15); earlier rows were checked against the marketing
+  //    pricing page, which omits the cache tiers. Four tiers:
+  //      Astra    10 / 50    — hardest end-to-end work
+  //      Sol       2 / 10    — complex coding + agentic workflows
+  //      Sol 6.1   2 / 10    — same list price, cheaper cache reads
+  //      Luna   0.1 / 0.5    — high-volume focused tasks
+  //    Cache writes are billed separately from 5.6+ onward, at 1.25x input;
+  //    before that generation OpenAI charged input for a cache write, which
+  //    is why the 5.x rows below mirror input (see the header note). Cached
+  //    input is 0.1x input except GPT-6.1 Sol, which is 0.05x. Contexts over
+  //    272K tokens reprice the whole request (2x input, 1.5x output) —
+  //    aggregated usage rows don't carry per-request prompt sizes, so we
+  //    price at the standard tier. --
+  "gpt-6-astra":        { input: 10,   output: 50,   cacheRead: 1.00,  cacheWrite: 12.50 },
+  "gpt-6.1-sol":        { input: 2,    output: 10,   cacheRead: 0.10,  cacheWrite: 2.50 },
+  "gpt-6-sol":          { input: 2,    output: 10,   cacheRead: 0.20,  cacheWrite: 2.50 },
+  "gpt-6-luna":         { input: 0.10, output: 0.50, cacheRead: 0.01,  cacheWrite: 0.125 },
 
   // -- OpenAI: o-series reasoning models --
   "o3-mini":            { input: 1.10, output: 4.40, cacheRead: 0.55,  cacheWrite: 1.10 },

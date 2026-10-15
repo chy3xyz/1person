@@ -226,11 +226,13 @@ describe("estimateCost", () => {
   });
 
   it("prices GPT-6 Sol / Luna / Astra at their published list rates (MUL-7692)", () => {
-    // Verified against openai.com/api/pricing 2026-09-27. Long-term list
-    // prices, not a promo. Note Luna is two orders of magnitude below
-    // Sol on input — a stale row here would wildly mis-cost bulk runs.
+    // Verified against developers.openai.com/api/docs/models 2026-10-15.
+    // Long-term list prices, not a promo. Note Luna is two orders of
+    // magnitude below Sol on input — a stale row here would wildly mis-cost
+    // bulk runs.
     const cases: Array<{ model: string; expected: number }> = [
       { model: "gpt-6-astra", expected: 10 + 50 },
+      { model: "gpt-6.1-sol", expected: 2 + 10 },
       { model: "gpt-6-sol", expected: 2 + 10 },
       { model: "gpt-6-luna", expected: 0.1 + 0.5 },
     ];
@@ -246,21 +248,39 @@ describe("estimateCost", () => {
     }
   });
 
-  it("prices GPT-6 cached input at the discounted rate", () => {
-    // OpenAI lists cached input separately (0.1x on Astra/Sol, 0.1x on
-    // Luna at $0.01). It does not bill cache writes, so cacheWrite
-    // mirrors input — a cached-heavy run must not be priced as if every
-    // token were fresh input.
-    const cost = estimateCost({
-      ...zeroUsage,
-      model: "gpt-6-sol",
-      input_tokens: 1_000_000,
-      output_tokens: 1_000_000,
-      cache_read_tokens: 1_000_000,
-      cache_write_tokens: 1_000_000,
-    });
-    // 2.00 input + 10.00 output + 0.20 cached read + 2.00 write(=input)
-    expect(cost).toBeCloseTo(2 + 10 + 0.20 + 2, 5);
+  it("prices every GPT-6 cache tier at its own rate", () => {
+    // GPT-5.6 is the first OpenAI generation to bill cache writes separately,
+    // at 1.25x input; cached input is 0.1x input except GPT-6.1 Sol at 0.05x.
+    // Cover model x category so a wrong rate cannot hide behind an
+    // input-only assertion — 1M of each category priced at its own rate.
+    const cases = [
+      { model: "gpt-6-astra", input: 10, cacheRead: 1, cacheWrite: 12.5, output: 50, total: 73.5 },
+      { model: "gpt-6.1-sol", input: 2, cacheRead: 0.1, cacheWrite: 2.5, output: 10, total: 14.6 },
+      { model: "gpt-6-sol", input: 2, cacheRead: 0.2, cacheWrite: 2.5, output: 10, total: 14.7 },
+      { model: "gpt-6-luna", input: 0.1, cacheRead: 0.01, cacheWrite: 0.125, output: 0.5, total: 0.735 },
+    ];
+    for (const c of cases) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model: c.model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000,
+          cache_write_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(c.total, 5);
+    }
+  });
+
+  it("refuses to absorb near-named GPT-6 variants into a priced row", () => {
+    // The resolver is exact-match-after-date-strip. A "pro" or hyphenated
+    // variant is a different SKU with its own rate, so it must surface in the
+    // unmapped diagnostic rather than inherit a relative's price.
+    expect(isModelPriced("gpt-6.1-sol-pro")).toBe(false);
+    expect(isModelPriced("gpt-6-1-sol")).toBe(false);
+    expect(isModelPriced("gpt-6-sol-high")).toBe(false);
+    expect(isModelPriced("gpt-6-luna-pro")).toBe(false);
   });
 
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
