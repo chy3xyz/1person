@@ -31,7 +31,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Zig (pinned 0.17.0-dev.2131)
+      - name: Install Zig (pinned 0.17.0)
         run: |
           set -euo pipefail
           bash backend/zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"

@@ -82,7 +82,7 @@ pub const Client = struct {
         var resp_len: usize = 0;
         while (resp_len < resp_buf.len) {
             var slices = [_][]u8{resp_buf[resp_len..]};
-            const n = self.stream.read(self.io, &slices) catch return error.HandshakeFailed;
+            const n = self.readSlices(&slices) catch return error.HandshakeFailed;
             if (n == 0) return error.HandshakeFailed;
             resp_len += n;
             if (std.mem.indexOf(u8, resp_buf[0..resp_len], "\r\n\r\n") != null) break;
@@ -219,11 +219,24 @@ pub const Client = struct {
         return take;
     }
 
+    /// Read into `slices` and return how many bytes arrived.
+    ///
+    /// `std.Io.net.Stream.read` cannot be used here: in Zig 0.17.0 it still
+    /// destructures the `net_read` result as a tuple, while the operation
+    /// returns a `ReadResult` struct, so the function does not compile.
+    /// Going through `Io.operate` reads the same bytes.
+    fn readSlices(self: *Client, slices: [][]u8) Error!usize {
+        const res = self.io.operate(.{
+            .net_read = .{ .socket_handle = self.stream.socket.handle, .data = slices },
+        }) catch return error.ReadFailed;
+        return (res.net_read catch return error.ReadFailed).data_len;
+    }
+
     fn readExact(self: *Client, buf: []u8) Error!void {
         var off = self.drainPending(buf);
         while (off < buf.len) {
             var slices = [_][]u8{buf[off..]};
-            const n = self.stream.read(self.io, &slices) catch return error.ReadFailed;
+            const n = self.readSlices(&slices) catch return error.ReadFailed;
             if (n == 0) return error.ConnectionClosed;
             off += n;
         }
@@ -240,7 +253,8 @@ pub const Client = struct {
                 error.Timeout => return error.TimedOut,
                 else => return error.ReadFailed,
             };
-            const n = res.net_read catch return error.ReadFailed;
+            const rc = res.net_read catch return error.ReadFailed;
+            const n = rc.data_len;
             if (n == 0) return error.ConnectionClosed;
             off += n;
         }

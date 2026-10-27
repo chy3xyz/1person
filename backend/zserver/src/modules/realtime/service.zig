@@ -1226,7 +1226,7 @@ const TimedReader = struct {
             .clock = .awake,
         } };
 
-        const n = (r.io.operateTimeout(.{
+        const rc = (r.io.operateTimeout(.{
             .net_read = .{
                 .socket_handle = r.stream.socket.handle,
                 .data = dest,
@@ -1238,6 +1238,7 @@ const TimedReader = struct {
             r.err = err;
             return error.ReadFailed;
         };
+        const n = rc.data_len;
 
         if (n == 0) return error.EndOfStream;
         if (n > data_size) {

@@ -1,6 +1,7 @@
 # --- Build stage: zserver (Zig backend) ---
-# Uses zigup to install the exact pinned Zig 0.17.0-dev.2131. zfinal + zcli
-# are fetched by the Zig package manager from build.zig.zon git URLs.
+# Uses backend/zserver/scripts/install-zig.sh to install the exact pinned
+# Zig 0.17.0 release. zfinal + zcli are fetched by the Zig package manager
+# from build.zig.zon git URLs.
 # Links libpq (Postgres client) + sqlite3 from Alpine.
 
 FROM alpine:3.21 AS builder

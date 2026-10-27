@@ -1,8 +1,29 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const package_zon = @import("build.zig.zon");
 
 /// Keg-only libpq on macOS is not on the default linker search path.
 const default_pg_lib_dir: []const u8 = "/opt/homebrew/opt/libpq/lib";
+
+/// Fail loudly when the compiler is not the one this tree targets.
+///
+/// The target is the Zig 0.17.0 *release*. Dev snapshots are rejected on
+/// purpose: ziglang.org prunes them once a release ships, so a snapshot
+/// that works today stops downloading tomorrow — and the API drifted
+/// between the last snapshot we used and the release (`net_read` now
+/// carries a `ReadResult` struct instead of a byte count).
+fn checkToolchain() void {
+    const version = builtin.zig_version_string;
+    const is_release = std.mem.indexOf(u8, version, "-dev") == null;
+    if (!std.mem.startsWith(u8, version, "0.17.") or !is_release) {
+        std.process.fatal(
+            "zserver builds against the Zig 0.17.0 release; this compiler is {s}.\n" ++
+                "Install the pinned toolchain with:\n" ++
+                "  bash backend/zserver/scripts/install-zig.sh ~/.local\n",
+            .{version},
+        );
+    }
+}
 
 /// zfinal's `driver_pg` build option adds the libpq *bindings* to the
 /// `zfinal` module but does not `linkSystemLibrary("pq")` on it (only its
@@ -15,6 +36,8 @@ fn linkPq(mod: *std.Build.Module, pg_lib_dir: []const u8) void {
 }
 
 pub fn build(b: *std.Build) void {
+    checkToolchain();
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const pg_lib_dir = b.option([]const u8, "pg-lib", "Path to the libpq lib directory") orelse default_pg_lib_dir;

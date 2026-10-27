@@ -52,7 +52,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Zig (pinned 0.17.0-dev.2131)
+      - name: Install Zig (pinned 0.17.0)
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
