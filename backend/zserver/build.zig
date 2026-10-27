@@ -44,13 +44,21 @@ pub fn build(b: *std.Build) void {
 
     // `driver_pg = true` is what enables `zfinal.ConnectionPool`'s real
     // PostgreSQL driver (and the `zfinal.Model` ORM on top of it).
-    // The zfinal dep tree is patched so its zent peer data layer is dead-
-    // code (`if (false and enable_zent)` in deps-cache/zfinal-src/build.zig);
-    // zserver uses only DB/Model, never zent.
+    //
+    // `enable-zent = false` turns off zfinal's peer data layer (zent), which
+    // upstream enables by default. zserver only ever uses DB/Model, never
+    // `zfinal.zent`, so leaving zent on would drag a second ORM into the
+    // build for nothing. Setting the option explicitly — rather than
+    // patching the dependency tree on disk — is what keeps the local build
+    // and CI producing the same binary: CI resolves zfinal straight from the
+    // upstream git URL, where no patch exists. zfinal guards its zent import
+    // at comptime (`src/data/zent_layer.zig`), so with the option off the
+    // zent package is never compiled.
     const zfinal_dep = b.dependency("zfinal", .{
         .target = target,
         .optimize = optimize,
         .driver_pg = true,
+        .@"enable-zent" = false,
     });
     const zfinal_mod = zfinal_dep.module("zfinal");
 
