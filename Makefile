@@ -286,8 +286,28 @@ server: ## Run only the zserver (Zig backend) for the current checkout
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd $(BACKEND_DIR) && zig build && ./zig-out/bin/zserver server
 
-daemon: ## Restart the local agent daemon using the CLI's stored auth/session
-	@$(MAKE) 1p ONEPERSON_ARGS="daemon restart --profile local"
+##@ Daemon
+
+# The Zig `1p` daemon is a foreground worker loop: it registers with the
+# server, holds a WebSocket open, heartbeats and claims tasks. There is no
+# `start`/`stop` supervisor, so the target runs it in the foreground and
+# Ctrl-C stops it.
+#
+# DAEMON_RUNTIME_ID is the runtime id of the local agent the daemon serves
+# (the `runtime_id` of an agent in the workspace). DAEMON_WORKSPACE_ID
+# selects the workspace; when empty the CLI uses the workspace its stored
+# daemon token was minted for.
+DAEMON_WORKSPACE_ID ?= $(ONEPERSON_WORKSPACE_ID)
+
+daemon: ## Run the local agent daemon (foreground) with the CLI's stored session
+	@if [ -z "$(DAEMON_RUNTIME_ID)" ]; then \
+		echo "DAEMON_RUNTIME_ID is not set."; \
+		echo "It is the runtime_id of a local agent in the workspace."; \
+		echo "  make daemon DAEMON_RUNTIME_ID=<uuid>"; \
+		echo "  make daemon DAEMON_RUNTIME_ID=<uuid> DAEMON_WORKSPACE_ID=<uuid>"; \
+		exit 1; \
+	fi
+	@$(MAKE) 1p ONEPERSON_ARGS="daemon --runtime_id $(DAEMON_RUNTIME_ID) $(if $(DAEMON_WORKSPACE_ID),--workspace_id $(DAEMON_WORKSPACE_ID))"
 
 cli: ## Run the 1person CLI with ARGS or ONEPERSON_ARGS from source
 	@$(MAKE) 1p ONEPERSON_ARGS="$(ONEPERSON_ARGS)"
