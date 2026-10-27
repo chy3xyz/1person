@@ -48,16 +48,23 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgres://1person:1person@localhost:5432/1person?sslmode=disable
-      PATH: ${{ env.PATH }}:${{ github.workspace }}/.zig
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Install Zig (pinned 0.17.0-dev.1567)
+      - name: Install Zig (pinned 0.17.0-dev.2131)
         working-directory: ${{ github.workspace }}
         run: |
+          set -euo pipefail
           bash backend/zserver/scripts/install-zig.sh "${GITHUB_WORKSPACE}/.zig"
-          zig version
+          # GITHUB_PATH is the only way to extend PATH for later steps. A
+          # job-level `PATH: ${{ env.PATH }}` is not an option: the `env`
+          # context is unavailable at `jobs.<id>.env`, which made this
+          # workflow fail to parse — and so never run at all.
+          echo "${GITHUB_WORKSPACE}/.zig" >> "${GITHUB_PATH}"
+
+      - name: Show Zig version
+        run: zig version
 
       - name: Install libpq headers (Postgres client lib)
         working-directory: ${{ github.workspace }}
@@ -68,14 +75,14 @@ jobs:
       - name: Build
         run: zig build
 
-      - name: Unit tests
-        run: zig build test
-
       - name: Migrations (apply + idempotency)
         run: |
           ./zig-out/bin/zserver migrate
           echo "==> re-run (idempotency check)"
           ./zig-out/bin/zserver migrate
+
+      - name: Unit tests
+        run: zig build test
 
       - name: E2E — issue suite, no-DB mode
         run: |
