@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /Users/n0x/w4_proj/dev_machine/1person/zserver
+cd "$(dirname "$0")/.."
 BASE="http://127.0.0.1:18088"
 CFG="/tmp/1p-m3-config.json"
 rm -f "$CFG"

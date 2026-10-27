@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /Users/n0x/w4_proj/dev_machine/1person/zserver
+cd "$(dirname "$0")/.."
 BASE="http://127.0.0.1:18097"
 DATABASE_URL="postgres://1person:1person@localhost:5432/1person?sslmode=disable" \
   ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \

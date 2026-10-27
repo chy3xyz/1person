@@ -98,3 +98,11 @@ jobs:
         run: |
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
             bash scripts/smoke_test.sh
+
+      - name: E2E — CLI daemon (WebSocket handshake, hostname)
+        # The CLI's default server_url is http://localhost:8080, so the
+        # daemon's WebSocket client must resolve hostnames, not just IP
+        # literals. This script points at a hostname on purpose.
+        run: |
+          JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
+            bash scripts/cli_m2_e2e.sh
