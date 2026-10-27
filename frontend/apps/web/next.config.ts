@@ -1,13 +1,47 @@
 import type { NextConfig } from "next";
-import { config } from "dotenv";
+import { parse } from "dotenv";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "path";
 import { resolveRemoteApiUrl } from "./config/runtime-urls";
 import { createMDX } from "fumadocs-mdx/next";
 
-// Load root .env so REMOTE_API_URL is available to next.config.ts
-config({ path: resolve(__dirname, "../../.env") });
+// The repo-root .env is the project's single env file. Read only the keys
+// the build needs: loading the whole file would push secrets (JWT_SECRET,
+// DATABASE_URL, …) into the web server process.
+//
+// `PORT` in that file is the *backend's* port — the web server's own port
+// is not recorded there. It cannot be taken from `process.env`, because
+// Next.js overwrites that with the web server's listening port before this
+// config is evaluated.
+const rootEnvPath = resolve(__dirname, "../../../.env");
+const rootEnv = existsSync(rootEnvPath)
+  ? parse(readFileSync(rootEnvPath, "utf8"))
+  : {};
 
-const remoteApiUrl = resolveRemoteApiUrl(process.env);
+function firstNonEmpty(...values: (string | undefined)[]): string | undefined {
+  for (const value of values) {
+    if (value && value.trim().length > 0) return value;
+  }
+  return undefined;
+}
+
+const remoteApiUrl = resolveRemoteApiUrl({
+  REMOTE_API_URL: firstNonEmpty(
+    process.env.REMOTE_API_URL,
+    rootEnv.REMOTE_API_URL,
+  ),
+  NEXT_PUBLIC_API_URL: firstNonEmpty(
+    process.env.NEXT_PUBLIC_API_URL,
+    rootEnv.NEXT_PUBLIC_API_URL,
+  ),
+  BACKEND_PORT: firstNonEmpty(
+    process.env.BACKEND_PORT,
+    rootEnv.BACKEND_PORT,
+    rootEnv.PORT,
+  ),
+  API_PORT: firstNonEmpty(process.env.API_PORT, rootEnv.API_PORT),
+  SERVER_PORT: firstNonEmpty(process.env.SERVER_PORT, rootEnv.SERVER_PORT),
+});
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server

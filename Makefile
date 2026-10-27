@@ -13,6 +13,11 @@ POSTGRES_USER ?= 1person
 POSTGRES_PASSWORD ?= 1person
 POSTGRES_PORT ?= 5432
 PORT := $(or $(BACKEND_PORT),$(API_PORT),$(SERVER_PORT),$(PORT),8080)
+# The web app's SSR proxy needs the backend's port, and `PORT` is ambiguous
+# in a Next.js process: Next overwrites it with the web server's own
+# listening port before next.config.ts is evaluated. Export an unambiguous
+# alias so the proxy can reach the backend.
+BACKEND_PORT := $(PORT)
 FRONTEND_PORT ?= 3000
 FRONTEND_ORIGIN ?= http://localhost:$(FRONTEND_PORT)
 ONEPERSON_APP_URL ?= $(FRONTEND_ORIGIN)
