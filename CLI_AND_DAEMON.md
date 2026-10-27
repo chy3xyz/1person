@@ -2,6 +2,20 @@
 
 The `1person` CLI connects your local machine to 1Person. It handles authentication, workspace management, issue tracking, and runs the agent daemon that executes AI tasks locally.
 
+> **Implementation status.** The shipped binary is the Zig `1p` CLI
+> (`backend/zserver/zig-out/bin/1p`). It implements exactly these commands:
+> `config`, `login`, `pair`, `daemon`, `workspaces`, `agents`, `issues`,
+> `update`, `version`.
+>
+> The rest of this guide describes the target design. Not yet in the Zig
+> build: the `setup` wizard, `1person daemon start/stop` (the daemon runs in
+> the foreground — Ctrl-C stops it), browser-based login, automatic
+> agent-CLI detection, workspace auto-discovery on login, and the workspace
+> garbage collector. The daemon also does not spawn agent CLIs yet: it
+> registers, heartbeats, holds its WebSocket, and claims tasks, but the
+> `models` task reports an empty list until the M4 execution work lands.
+> Milestone-by-milestone status: `backend/docs/zig-daemon-plan.md`.
+
 ## Installation
 
 ### Homebrew (macOS/Linux)
@@ -36,105 +50,101 @@ For install script or manual installs, use:
 ## Quick Start
 
 ```bash
-# One-command setup: configure, authenticate, and start the daemon
-1person setup
+# 1. Authenticate with an email verification code
+1person login --server_url http://localhost:8080 --email you@example.com --code 123456
 
-# For self-hosted (local) deployments:
-1person setup self-host
+# 2. Mint a workspace-bound daemon token
+1person pair --workspace_id <workspace-uuid>
+
+# 3. Run the agent daemon (foreground; Ctrl-C stops it)
+1person daemon --runtime_id <runtime-uuid>
 ```
 
-Or step by step:
-
-```bash
-# 1. Authenticate (opens browser for login)
-1person login
-
-# 2. Start the agent daemon
-1person daemon start
-
-# 3. Done — agents in your watched workspaces can now execute tasks on your machine
-```
-
-`1person login` automatically discovers all workspaces you belong to and adds them to the daemon watch list.
+`--runtime_id` is the `runtime_id` of a local agent in the workspace — the
+daemon serves that runtime. `make daemon DAEMON_RUNTIME_ID=<uuid>` wraps
+the same call. Both credentials are stored in
+`~/.config/1person/config.json` (mode 0600), so `login` and `pair` run once
+per machine.
 
 ## Authentication
 
-### Browser Login
+### Log in with an email verification code
 
 ```bash
-1person login
+1person login --server_url http://localhost:8080 --email you@example.com --code 123456
 ```
 
-Opens your browser for OAuth authentication, creates a 90-day personal access token, and auto-configures your workspaces.
+`--server_url` defaults to `http://localhost:8080`; `--email` and `--code`
+are prompted for when omitted. The CLI requests the code itself, exchanges
+it for a session token, and stores the token in
+`~/.config/1person/config.json` (mode 0600).
 
-### Token Login
-
-```bash
-1person login --token <1p_...>
-```
-
-Authenticate using a personal access token directly. Useful for headless environments. Pass `--token=` with an empty value to be prompted interactively (so the token never lands in shell history).
+A self-hosted server without SMTP delivery prints the code in its log
+(`info(auth_service): login code for <email>: …`). A server started with
+`ONEPERSON_DEV_VERIFICATION_CODE` accepts that fixed code.
 
 ### Check Status
 
 ```bash
-1person auth status
+1person config
 ```
 
-Shows your current server, user, and token validity.
+Shows the resolved config file, the server URL, whether a session token is
+set, and how many daemon tokens are stored.
 
 ### Logout
 
-```bash
-1person auth logout
-```
-
-Removes the stored authentication token.
+There is no `logout` subcommand yet. Delete the token from
+`~/.config/1person/config.json` (or the whole file) to end the session.
 
 ## Agent Daemon
 
-The daemon is the local agent runtime. It detects available AI CLIs on your machine, registers them with the 1Person server, and executes tasks when agents are assigned work.
+The daemon is the local agent runtime. It registers with the 1Person server,
+holds a WebSocket open, sends heartbeats, and claims tasks for the runtime
+it serves.
 
 ### Start
 
 ```bash
-1person daemon start
+1person daemon --runtime_id <runtime-uuid> [--workspace_id <workspace-uuid>]
 ```
 
-By default, the daemon runs in the background and logs to `~/.1person/daemon.log`.
-
-To run in the foreground (useful for debugging):
-
-```bash
-1person daemon start --foreground
-```
+The daemon runs in the foreground; Ctrl-C (SIGINT) or SIGTERM stops it
+cleanly and deregisters it. `make daemon DAEMON_RUNTIME_ID=<uuid>` wraps
+the same call. `--claim_ms` and `--heartbeat_ms` tune the poll and
+heartbeat intervals.
 
 ### Stop
 
-```bash
-1person daemon stop
-```
+Send Ctrl-C to the foreground process, or `kill <pid>`.
 
 ### Status
 
-```bash
-1person daemon status
-1person daemon status --output json
+The daemon prints its lifecycle to stdout:
+
+```
+daemon registered: daemon_id=… runtime_id=…
+daemon websocket connected
+CLAIMED task id=… type=…
 ```
 
-Shows PID, uptime, detected agents, and watched workspaces.
+`1person config` shows the stored credentials. The server records the
+daemon's heartbeat, so the runtime shows as online in the console while
+the daemon is running.
 
 ### Logs
 
+Logs go to stdout. Redirect them when running detached:
+
 ```bash
-1person daemon logs              # Last 50 lines
-1person daemon logs -f           # Follow (tail -f)
-1person daemon logs -n 100       # Last 100 lines
+1person daemon --runtime_id <runtime-uuid> >> ~/.1person/daemon.log 2>&1
 ```
 
 ### Supported Agents
 
-The daemon auto-detects these AI CLIs on your PATH:
+The daemon cannot spawn agent CLIs yet — that work is tracked as M4 in
+`backend/docs/zig-daemon-plan.md`. The table below is the target set of
+runtimes to detect.
 
 | CLI | Command | Description |
 |-----|---------|-------------|
@@ -150,7 +160,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | Kimi | `kimi` | Moonshot coding agent |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 
-You need at least one installed. The daemon registers each detected CLI as an available runtime.
+Each of these will be registered as an available runtime once detection
+lands.
 
 ### How It Works
 
@@ -161,6 +172,10 @@ You need at least one installed. The daemon registers each detected CLI as an av
 5. On shutdown, all runtimes are deregistered
 
 ### Configuration
+
+> The knobs below belong to the target daemon. The shipped Zig build reads
+> only the two intervals the `1p daemon` command exposes — `--claim_ms`
+> (default 15000) and `--heartbeat_ms` (default 30000).
 
 Daemon behavior is configured via flags or environment variables:
 
@@ -228,12 +243,16 @@ Agent-specific overrides:
 When connecting to a self-hosted 1Person instance, the easiest approach is:
 
 ```bash
-# One command — configures for localhost, authenticates, starts daemon
-1person setup self-host
+# Point the CLI at your server, authenticate, mint a daemon token
+1person login --server_url https://api.example.com --email you@example.com --code 123456
+1person pair --workspace_id <workspace-uuid>
 
-# Or for on-premise with custom domains:
-1person setup self-host --server-url https://api.example.com --app-url https://app.example.com
+# Then run the daemon
+1person daemon --runtime_id <runtime-uuid>
 ```
+
+The server URL is stored in `~/.config/1person/config.json`; later commands
+reuse it, so only `login` needs `--server_url`.
 
 Or configure manually:
 
