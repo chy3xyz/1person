@@ -43,6 +43,9 @@ pub const Config = struct {
     /// `ONEPERSON_SERVICE_TOKEN` in the environment to enable it. The
     /// value is read-only and lives for the lifetime of the process.
     service_token: []const u8,
+    /// How long the server may take to wind down after a shutdown request
+    /// before it leaves on its own. See `server.zig`'s shutdown watchdog.
+    shutdown_grace_ms: u64,
     app: AppConfig,
 
     arena: std.heap.ArenaAllocator,
@@ -131,6 +134,17 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
         break :blk try std.fmt.parseInt(u32, raw, 10);
     };
 
+    // The graceful drain in zfinal is not bounded: it waits for every open
+    // connection to finish, and a connection parked in a socket read holds a
+    // thread from a pool sized by CPU count. On a 2-core runner that can
+    // take minutes. This is the budget after which the server leaves on its
+    // own instead.
+    const shutdown_grace_ms = blk: {
+        const raw = try getEnvOwnedDefault(allocator, environ, "ONEPERSON_SHUTDOWN_GRACE_MS", "35000");
+        defer allocator.free(raw);
+        break :blk try std.fmt.parseInt(u64, raw, 10);
+    };
+
     const public_url_raw = try getEnvOwnedDefault(allocator, environ, "ONEPERSON_PUBLIC_URL", "");
     const public_url_trimmed = std.mem.trimEnd(u8, std.mem.trim(u8, public_url_raw, &std.ascii.whitespace), "/");
     const public_url = try allocator.dupe(u8, public_url_trimmed);
@@ -197,6 +211,7 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
         .resend_from_email = resend_from_email,
         .github_app_slug = github_app_slug,
         .service_token = service_token,
+        .shutdown_grace_ms = shutdown_grace_ms,
         .app = app,
         .arena = arena,
     };

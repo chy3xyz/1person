@@ -20,6 +20,10 @@ BASE="http://127.0.0.1:${PORT}"
 JWT_SECRET="${JWT_SECRET:-test-secret}"
 export JWT_SECRET
 export DATABASE_URL="${DATABASE_URL:-}"
+# Budget for the server to wind down after SIGTERM. Nothing is in flight
+# when the suite stops the server, so a short budget is plenty — and it
+# keeps the run from waiting on a connection that never closes.
+export ONEPERSON_SHUTDOWN_GRACE_MS="${ONEPERSON_SHUTDOWN_GRACE_MS:-5000}"
 
 RED="\033[0;31m"
 GREEN="\033[0;32m"
@@ -68,6 +72,14 @@ SERVER_PID=$!
 cleanup() {
     echo "==> stopping zserver"
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
+    # The server leaves on its own once its shutdown budget elapses. Never
+    # let the harness hang on it: escalate if it is still alive.
+    local waited=0
+    while kill -0 "${SERVER_PID}" 2>/dev/null && [ "${waited}" -lt 100 ]; do
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    kill -9 "${SERVER_PID}" >/dev/null 2>&1 || true
     wait "${SERVER_PID}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT

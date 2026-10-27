@@ -115,6 +115,56 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     // WebSockets are dropped mid-frame.
     zfinal.shutdown.registerHandlers();
 
+    // ...but that drain is not bounded in practice. zfinal reads from
+    // client sockets with a 30s timeout on a thread pool sized by CPU
+    // count, so the drain takes roughly (open connections / threads) x
+    // 30s: on a 2-core runner with a few dozen keep-alive connections
+    // left over from a test run, the process was still alive six minutes
+    // after SIGTERM. A server that cannot be stopped is a server that
+    // gets SIGKILLed by whatever supervises it — and an E2E harness that
+    // waits on it hangs forever.
+    //
+    // So bound it here: once a shutdown is requested, leave on our own
+    // after the drain budget zfinal allows (plus a small margin).
+    startShutdownWatchdog(cfg.shutdown_grace_ms);
+
     log.info("server starting on port {}", .{cfg.port});
     try app.start();
+}
+
+/// Leave the process on our own if the graceful path has not finished.
+///
+/// Deliberately not a graceful shutdown: it exists so a stuck connection
+/// cannot keep the process alive forever. The exit code is 0 because the
+/// process was asked to stop, not because it failed.
+fn startShutdownWatchdog(grace_ms: u64) void {
+    const thread = std.Thread.spawn(.{}, shutdownWatchdogThread, .{grace_ms}) catch |err| {
+        log.warn("could not start the shutdown watchdog: {}", .{err});
+        return;
+    };
+    thread.detach();
+}
+
+fn shutdownWatchdogThread(grace_ms: u64) void {
+    while (!zfinal.shutdown.isShuttingDown()) {
+        sleepMs(100);
+    }
+    sleepMs(grace_ms);
+    if (zfinal.shutdown.isShuttingDown()) {
+        log.warn("shutdown grace period elapsed; exiting", .{});
+        std.process.exit(0);
+    }
+}
+
+/// Sleep for the given number of milliseconds.
+///
+/// `std.Thread.sleep` is gone in Zig 0.17 and the Io-based sleep would tie
+/// the watchdog to the Io instance that is shutting down, so use the libc
+/// call directly — the binary already links libc.
+fn sleepMs(ms: u64) void {
+    var req: std.c.timespec = .{
+        .sec = @intCast(ms / 1000),
+        .nsec = @intCast((ms % 1000) * std.time.ns_per_ms),
+    };
+    _ = std.c.nanosleep(&req, null);
 }
