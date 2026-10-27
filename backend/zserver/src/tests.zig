@@ -168,4 +168,9 @@ test {
     _ = @import("router_test.zig");
     _ = @import("realtime_test.zig");
     _ = @import("pg_types_test.zig");
+    // The CLI had no unit coverage: its WebSocket client once shipped a
+    // bug that only the e2e scripts could have caught, and they were
+    // pointed at IP literals.
+    _ = @import("cli/ws.zig");
+    _ = @import("cli/config_store.zig");
 }

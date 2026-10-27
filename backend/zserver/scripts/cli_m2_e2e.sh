@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd /Users/n0x/w4_proj/dev_machine/1person/zserver
-BASE="http://127.0.0.1:18091"
+cd "$(dirname "$0")/.."
+# A hostname on purpose: the WebSocket client must resolve names, not just
+# IP literals. The CLI's default server_url is http://localhost:8080.
+BASE="http://localhost:18091"
 CFG="/tmp/1p-m2-config.json"
 cat > "$CFG" <<JSON
 {

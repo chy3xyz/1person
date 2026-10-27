@@ -37,6 +37,21 @@ pub const Error = error{
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/// Open a TCP stream to `host`.
+///
+/// `IpAddress.parse` only accepts IP literals, so a hostname — the CLI's
+/// default `server_url` is `http://localhost:8080` — could not be parsed
+/// and the daemon never reached the server. The HTTP leg kept working
+/// because zfinal's HttpClient resolves names, which is why only the
+/// WebSocket handshake failed.
+fn connectToHost(io: std.Io, host: []const u8, port: u16) !std.Io.net.Stream {
+    if (std.Io.net.IpAddress.parse(host, port)) |addr| {
+        return addr.connect(io, .{ .mode = .stream });
+    } else |_| {}
+    const name = std.Io.net.HostName.init(host) catch return error.InvalidHost;
+    return std.Io.net.HostName.connect(name, io, port, .{ .mode = .stream });
+}
+
 /// A connected (post-handshake) WebSocket client. Call deinit() when done.
 pub const Client = struct {
     allocator: std.mem.Allocator,
@@ -50,8 +65,7 @@ pub const Client = struct {
 
     /// Connect and perform the upgrade handshake.
     pub fn connect(allocator: std.mem.Allocator, io: std.Io, host: []const u8, port: u16, path: []const u8, token: []const u8) Error!Client {
-        const addr = std.Io.net.IpAddress.parse(host, port) catch return error.HandshakeFailed;
-        const stream = addr.connect(io, .{ .mode = .stream }) catch return error.HandshakeFailed;
+        const stream = connectToHost(io, host, port) catch return error.HandshakeFailed;
         errdefer stream.close(io);
 
         var self = Client{ .allocator = allocator, .io = io, .stream = stream };
