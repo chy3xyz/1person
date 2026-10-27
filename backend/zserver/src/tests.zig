@@ -3,6 +3,7 @@
 test {
     _ = @import("config.zig");
     _ = @import("health.zig");
+    _ = @import("health_test.zig");
     _ = @import("router.zig");
     _ = @import("server.zig");
     _ = @import("middleware.zig");
