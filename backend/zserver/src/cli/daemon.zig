@@ -61,7 +61,15 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     defer client.deinit();
 
     // 1. register
-    const reg_body = try std.fmt.allocPrint(allocator, "{{\"runtime_id\":\"{s}\"}}", .{opts.runtime_id});
+    //
+    // `cli_version` is the version of the 1p CLI this daemon runs. The
+    // server stores it on the runtime row's `metadata.cli_version`, and
+    // the quick-create gate reads it from there to decide whether this
+    // daemon may serve an agent-create task.
+    const reg_body = try std.json.Stringify.valueAlloc(allocator, .{
+        .runtime_id = opts.runtime_id,
+        .cli_version = build_options.version,
+    }, .{});
     defer allocator.free(reg_body);
     var reg_resp = try client.postJson(allocator, "/api/daemon/register", reg_body, token_buf);
     defer reg_resp.deinit();

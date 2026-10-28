@@ -16,6 +16,7 @@ const Config = @import("../../config.zig").Config;
 const deps = @import("../../deps.zig");
 const auth_lib = @import("../../auth.zig");
 const runtime = @import("../runtime/service.zig");
+const runtime_model = @import("../runtime/model.zig");
 const task_queue = @import("../../task_queue.zig");
 const model = @import("model.zig");
 const response = @import("../../common/response.zig");
@@ -185,6 +186,17 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
     // connect so runtime-scoped requests (update/models/local-skills)
     // are accepted while the daemon is serving.
     _ = model.setRuntimeStatus(req.runtime_id, "online");
+
+    // The daemon reports the version of the 1p CLI it runs. It lands on
+    // the runtime row's `metadata.cli_version`, which is where both the
+    // frontend picker and the server-side quick-create gate read it
+    // from. A daemon that reports nothing leaves the key absent, and the
+    // gate treats that as "version unknown" — fail closed.
+    if (req.cli_version) |version| {
+        if (version.len > 0) {
+            _ = runtime_model.setRuntimeCliVersion(req.runtime_id, version);
+        }
+    }
 
     try memInit();
     try mem_mutex.lock(zfinal.io_instance.io);

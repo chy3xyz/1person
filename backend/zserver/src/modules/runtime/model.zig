@@ -237,6 +237,18 @@ pub fn runtimeResponseFromEntry(entry: RuntimeEntry) AgentRuntimeResponse {
     };
 }
 
+/// Parse the `metadata` JSONB column into a value the caller owns.
+///
+/// The metadata bag is advisory — it carries the daemon's reported CLI
+/// version and similar facts — so a missing or unparsable column falls
+/// back to an empty object instead of breaking the whole response.
+fn parseMetadata(allocator: std.mem.Allocator, text: ?[]const u8) std.json.Value {
+    const t = text orelse return .{ .object = std.json.ObjectMap.empty };
+    if (t.len == 0) return .{ .object = std.json.ObjectMap.empty };
+    return std.json.parseFromSliceLeaky(std.json.Value, allocator, t, .{}) catch
+        .{ .object = std.json.ObjectMap.empty };
+}
+
 /// Like `runtimeResponseFromRow` but deep-copies every string field into
 /// `allocator`, so the returned response outlives the result set. Use
 /// this when the response is returned from a function whose `ResultSet`
@@ -255,7 +267,7 @@ pub fn runtimeResponseFromRowDuped(allocator: std.mem.Allocator, rs: *zfinal.Res
         .launch_header = "",
         .status = dupeText(allocator, r.getText(6)),
         .device_info = dupeText(allocator, r.getText(7)),
-        .metadata = .{ .object = std.json.ObjectMap.empty },
+        .metadata = parseMetadata(allocator, r.getText(8)),
         .owner_id = dupeOpt(allocator, r.getText(12)),
         .visibility = dupeText(allocator, r.getText(14)),
         .last_seen_at = dupeOpt(allocator, r.getText(9)),
@@ -274,7 +286,7 @@ fn dupeOpt(allocator: std.mem.Allocator, text: ?[]const u8) ?[]const u8 {
     return allocator.dupe(u8, t) catch null;
 }
 
-pub fn runtimeResponseFromRow(rs: *zfinal.ResultSet, row: usize) AgentRuntimeResponse {
+pub fn runtimeResponseFromRow(allocator: std.mem.Allocator, rs: *zfinal.ResultSet, row: usize) AgentRuntimeResponse {
     const r = &rs.rows.items[row];
     return AgentRuntimeResponse{
         .id = r.getText(0) orelse "",
@@ -286,7 +298,7 @@ pub fn runtimeResponseFromRow(rs: *zfinal.ResultSet, row: usize) AgentRuntimeRes
         .launch_header = "",
         .status = r.getText(6) orelse "",
         .device_info = r.getText(7) orelse "",
-        .metadata = .{ .object = std.json.ObjectMap.empty },
+        .metadata = parseMetadata(allocator, r.getText(8)),
         .owner_id = r.getText(12),
         .visibility = r.getText(14) orelse "private",
         .last_seen_at = r.getText(9),
@@ -314,6 +326,46 @@ pub fn resolveMemberRole(_ctx: *zfinal.Context, db: *zfinal.DB, workspace_id: []
     defer rs.deinit();
     if (rs.rows.items.len == 0) return null;
     return rs.rows.items[0].getText(0);
+}
+
+/// Store the CLI version a daemon reported at registration time on the
+/// runtime row's metadata bag (`metadata.cli_version`).
+///
+/// The daemon sends the version of the 1p CLI it is running; the
+/// quick-create gate reads it back from the same place to decide whether
+/// the daemon is new enough to serve that flow. Only the `cli_version`
+/// key is replaced — the rest of the metadata bag is preserved.
+pub fn setRuntimeCliVersion(runtime_id: []const u8, version: []const u8) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    db.execParams(
+        "UPDATE agent_runtime " ++
+            "SET metadata = jsonb_set(metadata, '{cli_version}', to_jsonb($2::text), true), " ++
+            "updated_at = now() " ++
+            "WHERE id = $1::uuid",
+        &[_]SqlParam{ .{ .text = runtime_id }, .{ .text = version } },
+    ) catch return false;
+    return true;
+}
+
+/// Read `metadata.cli_version` off a runtime row.
+///
+/// Returns an empty string when the runtime does not exist or never
+/// reported a version — the caller treats that as "version missing",
+/// which the gate fails closed on. The result is copied into the DB
+/// allocator: the ResultSet is deinitialized when this function
+/// returns, so a borrowed slice would dangle.
+pub fn runtimeCliVersion(runtime_id: []const u8) []const u8 {
+    const db = borrowDb() orelse return "";
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT metadata ->> 'cli_version' FROM agent_runtime WHERE id = $1::uuid",
+        &[_]SqlParam{.{ .text = runtime_id }},
+    ) catch return "";
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return "";
+    const raw = rs.rows.items[0].getText(0) orelse return "";
+    return db.allocator.dupe(u8, raw) catch "";
 }
 
 /// Fetch a runtime row by id. Returns `null` (with 404 set on `ctx`)

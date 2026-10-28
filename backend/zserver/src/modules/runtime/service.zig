@@ -187,7 +187,7 @@ pub fn listAgentRuntimes(ctx: *zfinal.Context) !void {
         var list: std.ArrayList(model.AgentRuntimeResponse) = .empty;
         defer list.deinit(allocator);
         for (0..rs.rows.items.len) |i| {
-            try list.append(allocator, model.runtimeResponseFromRow(&rs, i));
+            try list.append(allocator, model.runtimeResponseFromRow(allocator, &rs, i));
         }
         try ctx.renderJson(list.items);
     } else {
@@ -266,7 +266,7 @@ pub fn updateAgentRuntime(ctx: *zfinal.Context) !void {
                 try ctx.renderJson(.{ .@"error" = "runtime not found" });
                 return;
             }
-            try ctx.renderJson(model.runtimeResponseFromRow(&rs, 0));
+            try ctx.renderJson(model.runtimeResponseFromRow(ctx.allocator, &rs, 0));
         } else {
             try ctx.renderJson(rt);
         }

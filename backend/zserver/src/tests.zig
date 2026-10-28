@@ -15,6 +15,8 @@ test {
     _ = @import("common/response.zig");
     _ = @import("common/pagination.zig");
     _ = @import("common/validation.zig");
+    _ = @import("common/cli_version.zig");
+    _ = @import("common/cli_version_test.zig");
     _ = @import("modules/auth/handler.zig");
     _ = @import("modules/auth/service.zig");
     _ = @import("modules/auth/model.zig");

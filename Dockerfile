@@ -20,7 +20,7 @@ COPY . .
 # Build zserver (ReleaseSafe). Zig fetches zfinal/zcli from build.zig.zon.
 ARG VERSION=dev
 ARG COMMIT=unknown
-RUN cd backend/zserver && zig build -Doptimize=ReleaseSafe -Dcommit=${COMMIT}
+RUN cd backend/zserver && zig build -Doptimize=ReleaseSafe -Dversion=${VERSION} -Dcommit=${COMMIT}
 
 # --- Runtime stage ---
 FROM alpine:3.21

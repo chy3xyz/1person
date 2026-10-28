@@ -46,6 +46,10 @@ pub const PinTaskSessionRequest = struct {
 pub const DaemonRegisterRequest = struct {
     runtime_id: []const u8,
     name: ?[]const u8 = null,
+    /// Version of the 1p CLI the daemon is running. Reported by the CLI
+    /// at registration and stored on the runtime row's
+    /// `metadata.cli_version`; the quick-create gate reads it from there.
+    cli_version: ?[]const u8 = null,
 };
 
 pub const MintDaemonTokenRequest = struct {

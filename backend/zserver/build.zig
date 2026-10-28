@@ -44,8 +44,19 @@ pub fn build(b: *std.Build) void {
 
     // Version / commit injected at build time so `zserver version` reports
     // something real instead of a hardcoded placeholder.
+    //
+    // `-Dversion` carries the release string (the Makefile passes the
+    // `git describe` output); a plain `zig build` falls back to the
+    // package version. The 1p CLI reports it to the server when the
+    // daemon registers, and the server stores it on the runtime row's
+    // `metadata.cli_version` — that is the version the quick-create gate
+    // checks.
     const build_options = b.addOptions();
-    build_options.addOption([]const u8, "version", package_zon.version);
+    build_options.addOption(
+        []const u8,
+        "version",
+        b.option([]const u8, "version", "Release version string") orelse package_zon.version,
+    );
     build_options.addOption(
         []const u8,
         "commit",

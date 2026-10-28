@@ -178,7 +178,7 @@ setup: ## Prepare the current checkout from its env file: install deps, ensure D
 	pnpm --dir $(FRONTEND_DIR) install
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "==> Building zserver (Zig backend)..."
-	cd $(BACKEND_DIR) && zig build
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION)
 	@echo "==> Running migrations..."
 	cd $(BACKEND_DIR) && ./zig-out/bin/zserver migrate
 	@echo ""
@@ -191,7 +191,7 @@ start: ## Start backend and frontend for the current checkout and run migrations
 	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "Building zserver (Zig backend)..."
-	cd $(BACKEND_DIR) && zig build
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION)
 	@echo "Running migrations..."
 	cd $(BACKEND_DIR) && ./zig-out/bin/zserver migrate
 	@echo "Starting backend and frontend..."
@@ -238,7 +238,7 @@ db-reset: ## Drop and recreate the current env's database, then re-run all migra
 		-c "DROP DATABASE IF EXISTS \"$(POSTGRES_DB)\" WITH (FORCE);" \
 		-c "CREATE DATABASE \"$(POSTGRES_DB)\";"
 	@echo "==> Running migrations..."
-	cd $(BACKEND_DIR) && zig build && ./zig-out/bin/zserver migrate
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION) && ./zig-out/bin/zserver migrate
 	@echo ""
 	@echo "✓ Database '$(POSTGRES_DB)' reset. Run 'make start' to launch the app."
 
@@ -284,7 +284,7 @@ dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, mig
 server: ## Run only the zserver (Zig backend) for the current checkout
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd $(BACKEND_DIR) && zig build && ./zig-out/bin/zserver server
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION) && ./zig-out/bin/zserver server
 
 ##@ Daemon
 
@@ -313,20 +313,25 @@ cli: ## Run the 1person CLI with ARGS or ONEPERSON_ARGS from source
 	@$(MAKE) 1p ONEPERSON_ARGS="$(ONEPERSON_ARGS)"
 
 1p: ## Run the Zig 1p CLI built from zserver
-	cd $(BACKEND_DIR) && zig build && ./zig-out/bin/1p $(ONEPERSON_ARGS)
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION) && ./zig-out/bin/1p $(ONEPERSON_ARGS)
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Release version string baked into the 1p CLI / zserver binaries.
+# The CLI reports it to the server when the daemon registers, and the
+# server stores it on the runtime row — that is the version the
+# quick-create gate checks. `--match 'v[0-9]*'` keeps a stray non-semver
+# tag from hijacking the version.
+VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 build: ## Build zserver + the Zig 1p CLI
-	cd $(BACKEND_DIR) && zig build
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION)
 
 test: ## Run zserver Zig tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd $(BACKEND_DIR) && zig build && ./zig-out/bin/zserver migrate
-	cd $(BACKEND_DIR) && zig build test
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION) && ./zig-out/bin/zserver migrate
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION) test
 
 # Database
 ##@ Database
@@ -334,7 +339,7 @@ test: ## Run zserver Zig tests after ensuring the target DB exists and migration
 migrate-up: ## Create the target DB if needed, then apply database migrations
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd $(BACKEND_DIR) && zig build && ./zig-out/bin/zserver migrate
+	cd $(BACKEND_DIR) && zig build -Dversion=$(VERSION) && ./zig-out/bin/zserver migrate
 
 migrate-down: ## Roll back database migrations (unsupported by zserver; use db-reset)
 	@echo "zserver migrate only applies forward migrations. Use 'make db-reset' for a clean slate."

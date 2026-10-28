@@ -25,8 +25,10 @@ const model = @import("model.zig");
 const response = @import("../../common/response.zig");
 const validation = @import("../../common/validation.zig");
 const pagination = @import("../../common/pagination.zig");
+const cli_gate = @import("../../common/cli_version.zig");
 const realtime = @import("../realtime/service.zig");
 const attachment = @import("../attachment/service.zig");
+const runtime_model = @import("../runtime/model.zig");
 
 const log = std.log.scoped(.issue_service);
 
@@ -960,6 +962,27 @@ pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
     if (!std.mem.eql(u8, binding.runtime_status, "online")) {
         try writeAgentUnavailable(ctx, "agent's runtime is offline", "runtime_offline");
         return;
+    }
+
+    // Daemon CLI version gate. The daemon reports the version of the 1p
+    // CLI it runs when it registers; it lands on the runtime row's
+    // `metadata.cli_version`. A daemon that never reported a version
+    // cannot be checked, so it fails closed — the same policy the
+    // frontend picker applies before it even lets the user submit.
+    const reported_version = runtime_model.runtimeCliVersion(binding.runtime_id);
+    switch (cli_gate.checkMinCliVersion(reported_version, cli_gate.min_quick_create_cli_version)) {
+        .ok => {},
+        .missing, .too_old => {
+            ctx.res_status = .unprocessable_entity;
+            try ctx.renderJson(.{
+                .code = "daemon_version_unsupported",
+                .@"error" = "daemon CLI version is not supported for quick-create",
+                .current_version = reported_version,
+                .min_version = cli_gate.min_quick_create_cli_version,
+                .runtime_id = binding.runtime_id,
+            });
+            return;
+        },
     }
 
     const created = model.insertIssue(
