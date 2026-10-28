@@ -7,24 +7,33 @@ import { WSClient } from "./ws-client";
 class FakeWebSocket {
   static lastUrl: string | null = null;
   static lastInstance: FakeWebSocket | null = null;
+  // Frames the client sent, in order.
+  static sent: string[] = [];
+  // The real class exposes these constants; the client compares
+  // `readyState` against `WebSocket.OPEN`.
+  static OPEN = 1;
+  static CLOSED = 3;
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
-  readyState = 0;
+  readyState = 1;
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
     FakeWebSocket.lastInstance = this;
   }
   close() {}
-  send() {}
+  send(data: string) {
+    FakeWebSocket.sent.push(data);
+  }
 }
 
 describe("WSClient", () => {
   beforeEach(() => {
     FakeWebSocket.lastUrl = null;
     FakeWebSocket.lastInstance = null;
+    FakeWebSocket.sent = [];
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
   });
 
@@ -151,5 +160,62 @@ describe("WSClient", () => {
       "user-123",
       "user",
     );
+  });
+
+  // The server bounds how long it waits for the next frame (30s in
+  // zserver). Without a keepalive an idle browser connection was dropped
+  // every 30 seconds, and every drop made the client reconnect — which
+  // invalidates every workspace-scoped query and refetches the whole
+  // workspace. That is the "refetch storm".
+  it("pings the server periodically so an idle connection survives", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      ws.connect();
+
+      // Token mode: the handshake completes on the auth ack.
+      FakeWebSocket.lastInstance!.onopen?.();
+      FakeWebSocket.lastInstance!.onmessage?.({
+        data: JSON.stringify({ type: "auth_ack" }),
+      });
+
+      vi.advanceTimersByTime(20_000);
+      expect(FakeWebSocket.sent).toContain(JSON.stringify({ type: "ping" }));
+
+      vi.advanceTimersByTime(20_000);
+      expect(
+        FakeWebSocket.sent.filter((m) => m === JSON.stringify({ type: "ping" })),
+      ).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops the keepalive when the connection closes", () => {
+    vi.useFakeTimers();
+    try {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      ws.connect();
+
+      FakeWebSocket.lastInstance!.onopen?.();
+      FakeWebSocket.lastInstance!.onmessage?.({
+        data: JSON.stringify({ type: "auth_ack" }),
+      });
+
+      FakeWebSocket.lastInstance!.onclose?.();
+      const pingsBefore = FakeWebSocket.sent.filter(
+        (m) => m === JSON.stringify({ type: "ping" }),
+      ).length;
+
+      vi.advanceTimersByTime(60_000);
+      const pingsAfter = FakeWebSocket.sent.filter(
+        (m) => m === JSON.stringify({ type: "ping" }),
+      ).length;
+      expect(pingsAfter).toBe(pingsBefore);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

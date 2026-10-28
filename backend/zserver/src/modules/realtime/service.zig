@@ -1427,6 +1427,16 @@ pub fn handleRealtime(ctx: *zfinal.Context) !void {
             .text, .binary => {
                 const text = try allocator.dupe(u8, msg.data);
                 defer allocator.free(text);
+                // Keepalive. The server bounds how long it waits for the
+                // next frame, so a browser client that has nothing to say
+                // used to be dropped every 30s — and every drop made the
+                // client reconnect, which invalidated every query and
+                // refetched the whole workspace. The ping is answered
+                // here instead of being broadcast to the room.
+                if (std.mem.startsWith(u8, text, "{\"type\":\"ping\"")) {
+                    conn.sendText("{\"type\":\"pong\"}");
+                    continue;
+                }
                 publishMessage(conn, text);
             },
             .ping => conn.sendPong(msg.data),

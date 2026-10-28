@@ -8,6 +8,20 @@ type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => 
 // be a console / IPC bridge whose buffers we don't want to blow.
 const UNPARSEABLE_LOG_MAX_CHARS = 200;
 
+/**
+ * Keepalive interval.
+ *
+ * The server's socket read is bounded (30s in zserver). A browser
+ * WebSocket sends nothing unless it has something to say, so an idle
+ * connection used to die every 30 seconds — and every reconnect
+ * invalidates every workspace-scoped query, which refetched the whole
+ * workspace roughly every 33 seconds.
+ *
+ * A ping every 20s keeps the socket warm. The server answers with a
+ * pong instead of broadcasting it to the room.
+ */
+const KEEPALIVE_INTERVAL_MS = 20_000;
+
 function summarizeUnparseable(data: unknown): string {
   const text = typeof data === "string" ? data : String(data);
   if (text.length <= UNPARSEABLE_LOG_MAX_CHARS) return text;
@@ -33,6 +47,7 @@ export class WSClient {
   private identity: WSClientIdentity | undefined;
   private handlers = new Map<WSEventType, Set<EventHandler>>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private hasConnectedBefore = false;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
@@ -113,6 +128,7 @@ export class WSClient {
     };
 
     this.ws.onclose = () => {
+      this.stopKeepalive();
       this.logger.warn("disconnected, reconnecting in 3s");
       this.reconnectTimer = setTimeout(() => this.connect(), 3000);
     };
@@ -125,6 +141,7 @@ export class WSClient {
 
   private onAuthenticated() {
     this.logger.info("connected");
+    this.startKeepalive();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -137,11 +154,36 @@ export class WSClient {
     this.hasConnectedBefore = true;
   }
 
+  /**
+   * Keep the socket warm.
+   *
+   * The server bounds how long it waits for the next frame (30s), so an
+   * idle browser connection would be dropped — and every drop triggers
+   * a reconnect, which invalidates every workspace-scoped query and
+   * refetches the whole workspace.
+   */
+  private startKeepalive() {
+    this.stopKeepalive();
+    this.keepaliveTimer = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+  }
+
+  private stopKeepalive() {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = null;
+    }
+  }
+
   disconnect() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.stopKeepalive();
     if (this.ws) {
       // Remove handlers before close to prevent onclose from scheduling a reconnect
       this.ws.onclose = null;
