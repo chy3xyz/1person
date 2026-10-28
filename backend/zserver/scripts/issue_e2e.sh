@@ -489,6 +489,11 @@ except Exception: pass
 done_create.wait(timeout=2.0)
 print("CREATE=" + ("HIT" if done_create.is_set() else "MISS") + " " + new_id_holder[0])
 
+# Every event frame must carry its body under "payload" — the clients
+# read msg.payload and drop a frame without it.
+frames_with_payload = sum(1 for m in events if '"payload":{' in m)
+print("PAYLOAD=" + ("HIT" if events and frames_with_payload == len(events) else "MISS"))
+
 ws.close()
 PYEOF
 )
@@ -498,6 +503,8 @@ PYEOF
     [[ -n "${meta_hit}" ]] && pass "38 WS issue_metadata:changed" || fail "38 WS issue_metadata:changed: ${ws_out}"
     [[ -n "${sub_hit}" ]] && pass "39 WS subscriber:added" || fail "39 WS subscriber:added: ${ws_out}"
     [[ -n "${create_hit}" ]] && pass "40 WS issue:created" || fail "40 WS issue:created: ${ws_out}"
+    payload_hit=$(echo "${ws_out}" | grep "PAYLOAD=HIT" | head -1) || true
+    [[ -n "${payload_hit}" ]] && pass "40b WS frames carry a payload envelope" || fail "40b WS frames carry a payload envelope: ${ws_out}"
 else
     warn "websocket-client not installed; skipping WS tests 38-40"
 fi

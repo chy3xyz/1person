@@ -85,6 +85,11 @@ fn resolveActor(ctx: *zfinal.Context) Actor {
 /// on the workspace room. Failures (alloc OOM, JSON encode) are
 /// logged and swallowed — the HTTP response is already on its way
 /// and the broadcast is best-effort.
+///
+/// The frame shape is the upstream one: the event body lives under
+/// `payload`, and `actor_type` / `actor_id` sit next to it. Clients
+/// read `msg.payload`; a frame without it is treated as malformed
+/// and every handler drops the event.
 fn publishIssueEvent(
     allocator: std.mem.Allocator,
     workspace_id: []const u8,
@@ -95,11 +100,40 @@ fn publishIssueEvent(
 ) void {
     const text = std.fmt.allocPrint(
         allocator,
-        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"issue_id\":\"{s}\",\"actor_type\":\"{s}\",\"actor_id\":\"{s}\"}}",
-        .{ event_type, workspace_id, issue_id, actor_type, actor_id },
+        "{{\"type\":\"{s}\",\"payload\":{{\"issue_id\":\"{s}\",\"workspace_id\":\"{s}\"}},\"actor_type\":\"{s}\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, issue_id, workspace_id, actor_type, actor_id },
     ) catch return;
     defer allocator.free(text);
     realtime.publishIssueEvent(workspace_id, text);
+}
+
+/// Same as `publishIssueEvent`, but the payload carries the whole issue
+/// object instead of just its id. The clients patch their issue caches
+/// from this body — without it an `issue:created` / `issue:updated`
+/// event can only be handled by refetching the list.
+///
+/// `issue` is the already-serialised issue JSON (an object); it is
+/// embedded verbatim, so it must be valid JSON.
+fn publishIssueEventWithBody(
+    allocator: std.mem.Allocator,
+    workspace_id: []const u8,
+    event_type: []const u8,
+    actor_type: []const u8,
+    actor_id: []const u8,
+    issue_json: []const u8,
+) void {
+    const text = std.fmt.allocPrint(
+        allocator,
+        "{{\"type\":\"{s}\",\"payload\":{{\"issue\":{s},\"workspace_id\":\"{s}\"}},\"actor_type\":\"{s}\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, issue_json, workspace_id, actor_type, actor_id },
+    ) catch return;
+    defer allocator.free(text);
+    realtime.publishIssueEvent(workspace_id, text);
+}
+
+/// Serialise an issue response to JSON for the realtime payload.
+fn issueResponseJson(allocator: std.mem.Allocator, issue: anytype) ?[]u8 {
+    return std.json.Stringify.valueAlloc(allocator, issue, .{}) catch null;
 }
 
 /// Get a path param or write a 400 envelope and return null.
@@ -329,7 +363,12 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
             actor.actor_type,
         )) |resp| {
             ctx.res_status = .created;
-            publishIssueEvent(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, resp.id);
+            if (issueResponseJson(allocator, resp)) |issue_json| {
+                defer allocator.free(issue_json);
+                publishIssueEventWithBody(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, issue_json);
+            } else {
+                publishIssueEvent(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, resp.id);
+            }
             try response.ok(ctx, resp);
             return;
         }
@@ -377,8 +416,14 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
 
     ctx.res_status = .created;
     const actor = resolveActor(ctx);
-    publishIssueEvent(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, entry.id);
-    try response.ok(ctx, model.issueResponseFromEntry(entry));
+    const created_response = model.issueResponseFromEntry(entry);
+    if (issueResponseJson(allocator, created_response)) |issue_json| {
+        defer allocator.free(issue_json);
+        publishIssueEventWithBody(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, issue_json);
+    } else {
+        publishIssueEvent(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, entry.id);
+    }
+    try response.ok(ctx, created_response);
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -441,7 +486,12 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
             // path below; without this, realtime clients never see
             // issue updates in production (DB configured).
             const update_actor_db = resolveActor(ctx);
-            publishIssueEvent(ctx.allocator, workspace_id, "issue:updated", update_actor_db.actor_type, update_actor_db.actor_id, issue_id);
+            if (issueResponseJson(ctx.allocator, resp)) |issue_json| {
+                defer ctx.allocator.free(issue_json);
+                publishIssueEventWithBody(ctx.allocator, workspace_id, "issue:updated", update_actor_db.actor_type, update_actor_db.actor_id, issue_json);
+            } else {
+                publishIssueEvent(ctx.allocator, workspace_id, "issue:updated", update_actor_db.actor_type, update_actor_db.actor_id, issue_id);
+            }
             try response.ok(ctx, resp);
             return;
         }
@@ -1011,7 +1061,12 @@ pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
         return;
     };
 
-    publishIssueEvent(ctx.allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, created.id);
+    if (issueResponseJson(ctx.allocator, created)) |issue_json| {
+        defer ctx.allocator.free(issue_json);
+        publishIssueEventWithBody(ctx.allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, issue_json);
+    } else {
+        publishIssueEvent(ctx.allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, created.id);
+    }
 
     // The client reads `task_id` from the payload; `response.ok` already
     // wraps it in the `{"data": …}` envelope.

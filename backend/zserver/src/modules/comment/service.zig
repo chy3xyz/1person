@@ -35,8 +35,8 @@ fn publishCommentEvent(ctx: *zfinal.Context, workspace_id: []const u8, event_typ
     const user_id = common_ctx.getUserId(ctx) orelse "";
     const text = std.fmt.allocPrint(
         ctx.allocator,
-        "{{\"type\":\"{s}\",\"workspace_id\":\"{s}\",\"comment_id\":\"{s}\",\"issue_id\":\"{s}\",\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
-        .{ event_type, workspace_id, comment_id, issue_id, user_id },
+        "{{\"type\":\"{s}\",\"payload\":{{\"comment_id\":\"{s}\",\"issue_id\":\"{s}\",\"workspace_id\":\"{s}\"}},\"actor_type\":\"member\",\"actor_id\":\"{s}\"}}",
+        .{ event_type, comment_id, issue_id, workspace_id, user_id },
     ) catch return;
     defer ctx.allocator.free(text);
     realtime.publishEvent(workspace_id, text);

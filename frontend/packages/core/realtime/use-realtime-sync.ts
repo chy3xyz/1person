@@ -572,8 +572,16 @@ export function useRealtimeSync(
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
 
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
-      const { issue } = p as IssueUpdatedPayload;
-      if (!issue?.id) return;
+      const { issue, issue_id } = p as IssueUpdatedPayload & { issue_id?: string };
+      if (!issue?.id) {
+        // No issue body in the event — fall back to a refetch so the
+        // cached issue does not stay stale.
+        const wsId = getCurrentWsId();
+        if (wsId && issue_id) {
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        }
+        return;
+      }
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueUpdated(qc, wsId, issue);
@@ -584,8 +592,17 @@ export function useRealtimeSync(
     });
 
     const unsubIssueCreated = ws.on("issue:created", (p) => {
-      const { issue } = p as IssueCreatedPayload;
-      if (!issue) return;
+      const { issue, issue_id } = p as IssueCreatedPayload & { issue_id?: string };
+      if (!issue) {
+        // The event carried no issue body — the server can send an
+        // id-only payload. Fall back to a refetch so the list still
+        // shows the new issue instead of silently going stale.
+        const wsId = getCurrentWsId();
+        if (wsId && issue_id) {
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        }
+        return;
+      }
       const wsId = getCurrentWsId();
       if (wsId) onIssueCreated(qc, wsId, issue);
     });
