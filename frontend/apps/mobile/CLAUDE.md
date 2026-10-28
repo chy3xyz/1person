@@ -173,6 +173,16 @@ Layer 1  ws-client.ts                — single socket, no React. Exponential
                                        the provider can pause on background
                                        and resume on foreground without
                                        racing the auto-reconnect timer.
+                                       Token-mode auth only: the token goes
+                                       in the FIRST FRAME
+                                       ({"type":"auth","payload":{"token":…}}),
+                                       because native has no cookie jar. The
+                                       server answers {"type":"auth_ack"}.
+                                       Pings every 20s to keep the socket
+                                       warm — the server drops a silent
+                                       connection after 30s, and every
+                                       reconnect invalidates every
+                                       workspace query.
 Layer 2  realtime-provider.tsx       — owns the WSClient. Mounts/unmounts on
                                        auth + workspace + AppState + NetInfo
                                        changes. Exposes useWSClient().
@@ -181,6 +191,10 @@ Layer 3  use-<feature>-realtime.ts   — per-feature subscriptions. Translate
 ```
 
 Layer 3 is what changes per feature; layers 1 and 2 are infrastructure and shouldn't be edited when adding event coverage.
+
+### The WS event envelope
+
+Every server event is `{type, payload, actor_type, actor_id}` — the event body lives under `payload`. A handler that destructures its payload directly (`const { issue } = p`) throws if the frame has no `payload` object, so the client hands handlers an empty body rather than letting the error escape `onmessage`.
 
 ### Mount strategy: list-level global, per-record per-screen
 
