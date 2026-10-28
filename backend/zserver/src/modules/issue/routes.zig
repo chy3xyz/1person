@@ -31,7 +31,6 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.get("/child-progress", handler.childProgress);
     try api.get("/grouped", handler.groupedIssues);
     try api.get("/children", handler.listChildrenByParents);
-
     try api.get("/:id", handler.getIssue);
     // Frontend/Go contract uses PUT for updates; keep PATCH for back-compat.
     try api.put("/:id", handler.updateIssue);

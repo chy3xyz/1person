@@ -666,6 +666,67 @@ pub fn validateTitle(raw: []const u8) ?[]const u8 {
 // row → response projectors
 // ──────────────────────────────────────────────────────────────────────
 
+/// One entry of `GET /api/issues/:id/timeline`.
+///
+/// The upstream Go server answers that endpoint with a FLAT ARRAY of
+/// entries (no wrapper object), and the client's schema expects the
+/// same. `type` discriminates the entry kind ("activity" /
+/// "comment"); `action` names the activity ("status_changed", …) and
+/// `details` carries its payload ({from, to}, …).
+pub const TimelineEntry = struct {
+    type: []const u8 = "activity",
+    id: []const u8 = "",
+    actor_type: []const u8 = "",
+    actor_id: []const u8 = "",
+    action: []const u8 = "",
+    details: ?std.json.Value = null,
+    created_at: []const u8 = "",
+};
+
+/// Parse a JSONB column into a `std.json.Value` so it can be embedded
+/// in the response as a real JSON object instead of a string.
+///
+/// The text is duplicated into `allocator` first: the column text points
+/// into the ResultSet, and a parsed `Value` may alias its input.
+pub fn parseDetailsValue(allocator: std.mem.Allocator, text: []const u8) ?std.json.Value {
+    if (text.len == 0) return null;
+    const owned = allocator.dupe(u8, text) catch return null;
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, owned, .{}) catch return null;
+    return parsed.value;
+}
+
+/// Project an `activity_log` row into a timeline entry.
+///
+/// Columns (in order): id, action, actor_type, actor_id, details, created_at.
+pub fn timelineEntryFromRow(
+    allocator: std.mem.Allocator,
+    res: *zfinal.ResultSet,
+    row: usize,
+) TimelineEntry {
+    const r = &res.rows.items[row];
+    return TimelineEntry{
+        .type = "activity",
+        .id = r.getText(0) orelse "",
+        .action = r.getText(1) orelse "",
+        .actor_type = r.getText(2) orelse "system",
+        .actor_id = r.getText(3) orelse "",
+        .details = parseDetailsValue(allocator, r.getText(4) orelse ""),
+        .created_at = r.getText(5) orelse "",
+    };
+}
+
+/// Project an in-memory timeline event into a timeline entry.
+pub fn timelineEntryFromEvent(event: TimelineEvent) TimelineEntry {
+    return TimelineEntry{
+        .type = "activity",
+        .id = event.id,
+        .action = event.event_type,
+        .actor_type = event.actor_type,
+        .actor_id = event.actor_id,
+        .created_at = event.created_at,
+    };
+}
+
 /// Convert a row selected with `issueSelectColumns` / `issueReturningColumns`
 /// into the API response shape. Empty-string → null translation lives here
 /// so the DB path doesn't have to special-case the response shape.
@@ -1112,6 +1173,18 @@ pub fn insertIssue(
     if (rs.rows.items.len == 0) return null;
     return issueResponseFromRowDuped(db.allocator, &rs, 0);
 }
+
+/// SQL for the list endpoints, kept next to the projectors so the test
+/// can prove the queries still resolve against the live schema.
+pub const timelineSelectSql =
+    "SELECT id::text, action, " ++
+    "COALESCE(actor_type::text, 'system'), COALESCE(actor_id::text, ''), " ++
+    "details::text, created_at " ++
+    "FROM activity_log WHERE issue_id = $1::uuid ORDER BY created_at ASC";
+
+pub const subscriberSelectSql =
+    "SELECT issue_id::text, user_type, user_id::text, reason, created_at " ++
+    "FROM issue_subscriber WHERE issue_id = $1::uuid ORDER BY created_at ASC";
 
 /// Resolve the kind of an assignee id: "agent", "member", or `null`
 /// when the id belongs to neither (an unassigned issue, or an id that

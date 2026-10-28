@@ -26,6 +26,7 @@ const response = @import("../../common/response.zig");
 const validation = @import("../../common/validation.zig");
 const pagination = @import("../../common/pagination.zig");
 const realtime = @import("../realtime/service.zig");
+const attachment = @import("../attachment/service.zig");
 
 const log = std.log.scoped(.issue_service);
 
@@ -787,9 +788,22 @@ pub fn detachLabel(ctx: *zfinal.Context) !void {
 }
 
 pub fn listAttachments(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
     const issue_id = try response.parseStringId(ctx, "id");
-    const attachment_ids = model.memListAttachments(issue_id);
-    try response.ok(ctx, .{ .data = attachment_ids });
+    const workspace_id = try requireWorkspaceId(ctx);
+
+    // The attachment table is owned by the `attachment` module; this
+    // endpoint used to serve the in-memory id list, which is neither the
+    // upstream shape nor useful to the client (it needs the file
+    // metadata and the signed download URL).
+    var out: std.ArrayList(attachment.AttachmentResponse) = .empty;
+    defer out.deinit(allocator);
+    try attachment.listForIssueImpl(allocator, workspace_id, issue_id, &out);
+
+    // Upstream answers with a flat array. `response.ok` already wraps the
+    // payload in the `{"data": …}` envelope — wrapping it a second time
+    // would leave the client with an object where it expects an array.
+    try response.ok(ctx, out.items);
 }
 
 const BatchUpdateRequest = struct {
@@ -907,7 +921,7 @@ pub fn quickCreate(ctx: *zfinal.Context) !void {
                 .created_at = now_str,
             });
             ctx.res_status = .created;
-            try response.ok(ctx, .{ .data = resp });
+            try response.ok(ctx, resp);
             return;
         }
         try response.err(ctx, .internal_server_error, "quick_create_failed", 50010);
@@ -940,7 +954,7 @@ pub fn quickCreate(ctx: *zfinal.Context) !void {
         .payload = "",
         .created_at = now_str,
     });
-    try response.ok(ctx, .{ .data = child });
+    try response.ok(ctx, child);
 }
 
 pub fn rerun(ctx: *zfinal.Context) !void {
@@ -961,7 +975,7 @@ pub fn rerun(ctx: *zfinal.Context) !void {
                 .payload = "",
                 .created_at = now_str,
             });
-            try response.ok(ctx, .{ .data = resp });
+            try response.ok(ctx, resp);
         } else {
             try response.err(ctx, .not_found, "issue not found", 40401);
         }
@@ -986,7 +1000,7 @@ pub fn rerun(ctx: *zfinal.Context) !void {
         .payload = "",
         .created_at = reset.updated_at,
     });
-    try response.ok(ctx, .{ .data = reset });
+    try response.ok(ctx, reset);
 }
 
 /// `GET /api/issues/child-progress` — per-parent progress across the
@@ -1176,58 +1190,95 @@ pub fn listChildren(ctx: *zfinal.Context) !void {
 }
 
 pub fn listTimeline(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
     const issue_id = try response.parseStringId(ctx, "id");
 
     if (deps.hasPool()) {
         // DB path: query activity_log for events on this issue.
         const db = model.borrowDb() orelse {
-            try response.ok(ctx, .{ .data = &[_]model.TimelineEvent{} });
+            try response.ok(ctx, &[_]model.TimelineEntry{});
             return;
         };
         defer deps.releaseBack(db);
         var rs = db.queryParams(
-            "SELECT id::text, issue_id::text, action, " ++
-                "COALESCE(actor_type::text, 'system'), COALESCE(actor_id::text, ''), " ++
-                "details::text, created_at " ++
-                "FROM activity_log WHERE issue_id = $1::uuid ORDER BY created_at ASC",
+            model.timelineSelectSql,
             &[_]zfinal.SqlParam{.{ .text = issue_id }},
         ) catch {
             // Fall through to in-memory if activity_log query fails.
             const events = model.memListTimeline(issue_id);
-            try response.ok(ctx, .{ .data = events });
+            var fallback: std.ArrayList(model.TimelineEntry) = .empty;
+            defer fallback.deinit(allocator);
+            for (events) |ev| try fallback.append(allocator, model.timelineEntryFromEvent(ev));
+            try response.ok(ctx, fallback.items);
             return;
         };
         defer rs.deinit();
-        var out: std.ArrayList(model.TimelineEvent) = .empty;
-        defer out.deinit(ctx.allocator);
+        var out: std.ArrayList(model.TimelineEntry) = .empty;
+        defer out.deinit(allocator);
         for (0..rs.rows.items.len) |i| {
-            try out.append(ctx.allocator, .{
-                .id = rs.rows.items[i].getText(0) orelse "",
-                .issue_id = rs.rows.items[i].getText(1) orelse "",
-                .event_type = rs.rows.items[i].getText(2) orelse "",
-                .actor_type = rs.rows.items[i].getText(3) orelse "system",
-                .actor_id = rs.rows.items[i].getText(4) orelse "",
-                .payload = rs.rows.items[i].getText(5) orelse "",
-                .created_at = rs.rows.items[i].getText(6) orelse "",
-            });
+            try out.append(allocator, model.timelineEntryFromRow(allocator, &rs, i));
         }
         // Also include in-memory timeline events for completeness.
         const mem_events = model.memListTimeline(issue_id);
         for (mem_events) |ev| {
-            try out.append(ctx.allocator, ev);
+            try out.append(allocator, model.timelineEntryFromEvent(ev));
         }
-        try response.ok(ctx, .{ .data = out.items });
+        // Upstream answers with a flat array. The rendered JSON points
+        // into the ResultSet, so it must happen before the deferred
+        // deinit/release — the render is inside the borrowed scope.
+        try response.ok(ctx, out.items);
         return;
     }
 
     const events = model.memListTimeline(issue_id);
-    try response.ok(ctx, .{ .data = events });
+    var out: std.ArrayList(model.TimelineEntry) = .empty;
+    defer out.deinit(allocator);
+    for (events) |ev| try out.append(allocator, model.timelineEntryFromEvent(ev));
+    try response.ok(ctx, out.items);
 }
 
+/// `GET /api/issues/:id/subscribers` — upstream answers with a flat array
+/// of subscriber rows. The DB path reads `issue_subscriber`; the no-DB
+/// path serves the in-memory store.
 pub fn listSubscribers(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
     const issue_id = try response.parseStringId(ctx, "id");
+
+    if (deps.hasPool()) {
+        const db = model.borrowDb() orelse {
+            try response.ok(ctx, &[_]model.SubscriberEntry{});
+            return;
+        };
+        defer deps.releaseBack(db);
+        var rs = db.queryParams(
+            model.subscriberSelectSql,
+            &[_]zfinal.SqlParam{.{ .text = issue_id }},
+        ) catch {
+            const entries = model.memListSubscribers(issue_id);
+            try response.ok(ctx, entries);
+            return;
+        };
+        defer rs.deinit();
+        var out: std.ArrayList(model.SubscriberEntry) = .empty;
+        defer out.deinit(allocator);
+        for (0..rs.rows.items.len) |i| {
+            const r = &rs.rows.items[i];
+            try out.append(allocator, .{
+                .issue_id = r.getText(0) orelse "",
+                .user_type = r.getText(1) orelse "",
+                .user_id = r.getText(2) orelse "",
+                .reason = r.getText(3) orelse "",
+                .created_at = r.getText(4) orelse "",
+            });
+        }
+        // Rendered inside the borrowed scope: the JSON points into the
+        // ResultSet rows.
+        try response.ok(ctx, out.items);
+        return;
+    }
+
     const entries = model.memListSubscribers(issue_id);
-    try response.ok(ctx, .{ .data = entries });
+    try response.ok(ctx, entries);
 }
 
 const AddSubscriberRequest = struct {
@@ -1264,7 +1315,7 @@ pub fn addSubscriber(ctx: *zfinal.Context) !void {
         const sub_actor = resolveActor(ctx);
         publishIssueEvent(ctx.allocator, ws, "subscriber:added", sub_actor.actor_type, sub_actor.actor_id, issue_id);
     }
-    try response.ok(ctx, .{ .data = entry });
+    try response.ok(ctx, entry);
 }
 
 pub fn removeSubscriber(ctx: *zfinal.Context) !void {
@@ -1296,7 +1347,7 @@ pub fn removeSubscriber(ctx: *zfinal.Context) !void {
 pub fn listReactions(ctx: *zfinal.Context) !void {
     const issue_id = try response.parseStringId(ctx, "id");
     const entries = model.memListReactions(issue_id);
-    try response.ok(ctx, .{ .data = entries });
+    try response.ok(ctx, entries);
 }
 
 const AddReactionRequest = struct {
@@ -1335,7 +1386,7 @@ pub fn addReaction(ctx: *zfinal.Context) !void {
         const rx_actor = resolveActor(ctx);
         publishIssueEvent(ctx.allocator, ws, "issue_reaction:added", rx_actor.actor_type, rx_actor.actor_id, issue_id);
     }
-    try response.ok(ctx, .{ .data = entry });
+    try response.ok(ctx, entry);
 }
 
 pub fn removeReaction(ctx: *zfinal.Context) !void {

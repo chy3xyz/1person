@@ -112,8 +112,7 @@ test "issue response carries every field the client contract needs" {
     try std.testing.expectEqualStrings("XXX-7", obj.get("identifier").?.string);
 }
 
-test "issue select and returning column lists stay in the same order" {
-    // The projector indexes by position, so the two lists must agree on
+test "issue select and returning column lists stay in the same order" {    // The projector indexes by position, so the two lists must agree on
     // which column is which. Compare the column names, ignoring the
     // table qualifiers and the identifier expression, which differ by
     // construction (join vs. scalar subquery).
@@ -173,4 +172,103 @@ test "issue select and returning column lists stay in the same order" {
     const returning_title = std.mem.indexOf(u8, returning, "title,") orelse return error.TestUnexpectedResult;
     try std.testing.expect(select_number < select_title);
     try std.testing.expect(returning_number < returning_title);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// The list endpoints and their wire shape
+// ──────────────────────────────────────────────────────────────────────
+//
+// `/api/issues/:id/{attachments,timeline,subscribers,reactions}` used to
+// answer `{"data": {"data": …}}` — the handler wrapped the payload in a
+// `data` field AND `response.ok` wraps the result in one. The client
+// unwraps a single `data` level, so it was left holding an object where
+// its schema expects an array: every entry failed validation and the
+// panel fell back to empty.
+
+test "timeline entry carries the client field names" {
+    const entry = model.TimelineEntry{
+        .type = "activity",
+        .id = "act-1",
+        .actor_type = "member",
+        .actor_id = "user-1",
+        .action = "status_changed",
+        .created_at = "2026-01-01T00:00:00Z",
+    };
+
+    const json = try std.json.Stringify.valueAlloc(std.testing.allocator, entry, .{});
+    defer std.testing.allocator.free(json);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+
+    const obj = parsed.value.object;
+    for ([_][]const u8{
+        "type",
+        "id",
+        "actor_type",
+        "actor_id",
+        "action",
+        "created_at",
+    }) |field| {
+        try std.testing.expect(obj.contains(field));
+    }
+
+    // The old row shape named these differently; the client reads the
+    // names above.
+    try std.testing.expect(!obj.contains("event_type"));
+    try std.testing.expect(!obj.contains("payload"));
+    try std.testing.expectEqualStrings("activity", obj.get("type").?.string);
+    try std.testing.expectEqualStrings("status_changed", obj.get("action").?.string);
+}
+
+test "timeline details serialise as a JSON object, not a string" {
+    // page_allocator: the parsed value owns allocations that outlive this
+    // test, and the testing allocator would flag them as leaks.
+    const details = model.parseDetailsValue(
+        std.heap.page_allocator,
+        "{\"from\":\"todo\",\"to\":\"in_progress\"}",
+    ) orelse return error.TestUnexpectedResult;
+
+    const entry = model.TimelineEntry{ .details = details };
+    const json = try std.json.Stringify.valueAlloc(std.testing.allocator, entry, .{});
+    defer std.testing.allocator.free(json);
+
+    // The client reads `details.from` / `details.to`; a JSON string there
+    // would fail the record schema and drop the whole entry.
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"from\":\"todo\"") != null);
+}
+
+test "a list of timeline entries serialises as a JSON array" {
+    const entries = [_]model.TimelineEntry{
+        .{ .id = "act-1", .action = "created" },
+        .{ .id = "act-2", .action = "status_changed" },
+    };
+
+    const json = try std.json.Stringify.valueAlloc(std.testing.allocator, entries, .{});
+    defer std.testing.allocator.free(json);
+
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer parsed.deinit();
+
+    // The client's schema is `z.array(TimelineEntrySchema)`. An object
+    // (a nested `data` wrapper, for instance) fails it.
+    try std.testing.expect(parsed.value == .array);
+    try std.testing.expectEqual(@as(usize, 2), parsed.value.array.items.len);
+}
+
+test "the timeline and subscriber list queries resolve against the live schema" {
+    const db = (try testDb()) orelse return error.SkipZigTest;
+    defer deps.releaseBack(db);
+
+    var rs = try db.queryParams(
+        model.timelineSelectSql,
+        &[_]zfinal.SqlParam{.{ .text = "00000000-0000-0000-0000-000000000000" }},
+    );
+    defer rs.deinit();
+
+    var rs2 = try db.queryParams(
+        model.subscriberSelectSql,
+        &[_]zfinal.SqlParam{.{ .text = "00000000-0000-0000-0000-000000000000" }},
+    );
+    defer rs2.deinit();
 }
