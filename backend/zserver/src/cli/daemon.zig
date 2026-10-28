@@ -27,6 +27,11 @@ pub const DaemonOptions = struct {
 
 var g_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 
+/// Cadence of the daemon's WebSocket keepalive frame. Must stay well
+/// below the server's socket read timeout (30s) so the push channel is
+/// not torn down and re-established on every timeout.
+const daemon_ws_keepalive_ms: u64 = 10_000;
+
 fn onSignal(_: std.posix.SIG) callconv(.c) void {
     g_shutdown.store(true, .monotonic);
 }
@@ -99,6 +104,14 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     var backoff_ms: u64 = 1000;
     var heartbeat_at: i64 = 0;
     var claim_at: i64 = nowMillis(io) + 3000;
+    // The server bounds how long it waits for the next frame (30s), so
+    // the socket needs traffic well inside that window. The HTTP
+    // heartbeat runs on the `heartbeat_interval_ms` cadence (30s by
+    // default), which is exactly the server's read timeout — the frame
+    // always arrived a moment too late and the connection was dropped
+    // and re-established every 30 seconds. The WS keepalive runs on its
+    // own, shorter cadence.
+    var ws_keepalive_at: i64 = 0;
 
     defer {
         if (ws_client) |c| {
@@ -171,7 +184,17 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
             claim_at = nowMillis(io) + @as(i64, @intCast(opts.claim_interval_ms));
         }
 
-        // Heartbeat (HTTP + WS frame)
+        // WS keepalive: a text frame well inside the server's read
+        // timeout, so the push channel stays open instead of being torn
+        // down and re-established every 30 seconds.
+        if (now >= ws_keepalive_at) {
+            ws_keepalive_at = nowMillis(io) + @as(i64, @intCast(daemon_ws_keepalive_ms));
+            if (ws_client) |c| {
+                c.sendText("{\"type\":\"daemon:heartbeat\"}") catch {};
+            }
+        }
+
+        // Heartbeat (HTTP)
         if (now >= heartbeat_at) {
             heartbeat_at = nowMillis(io) + @as(i64, @intCast(opts.heartbeat_interval_ms));
             var hb = client.postJson(allocator, "/api/daemon/heartbeat", "", token_buf) catch |err| {
@@ -179,9 +202,6 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
                 continue;
             };
             defer hb.deinit();
-            if (ws_client) |c| {
-                c.sendText("{\"type\":\"daemon:heartbeat\"}") catch {};
-            }
         }
 
         io.sleep(std.Io.Duration.fromMilliseconds(50), .awake) catch {};
