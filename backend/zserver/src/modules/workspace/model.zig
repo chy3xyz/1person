@@ -108,7 +108,6 @@ pub var mem_workspaces: ?std.StringHashMap(WorkspaceEntry) = null;
 pub var mem_members: ?std.StringHashMap(std.ArrayList(MemberEntry)) = null;
 pub var mem_invitations: ?std.StringHashMap(InvitationEntry) = null;
 pub var mem_github_installs: ?std.StringHashMap(GithubInstallationEntry) = null;
-pub var mem_lark_installs: ?std.StringHashMap(LarkInstallationEntry) = null;
 pub var mem_lark_sessions: ?std.StringHashMap(LarkInstallSession) = null;
 pub var mem_workspace_limits: ?std.StringHashMap(WorkspaceLimit) = null;
 
@@ -119,7 +118,6 @@ pub fn memInit() !void {
         mem_members = std.StringHashMap(std.ArrayList(MemberEntry)).init(memAlloc());
         mem_invitations = std.StringHashMap(InvitationEntry).init(memAlloc());
         mem_github_installs = std.StringHashMap(GithubInstallationEntry).init(memAlloc());
-        mem_lark_installs = std.StringHashMap(LarkInstallationEntry).init(memAlloc());
         mem_lark_sessions = std.StringHashMap(LarkInstallSession).init(memAlloc());
         mem_workspace_limits = std.StringHashMap(WorkspaceLimit).init(memAlloc());
     }
@@ -176,21 +174,10 @@ pub const InvitationEntry = struct {
 pub const GithubInstallationEntry = struct {
     id: []const u8,
     workspace_id: []const u8,
-    installation_id: []const u8,
+    installation_id: i64,
     account_login: []const u8,
-    account_url: []const u8,
-    repository_selection: []const u8,
-    created_at: []const u8,
-    updated_at: []const u8,
-};
-
-/// In-memory `lark_installation` row.
-pub const LarkInstallationEntry = struct {
-    id: []const u8,
-    workspace_id: []const u8,
-    app_id: []const u8,
-    tenant_key: []const u8,
-    tenant_name: []const u8,
+    account_type: []const u8,
+    account_avatar_url: []const u8,
     created_at: []const u8,
     updated_at: []const u8,
 };
@@ -240,27 +227,17 @@ pub const UpdateMemberRequest = struct {
     role: []const u8,
 };
 
-/// Request body for `GET /api/workspaces/:id/github/connect`.
-pub const ConnectGithubRequest = struct {
-    installation_id: []const u8,
-    account_login: ?[]const u8 = null,
-    account_url: ?[]const u8 = null,
-    repository_selection: ?[]const u8 = null,
-};
-
 /// Request body for `POST /api/workspaces/:id/github/connect`.
+///
+/// Field names mirror the `github_installation` columns (and the
+/// upstream response): `account_type` is GitHub's account kind
+/// ("User" / "Organization") and `account_avatar_url` the avatar.
+/// `installation_id` is GitHub's numeric id.
 pub const ConnectGithubInstallationRequest = struct {
-    installation_id: []const u8,
+    installation_id: i64,
     account_login: ?[]const u8 = null,
-    account_url: ?[]const u8 = null,
-    repository_selection: ?[]const u8 = null,
-};
-
-/// Request body for `POST /api/workspaces/:id/lark/connect`.
-pub const ConnectLarkRequest = struct {
-    app_id: []const u8,
-    tenant_key: []const u8,
-    tenant_name: ?[]const u8 = null,
+    account_type: ?[]const u8 = null,
+    account_avatar_url: ?[]const u8 = null,
 };
 
 /// Request body for `POST /api/workspaces/children` (multi-tenancy V2).
@@ -351,24 +328,41 @@ pub const InvitationResponse = struct {
 };
 
 /// `github_installation` row, projected for the API.
+///
+/// Mirrors the upstream `GitHubInstallationResponse`: the client reads
+/// `account_type` / `account_avatar_url`, not the `account_url` /
+/// `repository_selection` names this module used to invent, and expects
+/// `installation_id` to be GitHub's numeric id — a JSON number, not a
+/// string.
 pub const GithubInstallationResponse = struct {
     id: []const u8,
     workspace_id: []const u8,
-    installation_id: []const u8,
+    installation_id: i64,
     account_login: []const u8,
-    account_url: []const u8,
-    repository_selection: []const u8,
+    account_type: []const u8,
+    account_avatar_url: ?[]const u8 = null,
     created_at: []const u8,
-    updated_at: []const u8,
 };
 
 /// `lark_installation` row, projected for the API.
+///
+/// Field set mirrors the `LarkInstallation` wire contract in
+/// `frontend/packages/core/types/lark.ts` (which mirrors the upstream
+/// `LarkInstallationResponse`): every column the table actually has
+/// that the client renders. `tenant_name` is deliberately absent — the
+/// `lark_installation` table has no such column, and the client does
+/// not read one.
 pub const LarkInstallationResponse = struct {
     id: []const u8,
     workspace_id: []const u8,
+    agent_id: []const u8,
     app_id: []const u8,
     tenant_key: []const u8,
-    tenant_name: []const u8,
+    bot_open_id: []const u8,
+    installer_user_id: []const u8,
+    status: []const u8,
+    region: []const u8,
+    installed_at: []const u8,
     created_at: []const u8,
     updated_at: []const u8,
 };
@@ -760,22 +754,9 @@ pub fn githubResponseFromEntry(entry: GithubInstallationEntry) GithubInstallatio
         .workspace_id = entry.workspace_id,
         .installation_id = entry.installation_id,
         .account_login = entry.account_login,
-        .account_url = entry.account_url,
-        .repository_selection = entry.repository_selection,
+        .account_type = entry.account_type,
+        .account_avatar_url = if (entry.account_avatar_url.len > 0) entry.account_avatar_url else null,
         .created_at = entry.created_at,
-        .updated_at = entry.updated_at,
     };
 }
 
-/// Map a `LarkInstallationEntry` to the API response shape.
-pub fn larkResponseFromEntry(entry: LarkInstallationEntry) LarkInstallationResponse {
-    return LarkInstallationResponse{
-        .id = entry.id,
-        .workspace_id = entry.workspace_id,
-        .app_id = entry.app_id,
-        .tenant_key = entry.tenant_key,
-        .tenant_name = entry.tenant_name,
-        .created_at = entry.created_at,
-        .updated_at = entry.updated_at,
-    };
-}

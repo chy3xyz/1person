@@ -100,10 +100,6 @@ pub fn listLarkInstallations(ctx: *zfinal.Context) !void {
     try service.listLarkInstallations(ctx);
 }
 
-pub fn connectLark(ctx: *zfinal.Context) !void {
-    try service.connectLark(ctx);
-}
-
 pub fn deleteLarkInstallation(ctx: *zfinal.Context) !void {
     try service.deleteLarkInstallation(ctx);
 }

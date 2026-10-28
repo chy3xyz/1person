@@ -56,7 +56,6 @@ pub fn register(app: *zfinal.ZFinal) !void {
 
     // Lark integration.
     try specific.get("/lark/installations", handler.listLarkInstallations);
-    try specific.post("/lark/connect", handler.connectLark);
     try specific.delete("/lark/installations/:installationId", handler.deleteLarkInstallation);
     try specific.post("/lark/install/begin", handler.beginLarkInstall);
     try specific.get("/lark/install/:sessionId/status", handler.getLarkInstallStatus);

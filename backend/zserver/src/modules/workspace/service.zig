@@ -2,13 +2,13 @@
 //!
 //! Owns the per-process state (`g_cfg`, the in-memory workspace /
 //! member / invitation / GitHub / Lark tables) and exposes the
-//! twenty-one HTTP-facing operations: `listWorkspaces`,
+//! twenty HTTP-facing operations: `listWorkspaces`,
 //! `createWorkspace`, `getWorkspace`, `updateWorkspace`,
 //! `deleteWorkspace`, `listMembers`, `addMember`, `updateMemberRole`,
 //! `removeMember`, `leaveWorkspace`, `listInvitations`,
 //! `createInvitation`, `deleteInvitation`, `listGithubInstallations`,
 //! `connectGithub`, `connectGithubInstallation`,
-//! `deleteGithubInstallation`, `listLarkInstallations`, `connectLark`,
+//! `deleteGithubInstallation`, `listLarkInstallations`,
 //! `deleteLarkInstallation`, `beginLarkInstall`, `getLarkInstallStatus`.
 //!
 //! The `handler.zig` is a thin delegate; data shapes and the
@@ -1425,6 +1425,22 @@ pub fn deleteInvitation(ctx: *zfinal.Context) !void {
 // GitHub integration
 // ──────────────────────────────────────────────────────────────────────
 
+/// Envelope returned by `GET /api/workspaces/:id/github/installations`.
+///
+/// The client (`ListGitHubInstallationsResponse`) reads this envelope,
+/// not a bare array — same convention as the Lark installations
+/// endpoint and the upstream Go server. A bare array left
+/// `installationData.installations` undefined and `can_manage`
+/// missing, so the Connect / Disconnect controls never rendered.
+pub const GithubInstallationsListResponse = struct {
+    installations: []const model.GithubInstallationResponse,
+    /// Whether the deployment has the GitHub App credentials
+    /// configured (`GITHUB_APP_SLUG` + `GITHUB_WEBHOOK_SECRET`).
+    configured: bool,
+    /// Whether the caller may connect / disconnect installations.
+    can_manage: bool,
+};
+
 pub fn listGithubInstallations(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
     const workspace_id = model.getWorkspaceId(ctx) orelse {
@@ -1437,9 +1453,7 @@ pub fn listGithubInstallations(ctx: *zfinal.Context) !void {
         defer deps.releaseBack(db_handle);
         var rs = try db_handle.queryParams(
             "SELECT id, workspace_id, installation_id, account_login, " ++
-                "COALESCE(account_avatar_url, '') AS account_url, " ++
-                "account_type AS repository_selection, " ++
-                "created_at, updated_at " ++
+                "account_type, account_avatar_url, created_at " ++
                 "FROM github_installation WHERE workspace_id = $1::uuid ORDER BY created_at DESC",
             &[_]SqlParam{.{ .text = workspace_id }},
         );
@@ -1451,15 +1465,17 @@ pub fn listGithubInstallations(ctx: *zfinal.Context) !void {
             try list.append(allocator, model.GithubInstallationResponse{
                 .id = r.getText(0) orelse "",
                 .workspace_id = r.getText(1) orelse "",
-                .installation_id = r.getText(2) orelse "",
+                .installation_id = (r.getInt(2) catch null) orelse 0,
                 .account_login = r.getText(3) orelse "",
-                .account_url = r.getText(4) orelse "",
-                .repository_selection = r.getText(5) orelse "",
+                .account_type = r.getText(4) orelse "",
+                .account_avatar_url = r.getText(5),
                 .created_at = r.getText(6) orelse "",
-                .updated_at = r.getText(7) orelse "",
             });
         }
-        try ctx.renderJson(list.items);
+        // Rendered while the connection is still borrowed: the response
+        // strings point into the result set, which `rs.deinit()` frees
+        // when this block ends.
+        try ctx.renderJson(githubInstallationsEnvelope(list.items, canManageGithub(ctx)));
     } else {
         try model.memInit();
         if (!(try model.requireWorkspaceRoleAttr(ctx, "member"))) return;
@@ -1474,8 +1490,34 @@ pub fn listGithubInstallations(ctx: *zfinal.Context) !void {
             if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) continue;
             try list.append(allocator, model.githubResponseFromEntry(entry));
         }
-        try ctx.renderJson(list.items);
+        try ctx.renderJson(githubInstallationsEnvelope(list.items, canManageGithub(ctx)));
     }
+}
+
+/// Wrap the installation rows in the envelope the client reads.
+fn githubInstallationsEnvelope(installations: []const model.GithubInstallationResponse, can_manage: bool) GithubInstallationsListResponse {
+    return GithubInstallationsListResponse{
+        .installations = installations,
+        .configured = githubAppConfigured(),
+        .can_manage = can_manage,
+    };
+}
+
+/// Whether the caller may manage installations (owner / admin). Unlike
+/// `requireWorkspaceRoleAttr` this never renders a 403 — the list is
+/// member-visible and reports the answer as a flag instead.
+fn canManageGithub(ctx: *zfinal.Context) bool {
+    return model.roleRank(model.getWorkspaceRole(ctx)) >= model.roleRank("admin");
+}
+
+/// Whether the deployment has the GitHub App credentials configured.
+/// Same rule as upstream: the install URL is only offered when both the
+/// app slug and the webhook secret are set.
+fn githubAppConfigured() bool {
+    const cfg = g_cfg orelse return false;
+    const slug = cfg.github_app_slug orelse return false;
+    const secret = cfg.github_webhook_secret orelse return false;
+    return slug.len > 0 and secret.len > 0;
 }
 
 pub fn connectGithub(ctx: *zfinal.Context) !void {
@@ -1487,6 +1529,15 @@ pub fn connectGithub(ctx: *zfinal.Context) !void {
     };
     if (!(try model.requireWorkspaceRoleAttr(ctx, "admin"))) return;
 
+    // The client reads `configured` before offering the Connect button —
+    // upstream answers `{url, configured}` and returns an empty URL when
+    // the App credentials are missing. Answering without the flag made
+    // the button look broken even on a fully configured deployment.
+    if (!githubAppConfigured()) {
+        try ctx.renderJson(.{ .url = "", .configured = false });
+        return;
+    }
+
     const cfg = g_cfg.?;
     const app_slug = cfg.github_app_slug orelse "1person";
     const state = try model.generateId(allocator, workspace_id);
@@ -1494,7 +1545,7 @@ pub fn connectGithub(ctx: *zfinal.Context) !void {
     const url = try std.fmt.allocPrint(allocator, "https://github.com/apps/{s}/installations/new?state={s}", .{ app_slug, state });
     defer allocator.free(url);
 
-    try ctx.renderJson(.{ .url = url });
+    try ctx.renderJson(.{ .url = url, .configured = true });
 }
 
 pub fn connectGithubInstallation(ctx: *zfinal.Context) !void {
@@ -1510,59 +1561,105 @@ pub fn connectGithubInstallation(ctx: *zfinal.Context) !void {
     defer parsed.deinit();
     const req = parsed.value;
 
-    const installation_id = std.mem.trim(u8, req.installation_id, &std.ascii.whitespace);
-    if (installation_id.len == 0) {
+    if (req.installation_id <= 0) {
         ctx.res_status = .bad_request;
         try ctx.renderJson(.{ .@"error" = "installation_id is required" });
         return;
     }
-
-    // Note: the DB-backed INSERT path is not yet implemented (the
-    // github_installation table migration is owned by the
-    // platform/infra team). In both DB and no-DB modes we currently
-    // persist to the in-memory map and return a synthesised response.
-    // The branch on `deps.pool` is kept as a hook for the future
-    // DB-only path without changing the response shape.
-    if (deps.hasPool()) {
-        // Future: write to github_installation here.
+    const account_login = std.mem.trim(u8, req.account_login orelse "", &std.ascii.whitespace);
+    if (account_login.len == 0) {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "account_login is required" });
+        return;
     }
+    const account_type = std.mem.trim(u8, req.account_type orelse "User", &std.ascii.whitespace);
+    const avatar = std.mem.trim(u8, req.account_avatar_url orelse "", &std.ascii.whitespace);
 
-    try model.memInit();
-    try model.mem_mutex.lock(zfinal.io_instance.io);
-    defer model.mem_mutex.unlock(zfinal.io_instance.io);
+    if (model.borrowDb()) |db_handle| {
+        defer deps.releaseBack(db_handle);
+        const installation_id = std.fmt.allocPrint(allocator, "{d}", .{req.installation_id}) catch {
+            ctx.res_status = .internal_server_error;
+            try ctx.renderJson(.{ .@"error" = "failed to connect github" });
+            return;
+        };
+        defer allocator.free(installation_id);
 
-    var it = model.mem_github_installs.?.iterator();
-    while (it.next()) |e| {
-        const existing = e.value_ptr.*;
-        if (std.mem.eql(u8, existing.workspace_id, workspace_id) and
-            std.mem.eql(u8, existing.installation_id, installation_id))
-        {
-            e.value_ptr.account_login = try model.memDup(req.account_login orelse existing.account_login);
-            e.value_ptr.account_url = try model.memDup(req.account_url orelse existing.account_url);
-            e.value_ptr.repository_selection = try model.memDup(req.repository_selection orelse existing.repository_selection);
-            e.value_ptr.updated_at = try model.memFmtNumber(std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds());
-            try ctx.renderJson(model.githubResponseFromEntry(e.value_ptr.*));
+        var rs = try db_handle.queryParams(
+            "INSERT INTO github_installation " ++
+                "(workspace_id, installation_id, account_login, account_type, account_avatar_url) " ++
+                "VALUES ($1::uuid, $2::bigint, $3, $4, $5) " ++
+                "ON CONFLICT (installation_id) DO UPDATE SET " ++
+                "account_login = EXCLUDED.account_login, " ++
+                "account_type = EXCLUDED.account_type, " ++
+                "account_avatar_url = EXCLUDED.account_avatar_url, " ++
+                "updated_at = now() " ++
+                "RETURNING id, workspace_id, installation_id, account_login, " ++
+                "account_type, account_avatar_url, created_at",
+            &[_]SqlParam{
+                .{ .text = workspace_id },
+                .{ .text = installation_id },
+                .{ .text = account_login },
+                .{ .text = account_type },
+                .{ .text = avatar },
+            },
+        );
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) {
+            ctx.res_status = .internal_server_error;
+            try ctx.renderJson(.{ .@"error" = "failed to connect github" });
             return;
         }
+        const r = &rs.rows.items[0];
+        ctx.res_status = .created;
+        try ctx.renderJson(model.GithubInstallationResponse{
+            .id = r.getText(0) orelse "",
+            .workspace_id = r.getText(1) orelse "",
+            .installation_id = (r.getInt(2) catch null) orelse req.installation_id,
+            .account_login = r.getText(3) orelse "",
+            .account_type = r.getText(4) orelse "",
+            .account_avatar_url = r.getText(5),
+            .created_at = r.getText(6) orelse "",
+        });
+    } else {
+        try model.memInit();
+        try model.mem_mutex.lock(zfinal.io_instance.io);
+        defer model.mem_mutex.unlock(zfinal.io_instance.io);
+
+        var it = model.mem_github_installs.?.iterator();
+        while (it.next()) |e| {
+            const existing = e.value_ptr.*;
+            if (std.mem.eql(u8, existing.workspace_id, workspace_id) and
+                existing.installation_id == req.installation_id)
+            {
+                e.value_ptr.account_login = try model.memDup(account_login);
+                e.value_ptr.account_type = try model.memDup(account_type);
+                e.value_ptr.account_avatar_url = try model.memDup(avatar);
+                e.value_ptr.updated_at = try model.memFmtNumber(std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds());
+                try ctx.renderJson(model.githubResponseFromEntry(e.value_ptr.*));
+                return;
+            }
+        }
+
+        const now = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
+        const id_seed = try std.fmt.allocPrint(allocator, "{d}", .{req.installation_id});
+        defer allocator.free(id_seed);
+        const id = try model.generateId(allocator, id_seed);
+        defer allocator.free(id);
+        const entry = model.GithubInstallationEntry{
+            .id = try model.memDup(id),
+            .workspace_id = try model.memDup(workspace_id),
+            .installation_id = req.installation_id,
+            .account_login = try model.memDup(account_login),
+            .account_type = try model.memDup(account_type),
+            .account_avatar_url = try model.memDup(avatar),
+            .created_at = try model.memFmtNumber(now),
+            .updated_at = try model.memFmtNumber(now),
+        };
+        try model.mem_github_installs.?.put(entry.id, entry);
+
+        ctx.res_status = .created;
+        try ctx.renderJson(model.githubResponseFromEntry(entry));
     }
-
-    const now = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-    const id = try model.generateId(allocator, installation_id);
-    const entry = model.GithubInstallationEntry{
-        .id = try model.memDup(id),
-        .workspace_id = try model.memDup(workspace_id),
-        .installation_id = try model.memDup(installation_id),
-        .account_login = try model.memDup(req.account_login orelse ""),
-        .account_url = try model.memDup(req.account_url orelse ""),
-        .repository_selection = try model.memDup(req.repository_selection orelse "all"),
-        .created_at = try model.memFmtNumber(now),
-        .updated_at = try model.memFmtNumber(now),
-    };
-    try model.mem_github_installs.?.put(entry.id, entry);
-    allocator.free(id);
-
-    ctx.res_status = .created;
-    try ctx.renderJson(model.githubResponseFromEntry(entry));
 }
 
 pub fn deleteGithubInstallation(ctx: *zfinal.Context) !void {
@@ -1580,8 +1677,12 @@ pub fn deleteGithubInstallation(ctx: *zfinal.Context) !void {
 
     if (model.borrowDb()) |db_handle| {
         defer deps.releaseBack(db_handle);
+        // The client passes the installation ROW id (upstream deletes by
+        // the row UUID too). Deleting by GitHub's numeric
+        // `installation_id` never matched and the Disconnect button
+        // silently did nothing.
         try db_handle.execParams(
-            "DELETE FROM github_installation WHERE workspace_id = $1::uuid AND installation_id = $2",
+            "DELETE FROM github_installation WHERE workspace_id = $1::uuid AND id = $2::uuid",
             &[_]SqlParam{
                 .{ .text = workspace_id },
                 .{ .text = installation_id },
@@ -1597,7 +1698,7 @@ pub fn deleteGithubInstallation(ctx: *zfinal.Context) !void {
         var it = model.mem_github_installs.?.iterator();
         while (it.next()) |e| {
             if (std.mem.eql(u8, e.value_ptr.workspace_id, workspace_id) and
-                std.mem.eql(u8, e.value_ptr.installation_id, installation_id))
+                std.mem.eql(u8, e.value_ptr.id, installation_id))
             {
                 to_remove = e.key_ptr.*;
                 break;
@@ -1614,6 +1715,38 @@ pub fn deleteGithubInstallation(ctx: *zfinal.Context) !void {
 // Lark integration
 // ──────────────────────────────────────────────────────────────────────
 
+/// Columns projected into the Lark installation wire shape.
+///
+/// Shared with the tests so the SQL and the response field order can
+/// never drift apart.
+pub const larkInstallationColumns =
+    "id, workspace_id, agent_id, app_id, tenant_key, bot_open_id, " ++
+    "installer_user_id, status, region, installed_at, created_at, updated_at";
+
+/// Envelope returned by `GET /api/workspaces/:id/lark/installations`.
+///
+/// The client (`ListLarkInstallationsResponse` in
+/// `frontend/packages/core/types/lark.ts`) reads this envelope, not a
+/// bare array — same convention as the GitHub installations endpoint
+/// and the upstream Go server. A bare array left
+/// `listing.installations` undefined and crashed the agent details
+/// page into its error boundary.
+pub const LarkInstallationsListResponse = struct {
+    installations: []const model.LarkInstallationResponse,
+    /// Whether the deployment has the at-rest Lark secret key
+    /// configured. zserver has no Lark secret-key service — it cannot
+    /// produce the `app_secret_encrypted` blob an installation row
+    /// requires — so no install flow can succeed in this build.
+    /// Reporting `false` makes the client render its "not enabled"
+    /// state instead of offering a Bind button that would fail.
+    configured: bool,
+    /// Whether the device-flow install path can complete end-to-end.
+    /// zserver has no Lark registration service and no Lark HTTP
+    /// client, so `POST /lark/install/begin` answers 503 and a
+    /// scan-to-bind could never finish.
+    install_supported: bool,
+};
+
 pub fn listLarkInstallations(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
     const workspace_id = model.getWorkspaceId(ctx) orelse {
@@ -1625,10 +1758,8 @@ pub fn listLarkInstallations(ctx: *zfinal.Context) !void {
     if (model.borrowDb()) |db_handle| {
         defer deps.releaseBack(db_handle);
         var rs = try db_handle.queryParams(
-            "SELECT id, workspace_id, app_id, tenant_key, " ++
-                "'' AS tenant_name, " ++
-                "created_at, updated_at " ++
-                "FROM lark_installation WHERE workspace_id = $1::uuid ORDER BY created_at DESC",
+            "SELECT " ++ larkInstallationColumns ++
+                " FROM lark_installation WHERE workspace_id = $1::uuid ORDER BY created_at DESC",
             &[_]SqlParam{.{ .text = workspace_id }},
         );
         defer rs.deinit();
@@ -1639,30 +1770,39 @@ pub fn listLarkInstallations(ctx: *zfinal.Context) !void {
             try list.append(allocator, model.LarkInstallationResponse{
                 .id = r.getText(0) orelse "",
                 .workspace_id = r.getText(1) orelse "",
-                .app_id = r.getText(2) orelse "",
-                .tenant_key = r.getText(3) orelse "",
-                .tenant_name = r.getText(4) orelse "",
-                .created_at = r.getText(5) orelse "",
-                .updated_at = r.getText(6) orelse "",
+                .agent_id = r.getText(2) orelse "",
+                .app_id = r.getText(3) orelse "",
+                .tenant_key = r.getText(4) orelse "",
+                .bot_open_id = r.getText(5) orelse "",
+                .installer_user_id = r.getText(6) orelse "",
+                .status = r.getText(7) orelse "",
+                .region = r.getText(8) orelse "",
+                .installed_at = r.getText(9) orelse "",
+                .created_at = r.getText(10) orelse "",
+                .updated_at = r.getText(11) orelse "",
             });
         }
-        try ctx.renderJson(list.items);
+        // Rendered while the connection is still borrowed: the response
+        // strings point into the result set, which `rs.deinit()` frees
+        // when this block ends.
+        try ctx.renderJson(larkInstallationsEnvelope(list.items));
     } else {
+        // No-DB fallback: installations are only ever created by the
+        // Lark install flow, which this build does not implement, so
+        // there is nothing in memory to list either.
         try model.memInit();
         if (!(try model.requireWorkspaceRoleAttr(ctx, "member"))) return;
-        try model.mem_mutex.lock(zfinal.io_instance.io);
-        defer model.mem_mutex.unlock(zfinal.io_instance.io);
-
-        var list: std.ArrayList(model.LarkInstallationResponse) = .empty;
-        defer list.deinit(allocator);
-        var it = model.mem_lark_installs.?.iterator();
-        while (it.next()) |e| {
-            const entry = e.value_ptr.*;
-            if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) continue;
-            try list.append(allocator, model.larkResponseFromEntry(entry));
-        }
-        try ctx.renderJson(list.items);
+        try ctx.renderJson(larkInstallationsEnvelope(&[_]model.LarkInstallationResponse{}));
     }
+}
+
+/// Wrap the installation rows in the envelope the client reads.
+fn larkInstallationsEnvelope(installations: []const model.LarkInstallationResponse) LarkInstallationsListResponse {
+    return LarkInstallationsListResponse{
+        .installations = installations,
+        .configured = false,
+        .install_supported = false,
+    };
 }
 
 pub fn deleteLarkInstallation(ctx: *zfinal.Context) !void {
@@ -1689,10 +1829,9 @@ pub fn deleteLarkInstallation(ctx: *zfinal.Context) !void {
         );
         try response.okNoContent(ctx);
     } else {
-        try model.memInit();
-        try model.mem_mutex.lock(zfinal.io_instance.io);
-        defer model.mem_mutex.unlock(zfinal.io_instance.io);
-        _ = model.mem_lark_installs.?.fetchRemove(installation_id);
+        // No-DB fallback: installations are only ever created by the Lark
+        // install flow, which this build does not implement, so there is
+        // no in-memory row to remove.
         try response.okNoContent(ctx);
     }
 }
@@ -1759,98 +1898,6 @@ pub fn getLarkInstallStatus(ctx: *zfinal.Context) !void {
             return;
         }
         try ctx.renderJson(.{ .status = entry.status });
-    }
-}
-
-pub fn connectLark(ctx: *zfinal.Context) !void {
-    const allocator = ctx.allocator;
-    const workspace_id = model.getWorkspaceId(ctx) orelse {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
-        return;
-    };
-    if (!(try model.requireWorkspaceRoleAttr(ctx, "admin"))) return;
-
-    const parsed = try ctx.parseJsonBody(model.ConnectLarkRequest);
-    defer parsed.deinit();
-    const req = parsed.value;
-
-    const app_id = std.mem.trim(u8, req.app_id, &std.ascii.whitespace);
-    const tenant_key = std.mem.trim(u8, req.tenant_key, &std.ascii.whitespace);
-    if (app_id.len == 0 or tenant_key.len == 0) {
-        ctx.res_status = .bad_request;
-        try ctx.renderJson(.{ .@"error" = "app_id and tenant_key are required" });
-        return;
-    }
-
-    if (model.borrowDb()) |db_handle| {
-        defer deps.releaseBack(db_handle);
-        const params = [_]SqlParam{
-            .{ .text = workspace_id },
-            .{ .text = app_id },
-            .{ .text = tenant_key },
-            .{ .text = req.tenant_name orelse "" },
-        };
-        var rs = try db_handle.queryParams(
-            "INSERT INTO lark_installation (workspace_id, app_id, tenant_key, tenant_name) " ++
-                "VALUES ($1::uuid, $2, $3, $4) " ++
-                "ON CONFLICT (workspace_id, app_id, tenant_key) DO UPDATE SET " ++
-                "tenant_name = EXCLUDED.tenant_name, updated_at = now() " ++
-                "RETURNING id, workspace_id, app_id, tenant_key, tenant_name, created_at, updated_at",
-            &params,
-        );
-        defer rs.deinit();
-        if (rs.rows.items.len == 0) {
-            ctx.res_status = .internal_server_error;
-            try ctx.renderJson(.{ .@"error" = "failed to connect lark" });
-            return;
-        }
-        const r = &rs.rows.items[0];
-        ctx.res_status = .created;
-        try ctx.renderJson(model.LarkInstallationResponse{
-            .id = r.getText(0) orelse "",
-            .workspace_id = r.getText(1) orelse "",
-            .app_id = r.getText(2) orelse "",
-            .tenant_key = r.getText(3) orelse "",
-            .tenant_name = r.getText(4) orelse "",
-            .created_at = r.getText(5) orelse "",
-            .updated_at = r.getText(6) orelse "",
-        });
-    } else {
-        try model.memInit();
-        try model.mem_mutex.lock(zfinal.io_instance.io);
-        defer model.mem_mutex.unlock(zfinal.io_instance.io);
-
-        var it = model.mem_lark_installs.?.iterator();
-        while (it.next()) |e| {
-            const existing = e.value_ptr.*;
-            if (std.mem.eql(u8, existing.workspace_id, workspace_id) and
-                std.mem.eql(u8, existing.app_id, app_id) and
-                std.mem.eql(u8, existing.tenant_key, tenant_key))
-            {
-                e.value_ptr.tenant_name = try model.memDup(req.tenant_name orelse existing.tenant_name);
-                e.value_ptr.updated_at = try model.memFmtNumber(std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds());
-                try ctx.renderJson(model.larkResponseFromEntry(e.value_ptr.*));
-                return;
-            }
-        }
-
-        const now = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
-        const id = try model.generateId(allocator, tenant_key);
-        const entry = model.LarkInstallationEntry{
-            .id = try model.memDup(id),
-            .workspace_id = try model.memDup(workspace_id),
-            .app_id = try model.memDup(app_id),
-            .tenant_key = try model.memDup(tenant_key),
-            .tenant_name = try model.memDup(req.tenant_name orelse ""),
-            .created_at = try model.memFmtNumber(now),
-            .updated_at = try model.memFmtNumber(now),
-        };
-        try model.mem_lark_installs.?.put(entry.id, entry);
-        allocator.free(id);
-
-        ctx.res_status = .created;
-        try ctx.renderJson(model.larkResponseFromEntry(entry));
     }
 }
 

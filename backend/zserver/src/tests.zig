@@ -27,6 +27,7 @@ test {
     _ = @import("modules/workspace/service.zig");
     _ = @import("modules/workspace/model.zig");
     _ = @import("modules/workspace/model_test.zig");
+    _ = @import("modules/workspace/service_test.zig");
     _ = @import("modules/workspace/routes.zig");
     _ = @import("modules/invitation/handler.zig");
     _ = @import("modules/invitation/service.zig");
