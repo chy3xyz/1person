@@ -314,6 +314,9 @@ pub fn memListPullRequests(issue_id: []const u8) []PullRequestEntry {
 /// `position`, `due_date`, `start_date`, `number`).
 pub const Issue = struct {
     id: []const u8,
+    /// Owning workspace. The DB path reads it straight from the row;
+    /// the in-memory path fills it on create.
+    workspace_id: []const u8 = "",
     title: []const u8,
     description: []const u8,
     project_id: []const u8,
@@ -333,6 +336,9 @@ pub const Issue = struct {
     due_date: ?[]const u8 = null,
     start_date: ?[]const u8 = null,
     number: i32 = 0,
+    /// `<workspace prefix>-<number>`. The DB path computes it in SQL;
+    /// the in-memory path leaves it empty (no-DB mode is dev-only).
+    identifier: []const u8 = "",
 };
 
 /// Subscriber row used by the subscriber endpoints. Mirrors the
@@ -549,27 +555,60 @@ pub const GroupedIssuesResponse = struct {
 /// `Issue` interface in `packages/core/types/issue.ts`. The DB
 /// column names are translated to the simpler API names here
 /// (e.g. `status` → `state`).
+/// Columns every issue read projects into the API shape.
+///
+/// One list for every SELECT so the query and the projector can never
+/// drift apart. The wire contract (frontend `Issue` type in
+/// `packages/core/types/issue.ts`, upstream `IssueResponse`) needs
+/// `workspace_id`, `number`, `identifier`, `status` and
+/// `parent_issue_id` — the previous nine-column list carried none of
+/// them, so every issue response failed the client schema and the
+/// Issues list rendered empty.
+pub const issueSelectColumns =
+    "i.id, i.workspace_id, i.number, " ++
+    "COALESCE(w.issue_prefix, '') || '-' || i.number, " ++
+    "i.title, i.description, i.project_id::text, i.parent_issue_id::text, " ++
+    "i.assignee_id::text, i.status, i.created_at, i.updated_at, i.priority, " ++
+    "i.assignee_type, i.creator_type, i.creator_id, i.position, i.due_date, i.start_date";
+
+/// `FROM` clause matching `issueSelectColumns` — the workspace join
+/// carries the issue prefix the identifier is built from.
+pub const issueSelectFrom = " FROM issue i LEFT JOIN workspace w ON w.id = i.workspace_id";
+
+/// Same columns as `issueSelectColumns`, for the `RETURNING` clause of
+/// a write. A write cannot join, so the prefix comes from a scalar
+/// subquery instead. The column ORDER must stay identical to
+/// `issueSelectColumns` — the projector indexes by position.
+pub const issueReturningColumns =
+    "id, workspace_id, number, " ++
+    "(SELECT COALESCE(w2.issue_prefix, '') FROM workspace w2 WHERE w2.id = issue.workspace_id) || '-' || number, " ++
+    "title, description, project_id::text, parent_issue_id::text, " ++
+    "assignee_id::text, status, created_at, updated_at, priority, " ++
+    "assignee_type, creator_type, creator_id, position, due_date, start_date";
+
 pub const IssueResponse = struct {
     id: []const u8,
+    workspace_id: []const u8,
+    /// Per-workspace issue number (1-based).
+    number: i32,
+    /// Human-readable id, `<workspace prefix>-<number>` — the same
+    /// shape the upstream server renders.
+    identifier: []const u8,
     title: []const u8,
     description: ?[]const u8,
-    project_id: ?[]const u8,
-    parent_id: ?[]const u8,
+    status: []const u8,
+    priority: []const u8,
+    assignee_type: ?[]const u8,
     assignee_id: ?[]const u8,
-    state: []const u8,
+    creator_type: []const u8,
+    creator_id: []const u8,
+    parent_issue_id: ?[]const u8,
+    project_id: ?[]const u8,
+    position: f64,
+    start_date: ?[]const u8,
+    due_date: ?[]const u8,
     created_at: []const u8,
     updated_at: []const u8,
-    deleted_at: ?[]const u8 = null,
-    squad_evaluated_at: ?[]const u8 = null,
-    // Go alignment fields
-    priority: []const u8 = "none",
-    assignee_type: ?[]const u8 = null,
-    creator_type: []const u8 = "member",
-    creator_id: []const u8 = "",
-    position: f64 = 0.0,
-    due_date: ?[]const u8 = null,
-    start_date: ?[]const u8 = null,
-    number: i32 = 0,
 };
 
 // ──────────────────────────────────────────────────────────────────────
@@ -627,25 +666,31 @@ pub fn validateTitle(raw: []const u8) ?[]const u8 {
 // row → response projectors
 // ──────────────────────────────────────────────────────────────────────
 
-/// Convert a `SELECT id, title, description, project_id, parent_issue_id,
-/// assignee_id, status, created_at, updated_at FROM issue` row to
-/// the API response shape. Empty-string → null translation lives here
+/// Convert a row selected with `issueSelectColumns` / `issueReturningColumns`
+/// into the API response shape. Empty-string → null translation lives here
 /// so the DB path doesn't have to special-case the response shape.
 pub fn issueResponseFromRow(res: *zfinal.ResultSet, row: usize) IssueResponse {
     const r = &res.rows.items[row];
     return IssueResponse{
         .id = r.getText(0) orelse "",
-        .title = r.getText(1) orelse "",
-        .description = r.getText(2),
-        .project_id = emptyToNull(r.getText(3)),
-        .parent_id = emptyToNull(r.getText(4)),
-        .assignee_id = emptyToNull(r.getText(5)),
-        .state = r.getText(6) orelse "backlog",
-        .created_at = r.getText(7) orelse "",
-        .updated_at = r.getText(8) orelse "",
-        // DB schema doesn't have `squad_evaluated_at` yet; expose
-        // null until the migration adds the column.
-        .squad_evaluated_at = null,
+        .workspace_id = r.getText(1) orelse "",
+        .number = @intCast((r.getInt(2) catch null) orelse 0),
+        .identifier = r.getText(3) orelse "",
+        .title = r.getText(4) orelse "",
+        .description = r.getText(5),
+        .project_id = emptyToNull(r.getText(6)),
+        .parent_issue_id = emptyToNull(r.getText(7)),
+        .assignee_id = emptyToNull(r.getText(8)),
+        .status = r.getText(9) orelse "backlog",
+        .created_at = r.getText(10) orelse "",
+        .updated_at = r.getText(11) orelse "",
+        .priority = r.getText(12) orelse "none",
+        .assignee_type = r.getText(13),
+        .creator_type = r.getText(14) orelse "member",
+        .creator_id = r.getText(15) orelse "",
+        .position = (r.getFloat(16) catch null) orelse 0,
+        .due_date = r.getText(17),
+        .start_date = r.getText(18),
     };
 }
 
@@ -653,16 +698,17 @@ pub fn issueResponseFromRow(res: *zfinal.ResultSet, row: usize) IssueResponse {
 pub fn issueResponseFromEntry(entry: Issue) IssueResponse {
     return IssueResponse{
         .id = entry.id,
+        .workspace_id = entry.workspace_id,
+        .number = entry.number,
+        .identifier = entry.identifier,
         .title = entry.title,
         .description = if (entry.description.len > 0) entry.description else null,
         .project_id = if (entry.project_id.len > 0) entry.project_id else null,
-        .parent_id = if (entry.parent_id.len > 0) entry.parent_id else null,
+        .parent_issue_id = if (entry.parent_id.len > 0) entry.parent_id else null,
         .assignee_id = if (entry.assignee_id.len > 0) entry.assignee_id else null,
-        .state = entry.state,
+        .status = entry.state,
         .created_at = entry.created_at,
         .updated_at = entry.updated_at,
-        .deleted_at = entry.deleted_at,
-        .squad_evaluated_at = entry.squad_evaluated_at,
         .priority = entry.priority,
         .assignee_type = entry.assignee_type,
         .creator_type = entry.creator_type,
@@ -670,7 +716,6 @@ pub fn issueResponseFromEntry(entry: Issue) IssueResponse {
         .position = entry.position,
         .due_date = entry.due_date,
         .start_date = entry.start_date,
-        .number = entry.number,
     };
 }
 
@@ -682,48 +727,83 @@ fn issueResponseFromRowDuped(allocator: std.mem.Allocator, res: *zfinal.ResultSe
     const r = &res.rows.items[row];
     const dup_id = allocator.dupe(u8, r.getText(0) orelse "") catch return null;
     errdefer allocator.free(dup_id);
-    const dup_title = allocator.dupe(u8, r.getText(1) orelse "") catch return null;
+    const dup_ws = allocator.dupe(u8, r.getText(1) orelse "") catch return null;
+    errdefer allocator.free(dup_ws);
+    const dup_identifier = allocator.dupe(u8, r.getText(3) orelse "") catch return null;
+    errdefer allocator.free(dup_identifier);
+    const dup_title = allocator.dupe(u8, r.getText(4) orelse "") catch return null;
     errdefer allocator.free(dup_title);
-    const desc_raw = r.getText(2);
+    const desc_raw = r.getText(5);
     const dup_desc: ?[]const u8 = if (desc_raw) |d| blk: {
         const dd = allocator.dupe(u8, d) catch return null;
         break :blk if (dd.len == 0) null else dd;
     } else null;
     errdefer if (dup_desc) |d| allocator.free(d);
-    const proj_raw = r.getText(3);
+    const proj_raw = r.getText(6);
     const dup_proj: ?[]const u8 = if (proj_raw) |p| blk: {
         const dp = allocator.dupe(u8, p) catch return null;
         break :blk if (dp.len == 0) null else dp;
     } else null;
     errdefer if (dup_proj) |p| allocator.free(p);
-    const par_raw = r.getText(4);
+    const par_raw = r.getText(7);
     const dup_par: ?[]const u8 = if (par_raw) |p| blk: {
         const dp = allocator.dupe(u8, p) catch return null;
         break :blk if (dp.len == 0) null else dp;
     } else null;
     errdefer if (dup_par) |p| allocator.free(p);
-    const asgn_raw = r.getText(5);
+    const asgn_raw = r.getText(8);
     const dup_asgn: ?[]const u8 = if (asgn_raw) |a| blk: {
         const da = allocator.dupe(u8, a) catch return null;
         break :blk if (da.len == 0) null else da;
     } else null;
     errdefer if (dup_asgn) |a| allocator.free(a);
-    const dup_state = allocator.dupe(u8, r.getText(6) orelse "backlog") catch return null;
-    errdefer allocator.free(dup_state);
-    const dup_ca = allocator.dupe(u8, r.getText(7) orelse "") catch return null;
+    const dup_status = allocator.dupe(u8, r.getText(9) orelse "backlog") catch return null;
+    errdefer allocator.free(dup_status);
+    const dup_ca = allocator.dupe(u8, r.getText(10) orelse "") catch return null;
     errdefer allocator.free(dup_ca);
-    const dup_ua = allocator.dupe(u8, r.getText(8) orelse "") catch return null;
+    const dup_ua = allocator.dupe(u8, r.getText(11) orelse "") catch return null;
+    errdefer allocator.free(dup_ua);
+    const dup_priority = allocator.dupe(u8, r.getText(12) orelse "none") catch return null;
+    errdefer allocator.free(dup_priority);
+    const dup_atype: ?[]const u8 = if (r.getText(13)) |a| blk: {
+        const da = allocator.dupe(u8, a) catch return null;
+        break :blk if (da.len == 0) null else da;
+    } else null;
+    errdefer if (dup_atype) |a| allocator.free(a);
+    const dup_ctype = allocator.dupe(u8, r.getText(14) orelse "member") catch return null;
+    errdefer allocator.free(dup_ctype);
+    const dup_cid = allocator.dupe(u8, r.getText(15) orelse "") catch return null;
+    errdefer allocator.free(dup_cid);
+    const dup_due: ?[]const u8 = if (r.getText(17)) |d| blk: {
+        const dd = allocator.dupe(u8, d) catch return null;
+        break :blk if (dd.len == 0) null else dd;
+    } else null;
+    errdefer if (dup_due) |d| allocator.free(d);
+    const dup_start: ?[]const u8 = if (r.getText(18)) |d| blk: {
+        const dd = allocator.dupe(u8, d) catch return null;
+        break :blk if (dd.len == 0) null else dd;
+    } else null;
+    errdefer if (dup_start) |d| allocator.free(d);
     return IssueResponse{
         .id = dup_id,
+        .workspace_id = dup_ws,
+        .number = @intCast((r.getInt(2) catch null) orelse 0),
+        .identifier = dup_identifier,
         .title = dup_title,
         .description = dup_desc,
         .project_id = dup_proj,
-        .parent_id = dup_par,
+        .parent_issue_id = dup_par,
         .assignee_id = dup_asgn,
-        .state = dup_state,
+        .status = dup_status,
         .created_at = dup_ca,
         .updated_at = dup_ua,
-        .squad_evaluated_at = null,
+        .priority = dup_priority,
+        .assignee_type = dup_atype,
+        .creator_type = dup_ctype,
+        .creator_id = dup_cid,
+        .position = (r.getFloat(16) catch null) orelse 0,
+        .due_date = dup_due,
+        .start_date = dup_start,
     };
 }
 
@@ -732,14 +812,22 @@ fn issueResponseFromRowDuped(allocator: std.mem.Allocator, res: *zfinal.ResultSe
 /// zero-length strings (they are "" not null).
 pub fn freeIssueResponse(allocator: std.mem.Allocator, resp: IssueResponse) void {
     allocator.free(resp.id);
+    allocator.free(resp.workspace_id);
+    allocator.free(resp.identifier);
     allocator.free(resp.title);
     if (resp.description) |d| allocator.free(d);
     if (resp.project_id) |p| allocator.free(p);
-    if (resp.parent_id) |p| allocator.free(p);
+    if (resp.parent_issue_id) |p| allocator.free(p);
     if (resp.assignee_id) |a| allocator.free(a);
-    allocator.free(resp.state);
+    allocator.free(resp.status);
     allocator.free(resp.created_at);
     allocator.free(resp.updated_at);
+    allocator.free(resp.priority);
+    if (resp.assignee_type) |a| allocator.free(a);
+    allocator.free(resp.creator_type);
+    allocator.free(resp.creator_id);
+    if (resp.due_date) |d| allocator.free(d);
+    if (resp.start_date) |d| allocator.free(d);
 }
 
 fn emptyToNull(s: ?[]const u8) ?[]const u8 {
@@ -980,6 +1068,12 @@ pub fn issueExistsAny(issue_id: []const u8) bool {
 /// the DB. The returned `IssueResponse` is already projected to the
 /// API shape. Returns `null` when the insert failed or no row was
 /// returned.
+///
+/// `creator_id` / `creator_type` describe WHO created the issue — the
+/// acting user or agent. They used to be hardcoded to the workspace id
+/// with type "member", so every issue claimed the workspace as its
+/// author. `assignee_type` is the kind of the assignee (agent /
+/// member); `null` leaves the issue unassigned.
 pub fn insertIssue(
     workspace_id: []const u8,
     title: []const u8,
@@ -988,6 +1082,9 @@ pub fn insertIssue(
     project_id: []const u8,
     parent_id: []const u8,
     assignee_id: []const u8,
+    assignee_type: ?[]const u8,
+    creator_id: []const u8,
+    creator_type: []const u8,
 ) ?IssueResponse {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
@@ -995,11 +1092,9 @@ pub fn insertIssue(
         "INSERT INTO issue (workspace_id, title, description, status, project_id, parent_issue_id, " ++
             "assignee_type, assignee_id, creator_type, creator_id, number) " ++
             "VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, '')::uuid, " ++
-            "CASE WHEN NULLIF($7, '') IS NULL THEN NULL ELSE 'member' END, " ++
-            "NULLIF($7, '')::uuid, 'member', $1::uuid, " ++
+            "NULLIF($7, ''), NULLIF($8, '')::uuid, $9, NULLIF($10, '')::uuid, " ++
             "(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1::uuid)) " ++
-            "RETURNING id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at",
+            "RETURNING " ++ issueReturningColumns,
         &[_]SqlParam{
             .{ .text = workspace_id },
             .{ .text = title },
@@ -1007,7 +1102,10 @@ pub fn insertIssue(
             .{ .text = state },
             .{ .text = project_id },
             .{ .text = parent_id },
+            .{ .text = assignee_type orelse "" },
             .{ .text = assignee_id },
+            .{ .text = creator_type },
+            .{ .text = creator_id },
         },
     ) catch return null;
     defer rs.deinit();
@@ -1015,17 +1113,40 @@ pub fn insertIssue(
     return issueResponseFromRowDuped(db.allocator, &rs, 0);
 }
 
-/// `SELECT id, title, description, project_id::text, parent_issue_id::text,
-/// assignee_id::text, status, created_at, updated_at FROM
-/// issue WHERE id = $1::uuid AND workspace_id = $2::uuid`. Returns
+/// Resolve the kind of an assignee id: "agent", "member", or `null`
+/// when the id belongs to neither (an unassigned issue, or an id that
+/// was deleted). The wire contract carries `assignee_type` next to
+/// `assignee_id` and the client renders agents differently from
+/// members — hardcoding "member" made every agent-assigned issue look
+/// like a person.
+pub fn resolveAssigneeType(workspace_id: []const u8, assignee_id: []const u8) ?[]const u8 {
+    if (assignee_id.len == 0) return null;
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT EXISTS(SELECT 1 FROM agent WHERE id = $1::uuid), " ++
+            "EXISTS(SELECT 1 FROM member WHERE workspace_id = $2::uuid AND user_id = $1::uuid)",
+        &[_]SqlParam{
+            .{ .text = assignee_id },
+            .{ .text = workspace_id },
+        },
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    if (((rs.rows.items[0].getInt(0) catch null) orelse 0) != 0) return "agent";
+    if (((rs.rows.items[0].getInt(1) catch null) orelse 0) != 0) return "member";
+    return null;
+}
+
+/// `SELECT <issueSelectColumns> FROM issue i LEFT JOIN workspace w ...
+/// WHERE i.id = $1::uuid AND i.workspace_id = $2::uuid`. Returns
 /// `null` when no row matches.
 pub fn selectIssueById(workspace_id: []const u8, issue_id: []const u8) ?IssueResponse {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
     var rs = db.queryParams(
-        "SELECT id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at " ++
-            "FROM issue WHERE id = $1::uuid AND workspace_id = $2::uuid",
+        "SELECT " ++ issueSelectColumns ++ issueSelectFrom ++
+            " WHERE i.id = $1::uuid AND i.workspace_id = $2::uuid",
         &[_]SqlParam{
             .{ .text = issue_id },
             .{ .text = workspace_id },
@@ -1063,8 +1184,7 @@ pub fn updateIssue(
             "assignee_id = COALESCE(NULLIF($8, '')::uuid, assignee_id), " ++
             "updated_at = now() " ++
             "WHERE id = $1::uuid AND workspace_id = $2::uuid " ++
-            "RETURNING id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at",
+            "RETURNING " ++ issueReturningColumns,
         &[_]SqlParam{
             .{ .text = issue_id },
             .{ .text = workspace_id },
@@ -1143,8 +1263,7 @@ pub fn softDeleteIssue(workspace_id: []const u8, issue_id: []const u8) bool {
 }
 
 /// `UPDATE issue SET status = 'todo', updated_at = now() WHERE id = $1::uuid AND workspace_id = $2::uuid
-/// RETURNING id, title, description, project_id::text, parent_issue_id::text,
-/// assignee_id::text, status, created_at, updated_at`.
+/// RETURNING <issueReturningColumns>`.
 /// Returns the updated `IssueResponse` or `null` when no row matched.
 pub fn dbRerunIssue(workspace_id: []const u8, issue_id: []const u8) ?IssueResponse {
     const db = borrowDb() orelse return null;
@@ -1152,8 +1271,7 @@ pub fn dbRerunIssue(workspace_id: []const u8, issue_id: []const u8) ?IssueRespon
     var rs = db.queryParams(
         "UPDATE issue SET status = 'todo', updated_at = now() " ++
             "WHERE id = $1::uuid AND workspace_id = $2::uuid " ++
-            "RETURNING id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at",
+            "RETURNING " ++ issueReturningColumns,
         &[_]SqlParam{
             .{ .text = issue_id },
             .{ .text = workspace_id },
@@ -1187,7 +1305,7 @@ fn buildIssueFilterClause(
 ) ![]u8 {
     var where: std.ArrayList(u8) = .empty;
     defer where.deinit(allocator);
-    try where.appendSlice(allocator, "workspace_id = $1::uuid");
+    try where.appendSlice(allocator, "i.workspace_id = $1::uuid");
     try params.append(allocator, .{ .text = try allocator.dupe(u8, workspace_id) });
 
     var idx: usize = 1;
@@ -1195,7 +1313,7 @@ fn buildIssueFilterClause(
         if (s.len > 0) {
             idx += 1;
             try params.append(allocator, .{ .text = try allocator.dupe(u8, s) });
-            const clause = try std.fmt.allocPrint(allocator, " AND status = ${d}", .{idx});
+            const clause = try std.fmt.allocPrint(allocator, " AND i.status = ${d}", .{idx});
             try where.appendSlice(allocator, clause);
         }
     }
@@ -1203,7 +1321,7 @@ fn buildIssueFilterClause(
         if (p.len > 0) {
             idx += 1;
             try params.append(allocator, .{ .text = try allocator.dupe(u8, p) });
-            const clause = try std.fmt.allocPrint(allocator, " AND project_id = ${d}::uuid", .{idx});
+            const clause = try std.fmt.allocPrint(allocator, " AND i.project_id = ${d}::uuid", .{idx});
             try where.appendSlice(allocator, clause);
         }
     }
@@ -1211,7 +1329,7 @@ fn buildIssueFilterClause(
         if (a.len > 0) {
             idx += 1;
             try params.append(allocator, .{ .text = try allocator.dupe(u8, a) });
-            const clause = try std.fmt.allocPrint(allocator, " AND assignee_id = ${d}::uuid", .{idx});
+            const clause = try std.fmt.allocPrint(allocator, " AND i.assignee_id = ${d}::uuid", .{idx});
             try where.appendSlice(allocator, clause);
         }
     }
@@ -1236,7 +1354,7 @@ pub fn countIssuesWithFilters(
     const where = try buildIssueFilterClause(allocator, &params, workspace_id, state_filter, project_filter, assignee_filter);
     defer allocator.free(where);
 
-    const query = try std.fmt.allocPrintSentinel(allocator, "SELECT count(*) FROM issue WHERE {s}", .{where}, 0);
+    const query = try std.fmt.allocPrintSentinel(allocator, "SELECT count(*) FROM issue i WHERE {s}", .{where}, 0);
     defer allocator.free(query);
 
     var rs = try db.queryParams(query, params.items);
@@ -1264,7 +1382,7 @@ pub fn listIssuesWithFilters(
     defer allocator.free(where);
 
     // Build ORDER BY + LIMIT + OFFSET separately, appended after WHERE.
-    const order_by = " ORDER BY created_at DESC";
+    const order_by = " ORDER BY i.created_at DESC";
 
     // limit / offset are always last params. `buildIssueFilterClause`
     // already appended the filter params, so continue numbering from there.
@@ -1283,9 +1401,8 @@ pub fn listIssuesWithFilters(
 
     const query = try std.fmt.allocPrintSentinel(
         allocator,
-        "SELECT id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at " ++
-            "FROM issue WHERE {s}{s}{s}{s}",
+        "SELECT " ++ issueSelectColumns ++ issueSelectFrom ++
+            " WHERE {s}{s}{s}{s}",
         .{where, order_by, limit_clause, offset_clause},
         0,
     );
@@ -1321,11 +1438,10 @@ pub fn searchIssuesByText(
     if (query.len == 0) return &[_]IssueResponse{};
 
     var rs = try db.queryParams(
-        "SELECT id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at " ++
-            "FROM issue WHERE workspace_id = $1::uuid AND " ++
-            "(title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%') " ++
-            "ORDER BY created_at DESC LIMIT $3",
+        "SELECT " ++ issueSelectColumns ++ issueSelectFrom ++
+            " WHERE i.workspace_id = $1::uuid AND " ++
+            "(i.title ILIKE '%' || $2 || '%' OR i.description ILIKE '%' || $2 || '%') " ++
+            "ORDER BY i.created_at DESC LIMIT $3",
         &[_]SqlParam{
             .{ .text = workspace_id },
             .{ .text = query },
@@ -1358,8 +1474,8 @@ pub fn countSearchIssues(
     if (query.len == 0) return 0;
 
     var rs = try db.queryParams(
-        "SELECT count(*) FROM issue WHERE workspace_id = $1::uuid AND " ++
-            "(title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')",
+        "SELECT count(*) FROM issue i WHERE i.workspace_id = $1::uuid AND " ++
+            "(i.title ILIKE '%' || $2 || '%' OR i.description ILIKE '%' || $2 || '%')",
         &[_]SqlParam{
             .{ .text = workspace_id },
             .{ .text = query },
@@ -1402,10 +1518,9 @@ pub fn listChildrenByParents(
     defer allocator.free(array_lit);
 
     var rs = try db.queryParams(
-        "SELECT id, title, description, project_id::text, parent_issue_id::text, " ++
-            "assignee_id::text, status, created_at, updated_at " ++
-            "FROM issue WHERE workspace_id = $1::uuid AND parent_issue_id = ANY($2::uuid[]) " ++
-            "ORDER BY created_at ASC",
+        "SELECT " ++ issueSelectColumns ++ issueSelectFrom ++
+            " WHERE i.workspace_id = $1::uuid AND i.parent_issue_id = ANY($2::uuid[]) " ++
+            "ORDER BY i.created_at ASC",
         &[_]SqlParam{
             .{ .text = workspace_id },
             .{ .text = array_lit },

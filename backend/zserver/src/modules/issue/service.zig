@@ -311,9 +311,21 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
     const assignee_id = req.assignee_id orelse "";
 
     if (deps.hasPool()) {
-        if (model.insertIssue(workspace_id, title, description, state, project_id, parent_id, assignee_id)) |resp| {
+        const actor = resolveActor(ctx);
+        const assignee_type = model.resolveAssigneeType(workspace_id, assignee_id);
+        if (model.insertIssue(
+            workspace_id,
+            title,
+            description,
+            state,
+            project_id,
+            parent_id,
+            assignee_id,
+            assignee_type,
+            actor.actor_id,
+            actor.actor_type,
+        )) |resp| {
             ctx.res_status = .created;
-            const actor = resolveActor(ctx);
             publishIssueEvent(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, resp.id);
             try response.ok(ctx, resp);
             return;
@@ -334,10 +346,11 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
         try model.memDup(assignee_type_raw)
     else
         null;
-    const creator_type_raw = req.creator_type orelse "member";
-    const creator_id_raw = req.creator_id orelse workspace_id;
+    const creator_type_raw = req.creator_type orelse resolveActor(ctx).actor_type;
+    const creator_id_raw = req.creator_id orelse resolveActor(ctx).actor_id;
     const entry = model.Issue{
         .id = try model.memDup(id),
+        .workspace_id = try model.memDup(workspace_id),
         .title = try model.memDup(title),
         .description = try model.memDup(description),
         .project_id = try model.memDup(project_id),
@@ -867,6 +880,8 @@ pub fn quickCreate(ctx: *zfinal.Context) !void {
     }
 
     if (deps.hasPool()) {
+        const actor = resolveActor(ctx);
+        const assignee_type = model.resolveAssigneeType(workspace_id, req.assignee_id);
         if (model.insertIssue(
             workspace_id,
             req.title,
@@ -875,6 +890,9 @@ pub fn quickCreate(ctx: *zfinal.Context) !void {
             "",
             parent_id,
             req.assignee_id,
+            assignee_type,
+            actor.actor_id,
+            actor.actor_type,
         )) |resp| {
             // Record a timeline event so listTimeline can find it.
             const now_secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();

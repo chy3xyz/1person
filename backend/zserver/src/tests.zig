@@ -35,6 +35,7 @@ test {
     _ = @import("modules/invitation/routes.zig");
     _ = @import("modules/issue/handler.zig");
     _ = @import("modules/issue/service.zig");
+    _ = @import("modules/issue/service_test.zig");
     _ = @import("modules/issue/model.zig");
     _ = @import("modules/issue/routes.zig");
     _ = @import("modules/autopilot/handler.zig");
