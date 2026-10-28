@@ -218,4 +218,66 @@ describe("WSClient", () => {
       vi.useRealTimers();
     }
   });
+
+  // A pong is the answer to our own keepalive — protocol traffic, not a
+  // business event. Dispatching it would let a catch-all subscriber
+  // (use-realtime-sync's prefix invalidator) react to it.
+  it("never dispatches a pong to the event handlers", () => {
+    const ws = new WSClient("ws://example.test/ws");
+    const anyHandler = vi.fn();
+    const typedHandler = vi.fn();
+    ws.onAny(anyHandler);
+    ws.on("issue:updated", typedHandler);
+    ws.connect();
+
+    FakeWebSocket.lastInstance!.onmessage?.({
+      data: JSON.stringify({ type: "pong" }),
+    });
+
+    expect(anyHandler).not.toHaveBeenCalled();
+    expect(typedHandler).not.toHaveBeenCalled();
+  });
+
+  // Trust boundary: a frame without a string `type` is out of protocol.
+  // The server sends `{"error":"..."}` when it refuses a connection, and
+  // `msg.type.split(...)` in the onAny dispatcher would throw.
+  it("drops a frame that carries no string type", () => {
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const ws = new WSClient("ws://example.test/ws", { logger });
+    const anyHandler = vi.fn();
+    ws.onAny(anyHandler);
+    ws.connect();
+
+    expect(() => {
+      FakeWebSocket.lastInstance!.onmessage?.({
+        data: JSON.stringify({ error: "invalid token" }),
+      });
+    }).not.toThrow();
+
+    expect(anyHandler).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+  });
+
+  // The event body must be an object — handlers destructure it
+  // directly. A frame without one must not throw out of onmessage.
+  it("hands the handlers an empty body when the payload is missing", () => {
+    const ws = new WSClient("ws://example.test/ws");
+    const handler = vi.fn();
+    ws.on("issue:updated", handler);
+    ws.connect();
+
+    expect(() => {
+      FakeWebSocket.lastInstance!.onmessage?.({
+        data: JSON.stringify({ type: "issue:updated" }),
+      });
+    }).not.toThrow();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({}, undefined, undefined);
+  });
 });

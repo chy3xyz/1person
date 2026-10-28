@@ -64,6 +64,21 @@ const RECONNECT_CAP_MS = 30_000;
 const RECONNECT_MAX_EXPONENT = 6; // 1s → 64s ceiling, capped at 30s
 
 /**
+ * Keepalive interval.
+ *
+ * The server bounds how long it waits for the next frame (30s in
+ * zserver). A socket that says nothing used to die every 30 seconds —
+ * and every reconnect invalidates every workspace-scoped query, so the
+ * whole workspace was refetched about every 33 seconds. Pinging keeps
+ * the socket warm; the server answers with a pong instead of
+ * broadcasting it to the room.
+ *
+ * The interval starts on auth_ack (not on open) so an unauthenticated
+ * socket never burns the server's read budget.
+ */
+const KEEPALIVE_INTERVAL_MS = 20_000;
+
+/**
  * Lifecycle state — drives whether onclose schedules a reconnect:
  *   idle    — never connected, or fully disconnected. No reconnect on close.
  *   active  — wants to be connected. onclose → schedule reconnect.
@@ -77,6 +92,7 @@ export class WSClient {
   private state: State = "idle";
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private hasConnectedBefore = false;
 
   private readonly handlers = new Map<WSEventType, Set<EventHandler>>();
@@ -218,6 +234,12 @@ export class WSClient {
         this.onAuthenticated();
         return;
       }
+      // The server answers our keepalive with a pong. That is protocol
+      // traffic, not a business event — dispatching it to the handlers
+      // would let a catch-all subscriber react to it.
+      if (type === "pong") {
+        return;
+      }
       if (!type) {
         // Server-side error frames have shape {error: "..."}; log and drop.
         // Reconnect loop is bounded by auth-store's 401 handler eventually
@@ -227,9 +249,17 @@ export class WSClient {
       }
 
       this.logger.debug("[ws] event", type);
+      // The event body must be an object — handlers destructure it
+      // directly. Degrade to an empty body instead of throwing a
+      // TypeError out of onmessage.
+      let payload: unknown = msg.payload;
+      if (!payload || typeof payload !== "object") {
+        this.logger.warn("[ws] frame without a payload object", event.data);
+        payload = {};
+      }
       const set = this.handlers.get(msg.type);
       if (set) {
-        for (const handler of set) handler(msg.payload, msg.actor_id);
+        for (const handler of set) handler(payload, msg.actor_id);
       }
       for (const handler of this.anyHandlers) handler(msg);
     };
@@ -247,6 +277,7 @@ export class WSClient {
       if (!wasOurs) return;
 
       this.ws = null;
+      this.stopKeepalive();
       this.logger.warn("[ws] socket closed");
       if (this.state === "active") this.scheduleReconnect();
     };
@@ -255,6 +286,7 @@ export class WSClient {
   private onAuthenticated() {
     this.reconnectAttempt = 0;
     this.logger.info("[ws] authenticated");
+    this.startKeepalive();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -265,6 +297,30 @@ export class WSClient {
       }
     }
     this.hasConnectedBefore = true;
+  }
+
+  /**
+   * Keep the socket warm.
+   *
+   * The server bounds how long it waits for the next frame (30s), so an
+   * idle connection would be dropped — and every drop triggers a
+   * reconnect, which invalidates every workspace-scoped query and
+   * refetches the whole workspace.
+   */
+  private startKeepalive() {
+    this.stopKeepalive();
+    this.keepaliveTimer = setInterval(() => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type: "ping" }));
+      }
+    }, KEEPALIVE_INTERVAL_MS);
+  }
+
+  private stopKeepalive() {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+      this.keepaliveTimer = null;
+    }
   }
 
   private scheduleReconnect() {
@@ -293,6 +349,10 @@ export class WSClient {
   }
 
   private teardownSocket() {
+    // Stop the keepalive before the early return below — a socket that
+    // already closed (this.ws === null) must not leave a live interval
+    // behind.
+    this.stopKeepalive();
     if (!this.ws) return;
     const ws = this.ws;
     // Detach BEFORE close — onclose firing after teardown would re-enter

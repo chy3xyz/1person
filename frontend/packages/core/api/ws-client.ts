@@ -49,6 +49,9 @@ export class WSClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private hasConnectedBefore = false;
+  // One-shot per connection. A non-conforming frame can repeat hundreds of
+  // times per session, so we log the first drop and suppress the rest.
+  private badFrameLogged = false;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
   private logger: Logger;
@@ -111,15 +114,53 @@ export class WSClient {
         );
         return;
       }
+      // Trust boundary: a frame must be an object carrying a string `type`.
+      // The server sends `{"error":"..."}` (no `type`) when it refuses a
+      // connection, and a proxy or browser extension can inject anything
+      // at all. Without this guard the shape reaches the onAny
+      // dispatcher, where `msg.type.split(...)` throws an uncaught
+      // TypeError out of onmessage.
+      if (!msg || typeof (msg as { type?: unknown }).type !== "string") {
+        if (!this.badFrameLogged) {
+          this.badFrameLogged = true;
+          this.logger.warn(
+            "ws: dropping frame without a string type",
+            summarizeUnparseable(event.data),
+          );
+        }
+        return;
+      }
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
         return;
       }
+      // The server answers our keepalive with a pong. That is protocol
+      // traffic, not a business event — dispatching it to the handlers
+      // would let a catch-all prefix subscriber react to it.
+      if ((msg as any).type === "pong") {
+        return;
+      }
       this.logger.debug("received", msg.type);
+      // The event body must be an object. Handlers destructure it
+      // directly (`const { issue } = p`), so a frame without one would
+      // throw a TypeError out of onmessage. Degrade to an empty body so
+      // the handler sees "nothing to do" instead of tearing the socket
+      // handler down.
+      let payload: unknown = msg.payload;
+      if (!payload || typeof payload !== "object") {
+        if (!this.badFrameLogged) {
+          this.badFrameLogged = true;
+          this.logger.warn(
+            "ws: frame without a payload object",
+            summarizeUnparseable(event.data),
+          );
+        }
+        payload = {};
+      }
       const eventHandlers = this.handlers.get(msg.type);
       if (eventHandlers) {
         for (const handler of eventHandlers) {
-          handler(msg.payload, msg.actor_id, msg.actor_type);
+          handler(payload, msg.actor_id, msg.actor_type);
         }
       }
       for (const handler of this.anyHandlers) {
