@@ -40,6 +40,21 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
 
     app.setPort(cfg.port);
 
+    // zfinal's write deadline is measured from the FIRST write of a
+    // response, not per write. That is correct for an HTTP response
+    // (which finishes in milliseconds) but wrong for a WebSocket, whose
+    // "response" never ends: with the 30s default, every socket silently
+    // loses the ability to receive server pushes 30 seconds after it
+    // connects — the client keeps thinking it is connected while nothing
+    // arrives. Both long-lived endpoints in this server (`/ws` and
+    // `/api/daemon/ws`) are affected.
+    //
+    // Disabling the deadline restores the correct behaviour for a
+    // bidirectional stream. The read timeout still bounds the connection
+    // lifetime: a peer that stops sending is dropped after 30s, and the
+    // keepalive ping keeps a live peer alive.
+    app.config.write_timeout_ms = 0;
+
     // The single zfinal.ConnectionPool that backs every handler. Lives
     // in `deps.pool`; handlers borrow from it via `deps.acquire()`.
     // An empty db_url (e.g. `DATABASE_URL=""` from the e2e scripts)
