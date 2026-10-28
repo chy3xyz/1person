@@ -840,6 +840,36 @@ pub fn listTasks(ctx: *zfinal.Context) !void {
     try ctx.renderJson(&[_]model.TaskResponse{});
 }
 
+/// Workspace-wide active + latest outcome tasks per agent (frontend
+/// presence derivation). Mirrors the Go `ListWorkspaceAgentTaskSnapshot`.
+///
+/// The workspace id is bound once as `$1` and referenced by both UNION
+/// branches. PostgreSQL's extended query protocol binds one value per
+/// placeholder: passing the reused `$1` twice fails the query with
+/// "bind message supplies 2 parameters, but prepared statement requires 1".
+pub const agentTaskSnapshotSql =
+    "SELECT atq.id::text, atq.agent_id::text, atq.issue_id::text, atq.status, atq.priority, " ++
+        "atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at " ++
+        "FROM agent_task_queue atq JOIN agent a ON a.id = atq.agent_id " ++
+        "WHERE a.workspace_id = $1::uuid AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory') " ++
+        "UNION ALL " ++
+        "SELECT t.id::text, t.agent_id::text, t.issue_id::text, t.status, t.priority, " ++
+        "t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at " ++
+        "FROM (SELECT DISTINCT ON (atq.agent_id) atq.* FROM agent_task_queue atq " ++
+        "JOIN agent a ON a.id = atq.agent_id WHERE a.workspace_id = $1::uuid " ++
+        "AND atq.status IN ('completed', 'failed') ORDER BY atq.agent_id, atq.created_at DESC) t";
+
+/// Bind values for `agentTaskSnapshotSql`.
+///
+/// The workspace id is referenced by both UNION branches, and PostgreSQL's
+/// extended query protocol binds one value per placeholder — so it is bound
+/// exactly once. The buffer is caller-owned so the slice can outlive this
+/// call.
+pub fn agentTaskSnapshotParams(workspace_id: []const u8, buf: *[1]SqlParam) []const SqlParam {
+    buf[0] = .{ .text = workspace_id };
+    return buf[0..];
+}
+
 /// `GET /api/agent-task-snapshot` — workspace-wide active + latest
 /// outcome tasks per agent (frontend presence derivation). Mirrors the
 /// Go `ListWorkspaceAgentTaskSnapshot`.
@@ -855,18 +885,10 @@ pub fn getAgentTaskSnapshot(ctx: *zfinal.Context) !void {
         defer deps.releaseBack(db);
         // Active tasks + each agent's latest outcome task (completed /
         // failed; cancelled excluded) — same query as the Go server.
+        var param_buf: [1]SqlParam = undefined;
         var rs = try db.queryParams(
-            "SELECT atq.id::text, atq.agent_id::text, atq.issue_id::text, atq.status, atq.priority, " ++
-                "atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at " ++
-                "FROM agent_task_queue atq JOIN agent a ON a.id = atq.agent_id " ++
-                "WHERE a.workspace_id = $1::uuid AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory') " ++
-                "UNION ALL " ++
-                "SELECT t.id::text, t.agent_id::text, t.issue_id::text, t.status, t.priority, " ++
-                "t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at " ++
-                "FROM (SELECT DISTINCT ON (atq.agent_id) atq.* FROM agent_task_queue atq " ++
-                "JOIN agent a ON a.id = atq.agent_id WHERE a.workspace_id = $1::uuid " ++
-                "AND atq.status IN ('completed', 'failed') ORDER BY atq.agent_id, atq.created_at DESC) t",
-            &[_]SqlParam{ .{ .text = workspace_id }, .{ .text = workspace_id } },
+            agentTaskSnapshotSql,
+            agentTaskSnapshotParams(workspace_id, &param_buf),
         );
         defer rs.deinit();
         var list: std.ArrayList(model.TaskResponse) = .empty;
