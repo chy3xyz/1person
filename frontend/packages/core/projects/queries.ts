@@ -20,5 +20,8 @@ export function projectDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: projectKeys.detail(wsId, id),
     queryFn: () => api.getProject(id),
+    // Same guard as issueDetailOptions: an empty id would request
+    // `/api/projects/`, which redirects to the project list.
+    enabled: id.length > 0,
   });
 }

@@ -77,7 +77,13 @@ export function useChatContextItems(wsId: string): MentionItem[] {
   const currentRoute = parseCurrentContextRoute(pathname, searchParams);
   const recentEntries = useRecentContextStore(selectRecentContexts(wsId));
   const visibleRecentEntries = useMemo(
-    () => recentEntries.slice(0, MAX_RECENT_MENTION_ITEMS),
+    // An entry without an id would fire `GET /api/issues/` — the
+    // server redirects that to the issue LIST, whose body then fails
+    // the issue schema and logs a false contract warning.
+    () =>
+      recentEntries
+        .filter((entry) => entry.id.length > 0)
+        .slice(0, MAX_RECENT_MENTION_ITEMS),
     [recentEntries],
   );
 

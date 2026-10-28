@@ -38,7 +38,7 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   // Fallback fetch for issues outside the first page of the list (e.g. Done).
   const { data: detailIssue } = useQuery({
     ...issueDetailOptions(wsId, issueId),
-    enabled: !listIssue,
+    enabled: !listIssue && issueId.length > 0,
   });
 
   const issue = listIssue ?? detailIssue;

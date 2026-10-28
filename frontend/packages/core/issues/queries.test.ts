@@ -9,6 +9,7 @@ import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
+  issueDetailOptions,
   issueKeys,
   projectGanttIssuesOptions,
 } from "./queries";
@@ -136,6 +137,19 @@ describe("projectGanttIssuesOptions", () => {
   it("uses the project-scoped Gantt cache key", () => {
     const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("issueDetailOptions", () => {
+  it("stays enabled for a real issue id", () => {
+    expect(issueDetailOptions(WS_ID, "issue-1").enabled).toBe(true);
+  });
+
+  it("is disabled for an empty id so the server never redirects to the issue list", () => {
+    // `GET /api/issues/` is redirected by the server to the issue LIST. The
+    // list body then fails the issue schema, which logs a false contract
+    // warning and silently falls the detail back to an empty issue.
+    expect(issueDetailOptions(WS_ID, "").enabled).toBe(false);
   });
 });
 

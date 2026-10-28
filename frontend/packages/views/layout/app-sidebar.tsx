@@ -266,11 +266,11 @@ function PinRow({
   const isIssue = pin.item_type === "issue";
   const issueQuery = useQuery({
     ...issueDetailOptions(wsId, pin.item_id),
-    enabled: isIssue,
+    enabled: isIssue && pin.item_id.length > 0,
   });
   const projectQuery = useQuery({
     ...projectDetailOptions(wsId, pin.item_id),
-    enabled: !isIssue,
+    enabled: !isIssue && pin.item_id.length > 0,
   });
 
   const triggeredRef = useRef(false);

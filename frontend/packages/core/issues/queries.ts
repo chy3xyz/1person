@@ -385,6 +385,10 @@ export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+    // An empty id would request `/api/issues/`, which the server redirects to
+    // the issue LIST. The list body then fails the issue schema and logs a
+    // false contract warning while the detail silently falls back to empty.
+    enabled: id.length > 0,
   });
 }
 
