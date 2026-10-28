@@ -31,6 +31,7 @@ import {
   statusGroupId,
   assigneeGroupId,
   buildColumns,
+  columnsEqual,
   computePosition,
   findColumn,
   issueMatchesGroup,
@@ -228,7 +229,14 @@ export function BoardView({
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping));
+      // Keep the write idempotent: `buildColumns` allocates a new object
+      // every call, so an unconditional `setColumns` would schedule a render
+      // even when the columns are unchanged — and a render that re-runs this
+      // effect is how a "Maximum update depth exceeded" loop starts.
+      setColumns((prev) => {
+        const next = buildColumns(groupedIssues, groups, grouping);
+        return columnsEqual(prev, next) ? prev : next;
+      });
     }
   }, [groupedIssues, groups, grouping, settleVersion]);
 

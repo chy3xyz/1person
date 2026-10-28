@@ -5,12 +5,24 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "../hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
 import { resolvePublicFileUrl } from "./avatar-url";
+import type { Agent, MemberWithUser, Squad } from "../types";
+
+// Stable empty defaults. A literal `= []` default inside the hook creates a
+// NEW array on every render while the query is still loading, which changes
+// the identity of the `useCallback`s below on every render. Consumers that
+// feed those callbacks into a `useMemo` dependency chain then recompute on
+// every render — and a consumer that writes the result back into state in a
+// `useEffect` turns that into an infinite update loop ("Maximum update depth
+// exceeded"). Module-level constants keep the identity stable.
+const EMPTY_MEMBERS: MemberWithUser[] = [];
+const EMPTY_AGENTS: Agent[] = [];
+const EMPTY_SQUADS: Squad[] = [];
 
 export function useActorName() {
   const wsId = useWorkspaceId();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
+  const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
+  const { data: squads = EMPTY_SQUADS } = useQuery(squadListOptions(wsId));
 
   const getMemberName = useCallback((userId: string) => {
     const m = members.find((m) => m.user_id === userId);

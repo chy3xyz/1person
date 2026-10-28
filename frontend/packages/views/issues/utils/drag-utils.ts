@@ -56,6 +56,33 @@ export function buildColumns(
   return cols;
 }
 
+/**
+ * Structural comparison of two column maps.
+ *
+ * `buildColumns` always allocates a fresh object, so writing it straight into
+ * state schedules a render even when nothing actually changed. Callers that
+ * sync derived state from a `useEffect` use this to keep the write
+ * idempotent: equal content keeps the previous object identity, so React
+ * bails out of the re-render instead of feeding its own update loop.
+ */
+export function columnsEqual(
+  a: Record<string, string[]>,
+  b: Record<string, string[]>,
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const aIds = a[key];
+    const bIds = b[key];
+    if (!bIds || !aIds || aIds.length !== bIds.length) return false;
+    for (let i = 0; i < aIds.length; i++) {
+      if (aIds[i] !== bIds[i]) return false;
+    }
+  }
+  return true;
+}
+
 export function computePosition(ids: string[], activeId: string, issueMap: Map<string, Issue>): number {
   const idx = ids.indexOf(activeId);
   if (idx === -1) return 0;
