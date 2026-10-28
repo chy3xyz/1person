@@ -227,6 +227,7 @@ import {
   IssueSchema,
   IssueUsageSummarySchema,
   ListGitHubInstallationsResponseSchema,
+  ListLarkInstallationsResponseSchema,
   ListLabelsForIssueResponseSchema,
   ListLabelsResponseSchema,
   ListIssuesResponseSchema,
@@ -277,6 +278,7 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -2408,7 +2410,10 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/installations`);
+    return parseWithFallback(raw, ListLarkInstallationsResponseSchema, EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE, {
+      endpoint: "GET /api/workspaces/:id/lark/installations",
+    });
   }
 
   async beginLarkInstall(

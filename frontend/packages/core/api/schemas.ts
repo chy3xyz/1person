@@ -31,6 +31,7 @@ import type {
   IssueUsageSummary,
   Label,
   ListGitHubInstallationsResponse,
+  ListLarkInstallationsResponse,
   ListLabelsResponse,
   ListProjectResourcesResponse,
   ChatMessage,
@@ -961,23 +962,64 @@ export const EMPTY_ISSUE_LABELS_RESPONSE: IssueLabelsResponse = {
 };
 
 const GitHubInstallationSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
   installation_id: z.number().optional(),
-  account_login: z.string(),
-  account_type: z.string(),
-  account_avatar_url: z.string().nullable(),
-  created_at: z.string(),
+  account_login: z.string().default(""),
+  account_type: z.string().default(""),
+  account_avatar_url: z.string().nullable().default(null),
+  created_at: z.string().default(""),
   connected_by: z.string().optional(),
 }).loose();
 
 export const ListGitHubInstallationsResponseSchema = z.object({
   installations: z.array(GitHubInstallationSchema).default([]),
-  configured: z.boolean(),
+  configured: z.boolean().default(false),
   can_manage: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+// ---------------------------------------------------------------------------
+// Lark schemas.
+//
+// The installations endpoint answers with an envelope
+// (`{installations, configured, install_supported}`), NOT a bare array —
+// the same convention the GitHub installations endpoint uses. A bare
+// array left `listing.installations` undefined, and
+// `listing?.installations.find(...)` then threw a TypeError that took
+// the whole agent details page down into its error boundary.
+//
+// Every field is lenient: unknown enum values stay strings, missing
+// fields fall back to an empty string, and `installations` falls back to
+// `[]`. A drifted server degrades the Lark panel, it never white-screens
+// the page that embeds it.
+// ---------------------------------------------------------------------------
+export const LarkInstallationSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  app_id: z.string().default(""),
+  tenant_key: z.string().nullable().optional().default(""),
+  bot_open_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default(""),
+  region: z.string().optional().default(""),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
   installations: [],
   configured: false,
 };

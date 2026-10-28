@@ -653,4 +653,141 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
   });
+
+  describe("lark installations", () => {
+    function stubJson(body: unknown) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("parses the installations envelope", async () => {
+      const fetchMock = stubJson({
+        installations: [
+          {
+            id: "inst-1",
+            workspace_id: "ws-1",
+            agent_id: "agent-1",
+            app_id: "cli_app",
+            tenant_key: "tenant-1",
+            bot_open_id: "ou_1",
+            installer_user_id: "user-1",
+            status: "active",
+            region: "feishu",
+            installed_at: "2026-01-01T00:00:00Z",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        configured: true,
+        install_supported: false,
+      });
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.listLarkInstallations("ws-1");
+
+      expect(fetchMock.mock.calls[0]![0]).toBe(
+        "https://api.example.test/api/workspaces/ws-1/lark/installations",
+      );
+      expect(result.installations).toHaveLength(1);
+      expect(result.installations[0]!.agent_id).toBe("agent-1");
+      expect(result.installations[0]!.status).toBe("active");
+      expect(result.configured).toBe(true);
+      expect(result.install_supported).toBe(false);
+    });
+
+    // A bare array (what the server used to answer) left
+    // `listing.installations` undefined, and `listing?.installations.find(...)`
+    // threw a TypeError that took the whole agent details page into its
+    // error boundary. Every malformed shape must degrade to the empty
+    // envelope instead.
+    it.each([
+      ["a bare array", [{ id: "inst-1" }]],
+      ["a null installations field", { installations: null, configured: true }],
+      ["a non-array installations field", { installations: "nope", configured: true }],
+      ["a null body", null],
+    ])("falls back to the empty envelope for %s", async (_label, body) => {
+      stubJson(body);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.listLarkInstallations("ws-1");
+
+      expect(result.installations).toEqual([]);
+      expect(result.configured).toBe(false);
+    });
+
+    it("defaults a missing installations field to an empty list", async () => {
+      stubJson({ configured: true });
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.listLarkInstallations("ws-1");
+
+      expect(result.installations).toEqual([]);
+      expect(result.configured).toBe(true);
+    });
+  });
+
+  describe("github installations", () => {
+    function stubJson(body: unknown) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("parses the installations envelope", async () => {
+      stubJson({
+        installations: [
+          {
+            id: "row-1",
+            workspace_id: "ws-1",
+            installation_id: 4242,
+            account_login: "acme",
+            account_type: "Organization",
+            account_avatar_url: null,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+        ],
+        configured: true,
+        can_manage: true,
+      });
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.listGitHubInstallations("ws-1");
+
+      expect(result.installations).toHaveLength(1);
+      expect(result.installations[0]!.account_login).toBe("acme");
+      expect(result.installations[0]!.installation_id).toBe(4242);
+      expect(result.configured).toBe(true);
+      expect(result.can_manage).toBe(true);
+    });
+
+    // The server used to answer with a bare array, which failed
+    // validation and left the Settings → GitHub tab permanently empty
+    // (and its Connect button disabled, because `can_manage` never
+    // arrived).
+    it.each([
+      ["a bare array", [{ id: "row-1" }]],
+      ["a null installations field", { installations: null, configured: true }],
+      ["a non-array installations field", { installations: "nope", configured: true }],
+      ["a null body", null],
+    ])("falls back to the empty envelope for %s", async (_label, body) => {
+      stubJson(body);
+
+      const client = new ApiClient("https://api.example.test");
+      const result = await client.listGitHubInstallations("ws-1");
+
+      expect(result.installations).toEqual([]);
+      expect(result.configured).toBe(false);
+    });
+  });
 });
