@@ -25,14 +25,6 @@ pub const WebSocketConnection = zfinal.WebSocketConnection;
 
 pub const WebSocket = std.http.Server.WebSocket;
 
-/// Token info returned by `authenticate`. The user_id is optional
-/// because task, cloud-node, and personal access tokens don't carry
-/// one — they're accepted as opaque valid tokens for the realtime
-/// endpoint.
-pub const TokenInfo = struct {
-    user_id: ?[]const u8,
-};
-
 /// A single WebSocket connection and its metadata.
 pub const Conn = struct {
     allocator: std.mem.Allocator,

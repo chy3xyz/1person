@@ -502,9 +502,66 @@ else
     warn "websocket-client not installed; skipping WS tests 38-40"
 fi
 
+# ─── 41. WS first-frame auth ───────────────────────────────────────────
+# Native clients (React Native) have no cookie jar, so they carry their
+# token in the first frame instead of the upgrade URL. The server must
+# answer with an auth_ack and then deliver events on that socket.
+if [[ "${ws38}" == "ok" ]]; then
+    ws41=$(python3 - <<PYEOF 2>&1 || true
+import json, threading, time, urllib.request
+import websocket
+WS = "ws://127.0.0.1:${PORT}/ws?workspace_id=${WS_ID}"
+frames = []
+acked = threading.Event()
+def on_msg(ws, msg):
+    frames.append(msg)
+    if '"type":"auth_ack"' in msg:
+        acked.set()
+ws = websocket.WebSocketApp(WS, on_message=on_msg,
+                             on_error=lambda *a: None, on_close=lambda *a: None)
+t = threading.Thread(target=ws.run_forever, daemon=True); t.start()
+time.sleep(0.5)
+# The auth frame must be the FIRST frame on the socket.
+ws.send(json.dumps({"type": "auth", "payload": {"token": "${TOKEN}"}}))
+acked.wait(timeout=3.0)
+print("ACK=" + ("HIT" if acked.is_set() else "MISS"))
+ws.close()
+PYEOF
+)
+    ack_hit=$(echo "${ws41}" | grep "ACK=HIT" | head -1) || true
+    [[ -n "${ack_hit}" ]] && pass "41 WS first-frame auth" || fail "41 WS first-frame auth: ${ws41}"
+
+    # A bad token must be refused with an error frame, not accepted.
+    ws41b=$(python3 - <<PYEOF 2>&1 || true
+import json, threading, time
+import websocket
+WS = "ws://127.0.0.1:${PORT}/ws?workspace_id=${WS_ID}"
+frames = []
+done = threading.Event()
+def on_msg(ws, msg):
+    frames.append(msg)
+    if '"error"' in msg:
+        done.set()
+ws = websocket.WebSocketApp(WS, on_message=on_msg,
+                             on_error=lambda *a: None, on_close=lambda *a: None)
+t = threading.Thread(target=ws.run_forever, daemon=True); t.start()
+time.sleep(0.5)
+ws.send(json.dumps({"type": "auth", "payload": {"token": "not-a-real-token"}}))
+done.wait(timeout=3.0)
+joined = " ".join(frames)
+print("REJECT=" + ("HIT" if '"error":"invalid token"' in joined else "MISS"))
+ws.close()
+PYEOF
+)
+    reject_hit=$(echo "${ws41b}" | grep "REJECT=HIT" | head -1) || true
+    [[ -n "${reject_hit}" ]] && pass "42 WS rejects a bad token" || fail "42 WS rejects a bad token: ${ws41b}"
+else
+    warn "websocket-client not installed; skipping WS tests 41-42"
+fi
+
 echo
 if [[ ${failures} -eq 0 ]]; then
-    echo -e "${GREEN}All 40 issue endpoints responded correctly${RESET}"
+    echo -e "${GREEN}All 42 issue endpoints responded correctly${RESET}"
     exit 0
 else
     echo -e "${RED}${failures} check(s) failed${RESET}"

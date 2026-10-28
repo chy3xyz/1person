@@ -25,10 +25,10 @@
 
 const std = @import("std");
 const zfinal = @import("zfinal");
-const auth = @import("../../auth.zig");
 const redis = @import("../../redis.zig");
 const workspace = @import("../workspace/model.zig");
 const model = @import("model.zig");
+const ws_auth = @import("ws_auth.zig");
 
 const log = std.log.scoped(.realtime);
 
@@ -1023,30 +1023,15 @@ pub fn metrics() model.RoomManagerMetricsSnapshot {
     };
 }
 
+/// The token presented with the HTTP upgrade request, if any.
+///
+/// Two sources, in order: the `?token=` query parameter and the HttpOnly
+/// session cookie. When neither is present the connection falls back to
+/// the first-frame auth handshake — native clients have no cookie jar.
 fn getToken(ctx: *zfinal.Context) !?[]const u8 {
     const from_query = try ctx.getPara("token") orelse "";
     if (from_query.len > 0) return from_query;
     return try ctx.getCookie("1person_auth");
-}
-
-fn authenticate(ctx: *zfinal.Context) !?model.TokenInfo {
-    const allocator = ctx.allocator;
-    const token = try getToken(ctx) orelse return null;
-    const tt = auth.detectTokenType(token);
-    switch (tt) {
-        .jwt => {
-            const cfg = auth.getConfig() orelse return null;
-            const info = auth.validateToken(ctx.allocator, cfg, token) catch return null;
-            defer allocator.free(info.email);
-            return model.TokenInfo{ .user_id = info.user_id };
-        },
-        else => {
-            // Task, cloud-node and personal access tokens are
-            // accepted as opaque valid tokens for the realtime
-            // endpoint.
-            return model.TokenInfo{ .user_id = null };
-        },
-    }
 }
 
 fn resolveWorkspace(ctx: *zfinal.Context) !?[]const u8 {
@@ -1353,6 +1338,93 @@ fn startSubscriber(allocator: std.mem.Allocator, conn: *model.Conn) !bool {
     return true;
 }
 
+// ── WebSocket handshake authentication ──────────────────────────────────
+//
+// Error frames sent after the socket is already upgraded. The HTTP
+// status is long gone at that point, so the failure has to travel as a
+// frame — the same shape the upstream Go server uses.
+
+const auth_err_invalid_token = "{\"error\":\"invalid token\"}";
+const auth_err_expected_frame = "{\"error\":\"expected auth message as first frame\"}";
+const auth_err_read_error = "{\"error\":\"auth timeout or read error\"}";
+const auth_err_not_member = "{\"error\":\"not a member of this workspace\"}";
+const auth_err_db_unavailable = "{\"error\":\"database unavailable\"}";
+
+/// Write an error frame and close the socket. The write is best-effort:
+/// a peer that already went away gets the close, nothing more.
+fn sendAuthError(ws: *std.http.Server.WebSocket, payload: []const u8) void {
+    ws.writeMessage(payload, .text) catch {};
+}
+
+/// Read the first frame and treat it as the auth frame.
+///
+/// The frame must be `{"type":"auth","payload":{"token":"..."}}`. On
+/// success the resolved user id is written to `user_id` and the server
+/// answers with `auth_ack`. On failure an error frame is written, the
+/// socket is closed, and `false` is returned — the caller must not join
+/// a room.
+fn authenticateFirstFrame(
+    ws: *std.http.Server.WebSocket,
+    allocator: std.mem.Allocator,
+    workspace_id: []const u8,
+    user_id: *?[]const u8,
+) !bool {
+    const msg = ws.readSmallMessage() catch {
+        sendAuthError(ws, auth_err_read_error);
+        return false;
+    };
+    if (msg.opcode != .text and msg.opcode != .binary) {
+        sendAuthError(ws, auth_err_expected_frame);
+        return false;
+    }
+
+    // readSmallMessage's payload aliases the connection's input buffer and
+    // is invalidated by the next read — copy before parsing.
+    const text = try allocator.dupe(u8, msg.data);
+    defer allocator.free(text);
+
+    const token = (try ws_auth.parseAuthFrame(allocator, text)) orelse {
+        sendAuthError(ws, auth_err_expected_frame);
+        return false;
+    };
+    defer allocator.free(token);
+
+    const resolved = ws_auth.resolveUserId(allocator, token) catch |err| switch (err) {
+        error.DatabaseUnavailable => {
+            sendAuthError(ws, auth_err_db_unavailable);
+            return false;
+        },
+        else => return err,
+    };
+    const uid = resolved orelse {
+        sendAuthError(ws, auth_err_invalid_token);
+        return false;
+    };
+    errdefer allocator.free(uid);
+
+    switch (try ws_auth.checkMembership(workspace_id, uid)) {
+        .member, .no_db => {},
+        .not_member => {
+            sendAuthError(ws, auth_err_not_member);
+            return false;
+        },
+        .db_error => {
+            sendAuthError(ws, auth_err_db_unavailable);
+            return false;
+        },
+    }
+
+    // Hand the user id over to the caller only once the ack is on the
+    // wire — a failed write must not leave the caller owning a slice
+    // that was already released here.
+    ws.writeMessage("{\"type\":\"auth_ack\"}", .text) catch {
+        allocator.free(uid);
+        return false;
+    };
+    user_id.* = uid;
+    return true;
+}
+
 pub fn handleRealtime(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
 
@@ -1376,23 +1448,71 @@ pub fn handleRealtime(ctx: *zfinal.Context) !void {
     };
     defer allocator.free(workspace_id);
 
-    const token_info = try authenticate(ctx) orelse {
-        ctx.res_status = .unauthorized;
-        try ctx.renderJson(.{ .@"error" = "invalid_token" });
-        return;
-    };
-    defer if (token_info.user_id) |uid| allocator.free(uid);
+    // ── Pre-upgrade authentication ────────────────────────────────────
+    // A cookie or a `?token=` parameter proves the identity before the
+    // socket exists, so a bad token can be rejected with a plain status
+    // code instead of a frame.
+    var user_id: ?[]const u8 = null;
+    if (try getToken(ctx)) |token| {
+        user_id = ws_auth.resolveUserId(allocator, token) catch |err| switch (err) {
+            error.DatabaseUnavailable => {
+                ctx.res_status = .service_unavailable;
+                try ctx.renderJson(.{ .@"error" = "database_unavailable" });
+                return;
+            },
+            else => return err,
+        };
+        if (user_id == null) {
+            ctx.res_status = .unauthorized;
+            try ctx.renderJson(.{ .@"error" = "invalid_token" });
+            return;
+        }
+        switch (try ws_auth.checkMembership(workspace_id, user_id.?)) {
+            .member, .no_db => {},
+            .not_member => {
+                ctx.res_status = .forbidden;
+                try ctx.renderJson(.{ .@"error" = "not a member of this workspace" });
+                return;
+            },
+            .db_error => {
+                ctx.res_status = .service_unavailable;
+                try ctx.renderJson(.{ .@"error" = "database_unavailable" });
+                return;
+            },
+        }
+    }
+    defer if (user_id) |uid| allocator.free(uid);
 
     try ensureManager();
 
     var ws = try ctx.req.respondWebSocket(.{ .key = sec_key });
+
+    // `respondWebSocket` only writes the 101 response into the output
+    // buffer — it is not flushed until the first frame is written. The
+    // first-frame auth handshake below waits for the client to send its
+    // auth frame, and a client only does that once it has seen the 101.
+    // Without this flush the two sides wait on each other until the
+    // connection times out.
+    ws.flush() catch {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "websocket_handshake_failed" });
+        return;
+    };
+
+    // ── Post-upgrade authentication ───────────────────────────────────
+    // Native clients (React Native) have no cookie jar, so they carry
+    // their token in the first frame instead. The upgrade has to be
+    // allowed through for that to be possible at all.
+    if (user_id == null) {
+        if (!try authenticateFirstFrame(&ws, allocator, workspace_id, &user_id)) return;
+    }
 
     const conn = try allocator.create(model.Conn);
     conn.* = .{
         .allocator = allocator,
         .ws = &ws,
         .workspace_id = try allocator.dupe(u8, workspace_id),
-        .user_id = if (token_info.user_id) |uid| try allocator.dupe(u8, uid) else null,
+        .user_id = if (user_id) |uid| try allocator.dupe(u8, uid) else null,
     };
     errdefer {
         allocator.free(conn.workspace_id);
@@ -1406,7 +1526,6 @@ pub fn handleRealtime(ctx: *zfinal.Context) !void {
     _ = try startSubscriber(allocator, conn);
 
     log.info("websocket connected workspace={s} user={?s}", .{ conn.workspace_id, conn.user_id });
-    conn.sendText("{\"type\":\"connected\"}");
 
     while (true) {
         const msg = ws.readSmallMessage() catch |err| switch (err) {
@@ -1456,11 +1575,11 @@ pub fn handleRealtime(ctx: *zfinal.Context) !void {
         allocator.destroy(rc);
     }
 
+    log.info("websocket disconnected workspace={s} user={?s}", .{ workspace_id, conn.user_id });
+
     allocator.free(conn.workspace_id);
     if (conn.user_id) |uid| allocator.free(uid);
     allocator.destroy(conn);
-
-    log.info("websocket disconnected workspace={s} user={?s}", .{ workspace_id, token_info.user_id });
 }
 
 // ── RESP pub/sub framing tests ───────────────────────────────────────

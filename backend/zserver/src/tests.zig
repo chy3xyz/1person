@@ -130,6 +130,7 @@ test {
     _ = @import("modules/realtime/service.zig");
     _ = @import("modules/realtime/model.zig");
     _ = @import("modules/realtime/routes.zig");
+    _ = @import("modules/realtime/ws_auth.zig");
     _ = @import("modules/runtime/handler.zig");
     _ = @import("modules/runtime/service.zig");
     _ = @import("modules/runtime/model.zig");
