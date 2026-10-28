@@ -172,9 +172,8 @@ if [[ "${BU_N}" == "2" ]]; then pass "04 batchUpdate (n=2)"; else fail "04 batch
 qc_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
     -d "{\"title\":\"child of first\"}" \
     "${BASE}/api/issues/${ISSUE_ID}/quick-create")
-# quickCreate wraps the new Issue in `.{.data = child}` then
-# `response.ok` wraps again, so the shape is `{"data":{"data":{...}}}`.
-CHILD_ID=$(jget_path "${qc_body}" data.data.id)
+# `response.ok` wraps the payload once, so the shape is `{"data":{...}}`.
+CHILD_ID=$(jget_path "${qc_body}" data.id)
 cp_status=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/child-progress")
 if [[ "${cp_status}" == "200" ]]; then pass "05 childProgress (200)"; else fail "05 childProgress (${cp_status})"; fi
 
@@ -211,7 +210,9 @@ if [[ -n "${CHILD_ID}" ]]; then pass "11 quickCreate (id=${CHILD_ID})"; else fai
 # to `response.ok` which itself wraps in `data`.
 rr_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
     -d "{\"by\":\"user\",\"note\":\"go again\"}" "${BASE}/api/issues/${ISSUE_ID}/rerun")
-RR_OK=$(jget_path "${rr_body}" data.data.id)
+# Response shape: {"data":{...issue...}} — `response.ok` wraps the
+# upserted Issue once.
+RR_OK=$(jget_path "${rr_body}" data.id)
 if [[ "${RR_OK}" == "${ISSUE_ID}" ]]; then pass "12 rerun"; else fail "12 rerun: ${rr_body}"; fi
 
 # ─── 13. attachLabel (POST /api/issues/:id/labels) ───────────────────
@@ -266,7 +267,9 @@ if [[ "${lc_status}" == "200" ]]; then pass "16 listChildren (200)"; else fail "
 # the events array in `.{.data = events}` before `response.ok`
 # wraps that in `.{.data = …}` again.
 lt_body=$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}/timeline")
-LT_N=$(echo "${lt_body}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data', {}).get('data', [])))" 2>/dev/null || echo 0)
+# Response shape: {"data":[events…]} — upstream answers with a bare
+# array and `response.ok` wraps it once.
+LT_N=$(echo "${lt_body}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('data', [])))" 2>/dev/null || echo 0)
 if [[ "${LT_N}" -ge 2 ]]; then pass "17 listTimeline (events=${LT_N})"; else fail "17 listTimeline: ${lt_body}"; fi
 
 # ─── 18. listSubscribers (GET /api/issues/:id/subscribers) ───────────
@@ -277,10 +280,8 @@ if [[ "${ls_status}" == "200" ]]; then pass "18 listSubscribers (200)"; else fai
 as_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
     -d "{\"user_id\":\"u-1\",\"reason\":\"watching\"}" \
     "${BASE}/api/issues/${ISSUE_ID}/subscribers")
-# addSubscriber wraps the entry in `.{.data = entry}`, then
-# `response.ok` wraps that in `.{.data = ...}` again, so the full
-# shape is `{"data":{"data":{...}}}`.
-AS_ID=$(jget_path "${as_body}" data.data.user_id)
+# `response.ok` wraps the entry once: `{"data":{...}}`.
+AS_ID=$(jget_path "${as_body}" data.user_id)
 if [[ "${AS_ID}" == "u-1" ]]; then pass "19 addSubscriber"; else fail "19 addSubscriber: ${as_body}"; fi
 
 # ─── 20. removeSubscriber (DELETE /api/issues/:id/subscribers/:userId)
@@ -303,8 +304,8 @@ if [[ "${lr_status}" == "200" ]]; then pass "21 listReactions (200)"; else fail 
 ar_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
     -d "{\"actor_id\":\"${USER_ID}\",\"emoji\":\"thumbsup\"}" \
     "${BASE}/api/issues/${ISSUE_ID}/reactions")
-# addReaction: same double-wrap as addSubscriber.
-AR_ID=$(jget_path "${ar_body}" data.data.id)
+# addReaction: same single wrap as addSubscriber.
+AR_ID=$(jget_path "${ar_body}" data.id)
 if [[ -n "${AR_ID}" ]]; then pass "22 addReaction (id=${AR_ID})"; else fail "22 addReaction: ${ar_body}"; fi
 
 # ─── 23. removeReaction (DELETE /api/issues/:id/reactions/:reactionId)
@@ -328,9 +329,15 @@ sq_status=$(http_status -X POST -H "Content-Type: application/json" -H "${AUTH}"
     "${BASE}/api/issues/${ISSUE_ID}/squad-evaluated")
 if [[ "${sq_status}" == "200" ]]; then pass "26 squadEvaluated (200)"; else fail "26 squadEvaluated (${sq_status})"; fi
 
-# ─── 26b. squad_evaluated_at persisted on issue ──────────────────────
-se_at=$(jget_path "$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}")" data.squad_evaluated_at)
-if [[ -n "${se_at}" && "${se_at}" != "null" ]]; then pass "26b squad_evaluated_at persisted"; else fail "26b squad_evaluated_at missing"; fi
+# ─── 26b. squad-evaluated answers with its own payload ───────────────
+# `squad_evaluated_at` is not part of the issue payload: the upstream
+# Issue contract has no such field and the client never read it, so
+# the endpoint's own answer is what we assert on.
+sq_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+    -d "{\"evaluator_type\":\"agent\",\"evaluator_id\":\"a-1\",\"score\":0.9,\"summary\":\"looks good\"}" \
+    "${BASE}/api/issues/${ISSUE_ID}/squad-evaluated")
+se_eval=$(jget_path "${sq_body}" data.evaluated)
+if [[ "${se_eval}" == "True" ]]; then pass "26b squad-evaluated payload"; else fail "26b squad-evaluated payload: ${sq_body}"; fi
 
 # ─── 27. batchDelete (POST /api/issues/batch-delete) ─────────────────
 # batchDelete body uses the inline anon struct { issue_ids: [][]const u8 }
