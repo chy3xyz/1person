@@ -30,5 +30,10 @@ pub fn register(app: *zfinal.ZFinal) !void {
     try api.get("/:sessionId/pending-task", handler.getPendingChatTask);
     try api.post("/:sessionId/read", handler.markChatSessionRead);
 
-    try app.get("/api/chat/pending-tasks", handler.listPendingChatTasks);
+    // Registered outside the group above, so it needs the workspace
+    // interceptor on its own: without it the request carries only
+    // X-Workspace-Slug (the client never sends X-Workspace-ID), the slug is
+    // never resolved to a workspace id, and the handler answered 400
+    // "workspace_id is required".
+    try app.getWithInterceptors("/api/chat/pending-tasks", handler.listPendingChatTasks, &.{workspace_mw.RequireWorkspaceMember});
 }
