@@ -133,6 +133,16 @@ fn messageResponseFromRow(rs: *zfinal.ResultSet, row: usize) model.ChatMessageRe
     };
 }
 
+/// Columns every chat_session read returns.
+///
+/// `unread_since` (migration 040) is the unread marker: it holds the
+/// timestamp of the first unread assistant message and is NULL when there
+/// is nothing unread. `has_unread` is derived from it because the response
+/// shape is a boolean — reading a `has_unread` column instead failed with
+/// 42703, because no migration ever created one.
+pub const chatSessionColumns =
+    "id, workspace_id, agent_id, creator_id, title, status, (unread_since IS NOT NULL) AS has_unread, created_at, updated_at";
+
 fn loadSession(ctx: *zfinal.Context, session_id: []const u8) !?model.ChatSessionEntry {
     const workspace_id = getWorkspaceId(ctx) orelse return null;
     const user_id = getUserId(ctx) orelse return null;
@@ -140,7 +150,7 @@ fn loadSession(ctx: *zfinal.Context, session_id: []const u8) !?model.ChatSession
     if (model.borrowDb()) |d| {
         defer deps.releaseBack(d);
         var rs = try d.queryParams(
-            "SELECT id, workspace_id, agent_id, creator_id, title, status, has_unread, created_at, updated_at " ++
+            "SELECT " ++ chatSessionColumns ++ " " ++
                 "FROM chat_session WHERE id = $1::uuid AND workspace_id = $2::uuid",
             &[_]SqlParam{ .{ .text = session_id }, .{ .text = workspace_id } },
         );
@@ -237,7 +247,7 @@ pub fn listChatSessions(ctx: *zfinal.Context) !void {
     if (model.borrowDb()) |d| {
         defer deps.releaseBack(d);
         var rs = try d.queryParams(
-            "SELECT id, workspace_id, agent_id, creator_id, title, status, has_unread, created_at, updated_at " ++
+            "SELECT " ++ chatSessionColumns ++ " " ++
                 "FROM chat_session WHERE workspace_id = $1::uuid AND creator_id = $2::uuid " ++
                 "ORDER BY updated_at DESC",
             &[_]SqlParam{ .{ .text = workspace_id }, .{ .text = user_id } },
@@ -309,7 +319,7 @@ pub fn createChatSession(ctx: *zfinal.Context) !void {
         var rs = try d.queryParams(
             "INSERT INTO chat_session (workspace_id, agent_id, creator_id, title) " ++
                 "VALUES ($1::uuid, $2::uuid, $3::uuid, $4) " ++
-                "RETURNING id, workspace_id, agent_id, creator_id, title, status, has_unread, created_at, updated_at",
+                "RETURNING " ++ chatSessionColumns,
             &[_]SqlParam{
                 .{ .text = workspace_id },
                 .{ .text = req.agent_id },
@@ -398,7 +408,7 @@ pub fn updateChatSession(ctx: *zfinal.Context) !void {
         var rs = try d.queryParams(
             "UPDATE chat_session SET title = $4, updated_at = now() " ++
                 "WHERE id = $1::uuid AND workspace_id = $2::uuid AND creator_id = $3::uuid " ++
-                "RETURNING id, workspace_id, agent_id, creator_id, title, status, has_unread, created_at, updated_at",
+                "RETURNING " ++ chatSessionColumns,
             &[_]SqlParam{
                 .{ .text = session_id },
                 .{ .text = workspace_id },
@@ -976,7 +986,7 @@ pub fn markChatSessionRead(ctx: *zfinal.Context) !void {
     if (model.borrowDb()) |d| {
         defer deps.releaseBack(d);
         try d.execParams(
-            "UPDATE chat_session SET has_unread = false, updated_at = now() " ++
+            "UPDATE chat_session SET unread_since = NULL, updated_at = now() " ++
                 "WHERE id = $1::uuid AND workspace_id = $2::uuid AND creator_id = $3::uuid",
             &[_]SqlParam{
                 .{ .text = session_id },

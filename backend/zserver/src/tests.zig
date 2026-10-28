@@ -68,6 +68,7 @@ test {
     _ = @import("modules/billing/handler.zig");
     _ = @import("modules/chat/handler.zig");
     _ = @import("modules/chat/service.zig");
+    _ = @import("modules/chat/service_test.zig");
     _ = @import("modules/chat/model.zig");
     _ = @import("modules/chat/routes.zig");
     _ = @import("modules/comment/handler.zig");
