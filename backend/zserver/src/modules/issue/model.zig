@@ -1186,6 +1186,124 @@ pub const subscriberSelectSql =
     "SELECT issue_id::text, user_type, user_id::text, reason, created_at " ++
     "FROM issue_subscriber WHERE issue_id = $1::uuid ORDER BY created_at ASC";
 
+/// The agent that runs a squad's work: the squad's leader. Returns
+/// `null` when the squad does not exist in this workspace or is
+/// archived. The returned id is copied into the DB allocator so it
+/// outlives the borrowed result set.
+pub fn squadLeaderAgentId(workspace_id: []const u8, squad_id: []const u8) ?[]const u8 {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT leader_id::text FROM squad " ++
+            "WHERE id = $1::uuid AND workspace_id = $2::uuid AND archived_at IS NULL",
+        &[_]SqlParam{
+            .{ .text = squad_id },
+            .{ .text = workspace_id },
+        },
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    const raw = rs.rows.items[0].getText(0) orelse return null;
+    return db.allocator.dupe(u8, raw) catch null;
+}
+
+/// How an agent is wired to a runtime, and whether that runtime can take
+/// work right now.
+///
+/// Quick-create needs the agent to run NOW: a task queued for an offline
+/// runtime would sit in the queue until the machine came back, so the
+/// endpoint refuses instead of pretending it worked. The three failure
+/// modes stay distinguishable because the UI phrases them differently
+/// ("bind a runtime" vs "reconnect the machine").
+pub const AgentRuntimeBinding = struct {
+    /// The runtime the agent is bound to. Empty when the agent has none.
+    runtime_id: []const u8,
+    /// The runtime's liveness (`online` / `offline`). Empty when the
+    /// runtime row is gone.
+    runtime_status: []const u8,
+    /// True when the agent itself is archived.
+    agent_archived: bool,
+
+    pub fn isOnline(b: AgentRuntimeBinding) bool {
+        return b.runtime_id.len > 0 and std.mem.eql(u8, b.runtime_status, "online");
+    }
+};
+
+/// Read an agent's runtime binding. Returns `null` when the agent does
+/// not exist in this workspace.
+pub fn agentRuntimeBinding(workspace_id: []const u8, agent_id: []const u8) ?AgentRuntimeBinding {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT COALESCE(a.runtime_id::text, ''), COALESCE(r.status, ''), " ++
+            "(a.archived_at IS NOT NULL) " ++
+            "FROM agent a LEFT JOIN agent_runtime r ON r.id = a.runtime_id " ++
+            "WHERE a.id = $1::uuid AND a.workspace_id = $2::uuid",
+        &[_]SqlParam{
+            .{ .text = agent_id },
+            .{ .text = workspace_id },
+        },
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    const runtime_id = rs.rows.items[0].getText(0) orelse "";
+    const runtime_status = rs.rows.items[0].getText(1) orelse "";
+    const archived = (rs.rows.items[0].getBool(2) catch null) orelse false;
+    return AgentRuntimeBinding{
+        .runtime_id = db.allocator.dupe(u8, runtime_id) catch "",
+        .runtime_status = db.allocator.dupe(u8, runtime_status) catch "",
+        .agent_archived = archived,
+    };
+}
+
+/// Queue a task for an agent to work on an issue. Returns the new task
+/// id (copied into the DB allocator) or `null` when the insert failed.
+pub fn enqueueAgentTask(
+    agent_id: []const u8,
+    runtime_id: []const u8,
+    issue_id: []const u8,
+    initiator_id: []const u8,
+) ?[]const u8 {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "INSERT INTO agent_task_queue " ++
+            "(agent_id, runtime_id, issue_id, status, priority, initiator_user_id) " ++
+            "VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, 'queued', 0, NULLIF($4, '')::uuid) " ++
+            "RETURNING id",
+        &[_]SqlParam{
+            .{ .text = agent_id },
+            .{ .text = runtime_id },
+            .{ .text = issue_id },
+            .{ .text = initiator_id },
+        },
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    const raw = rs.rows.items[0].getText(0) orelse return null;
+    return db.allocator.dupe(u8, raw) catch null;
+}
+
+/// Derive an issue title from a free-form prompt: the first non-empty
+/// line, capped at 120 bytes on a UTF-8 boundary. The full prompt stays
+/// in the issue body.
+pub fn deriveIssueTitle(prompt: []const u8) []const u8 {
+    var lines = std.mem.splitScalar(u8, prompt, '\n');
+    var title: []const u8 = "";
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, &std.ascii.whitespace);
+        if (trimmed.len == 0) continue;
+        title = trimmed;
+        break;
+    }
+    if (title.len == 0) return "New issue";
+    if (title.len <= 120) return title;
+    // Do not split a multi-byte character in half.
+    var end: usize = 120;
+    while (end > 0 and (title[end] & 0xC0) == 0x80) end -= 1;
+    return title[0..end];
+}
+
 /// Resolve the kind of an assignee id: "agent", "member", or `null`
 /// when the id belongs to neither (an unassigned issue, or an id that
 /// was deleted). The wire contract carries `assignee_type` next to

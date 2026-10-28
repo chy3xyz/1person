@@ -256,6 +256,27 @@ test "a list of timeline entries serialises as a JSON array" {
     try std.testing.expectEqual(@as(usize, 2), parsed.value.array.items.len);
 }
 
+test "issue title is derived from the first non-empty line of the prompt" {
+    try std.testing.expectEqualStrings("Do the thing", model.deriveIssueTitle("Do the thing\nmore detail"));
+    try std.testing.expectEqualStrings("Do the thing", model.deriveIssueTitle("\n\n  Do the thing  \nmore"));
+    try std.testing.expectEqualStrings("New issue", model.deriveIssueTitle("   \n  \n"));
+}
+
+test "a derived title never splits a multi-byte character" {
+    // 60 CJK characters is 180 bytes — the 120-byte cap lands in the
+    // middle of a character.
+    var buf: [180]u8 = undefined;
+    for (0..60) |i| @memcpy(buf[i * 3 ..][0..3], "任");
+    const prompt = buf[0..180];    const title = model.deriveIssueTitle(prompt);
+
+    try std.testing.expect(title.len <= 120);
+    // The title must still be valid UTF-8 — cutting mid-character would
+    // produce a broken string that renders as a replacement glyph.
+    try std.testing.expect(std.unicode.utf8ValidateSlice(title));
+    // 120 bytes of 3-byte characters is 40 whole characters.
+    try std.testing.expectEqual(@as(usize, 120), title.len);
+}
+
 test "the timeline and subscriber list queries resolve against the live schema" {
     const db = (try testDb()) orelse return error.SkipZigTest;
     defer deps.releaseBack(db);
@@ -271,4 +292,25 @@ test "the timeline and subscriber list queries resolve against the live schema" 
         &[_]zfinal.SqlParam{.{ .text = "00000000-0000-0000-0000-000000000000" }},
     );
     defer rs2.deinit();
+}
+
+test "the agent task insert resolves against the live schema" {
+    const db = (try testDb()) orelse return error.SkipZigTest;
+    defer deps.releaseBack(db);
+
+    // EXPLAIN validates the statement (column names, types) without
+    // inserting a row.
+    var rs = try db.queryParams(
+        "EXPLAIN INSERT INTO agent_task_queue " ++
+            "(agent_id, runtime_id, issue_id, status, priority, initiator_user_id) " ++
+            "VALUES ($1::uuid, $2::uuid, NULLIF($3, '')::uuid, 'queued', 0, NULLIF($4, '')::uuid) " ++
+            "RETURNING id",
+        &[_]zfinal.SqlParam{
+            .{ .text = "00000000-0000-0000-0000-000000000000" },
+            .{ .text = "00000000-0000-0000-0000-000000000000" },
+            .{ .text = "" },
+            .{ .text = "00000000-0000-0000-0000-000000000000" },
+        },
+    );
+    defer rs.deinit();
 }

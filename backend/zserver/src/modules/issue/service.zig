@@ -882,6 +882,119 @@ const QuickCreateRequest = struct {
     assignee_id: []const u8 = "",
 };
 
+/// `POST /api/issues/quick-create` — "ask an agent to do this".
+///
+/// Upstream creates an issue from the prompt and queues a task for the
+/// picked agent (or the picked squad's leader), answering with the task
+/// id. The zserver had no such endpoint: the frontend's "new issue"
+/// modal hit a 405, so the primary create-issue entry point of the app
+/// did nothing.
+const QuickCreatePromptRequest = struct {
+    agent_id: ?[]const u8 = null,
+    squad_id: ?[]const u8 = null,
+    prompt: []const u8 = "",
+    project_id: ?[]const u8 = null,
+    parent_issue_id: ?[]const u8 = null,
+    attachment_ids: []const []const u8 = &.{},
+};
+
+/// 422 with a stable error code, so the modal can branch on `code` and
+/// tell the user what to fix ("bind a runtime" vs "reconnect the
+/// machine") instead of parsing a human-readable string.
+fn writeAgentUnavailable(ctx: *zfinal.Context, reason: []const u8, reason_code: []const u8) !void {
+    ctx.res_status = .unprocessable_entity;
+    try ctx.renderJson(.{
+        .code = "agent_unavailable",
+        .@"error" = reason,
+        .reason = reason,
+        .reason_code = reason_code,
+    });
+}
+
+pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
+    const workspace_id = try requireWorkspaceId(ctx);
+    const parsed = try validation.validateJson(QuickCreatePromptRequest, ctx);
+    defer parsed.deinit();
+    const req = parsed.value;
+
+    const prompt = std.mem.trim(u8, req.prompt, &std.ascii.whitespace);
+    if (prompt.len == 0) {
+        try response.err(ctx, .bad_request, "prompt is required", 40021);
+        return;
+    }
+
+    const agent_id = req.agent_id orelse "";
+    const squad_id = req.squad_id orelse "";
+    if ((agent_id.len == 0) == (squad_id.len == 0)) {
+        try response.err(ctx, .bad_request, "exactly one of agent_id or squad_id is required", 40021);
+        return;
+    }
+
+    const actor = resolveActor(ctx);
+
+    // A squad pick runs on the squad's leader agent.
+    const target_agent_id = if (squad_id.len > 0)
+        (model.squadLeaderAgentId(workspace_id, squad_id) orelse {
+            try response.err(ctx, .not_found, "squad not found", 40401);
+            return;
+        })
+    else
+        agent_id;
+
+    // The task has to be runnable right now — queueing it for an offline
+    // runtime would leave it sitting in the queue forever. The three
+    // reasons stay distinguishable because the modal phrases them
+    // differently ("bind a runtime" vs "reconnect the machine").
+    const binding = model.agentRuntimeBinding(workspace_id, target_agent_id) orelse {
+        try writeAgentUnavailable(ctx, "agent not found in this workspace", "agent_not_found");
+        return;
+    };
+    if (binding.agent_archived) {
+        try writeAgentUnavailable(ctx, "agent is archived", "agent_archived");
+        return;
+    }
+    if (binding.runtime_id.len == 0) {
+        try writeAgentUnavailable(ctx, "agent is not bound to a runtime", "agent_runtime_required");
+        return;
+    }
+    if (!std.mem.eql(u8, binding.runtime_status, "online")) {
+        try writeAgentUnavailable(ctx, "agent's runtime is offline", "runtime_offline");
+        return;
+    }
+
+    const created = model.insertIssue(
+        workspace_id,
+        model.deriveIssueTitle(prompt),
+        prompt,
+        model.DEFAULT_STATE,
+        req.project_id orelse "",
+        req.parent_issue_id orelse "",
+        target_agent_id,
+        "agent",
+        actor.actor_id,
+        actor.actor_type,
+    ) orelse {
+        try response.err(ctx, .internal_server_error, "failed to create issue", 50010);
+        return;
+    };
+
+    const task_id = model.enqueueAgentTask(
+        target_agent_id,
+        binding.runtime_id,
+        created.id,
+        actor.actor_id,
+    ) orelse {
+        try response.err(ctx, .internal_server_error, "failed to enqueue agent task", 50011);
+        return;
+    };
+
+    publishIssueEvent(ctx.allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, created.id);
+
+    // The client reads `task_id` from the payload; `response.ok` already
+    // wraps it in the `{"data": …}` envelope.
+    try response.ok(ctx, .{ .task_id = task_id });
+}
+
 pub fn quickCreate(ctx: *zfinal.Context) !void {
     const parent_id = try response.parseStringId(ctx, "id");
     const workspace_id = try requireWorkspaceId(ctx);

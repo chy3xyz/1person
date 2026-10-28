@@ -60,6 +60,10 @@ pub fn quickCreate(ctx: *zfinal.Context) !void {
     try service.quickCreate(ctx);
 }
 
+pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
+    try service.quickCreateFromPrompt(ctx);
+}
+
 pub fn rerun(ctx: *zfinal.Context) !void {
     try service.rerun(ctx);
 }
