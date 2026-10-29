@@ -149,7 +149,7 @@ pub fn mintDaemonToken(ctx: *zfinal.Context) !void {
     const token_hash = try auth_lib.hashToken(allocator, token);
     defer allocator.free(token_hash);
 
-    if (!model.insertDaemonToken(req.workspace_id, daemon_id, token_hash, ttl_days)) {
+    if (!model.insertDaemonToken(req.workspace_id, daemon_id, token_hash, ttl_days, user_id)) {
         ctx.res_status = .internal_server_error;
         try ctx.renderJson(.{ .@"error" = "failed to store daemon token" });
         return;
@@ -181,6 +181,40 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
 
     const daemon_id = try generateId(allocator, req.runtime_id);
 
+    const name = if (req.name) |n| try memDup(n) else try memDup("daemon");
+
+    // The token carries the identity the runtime row must be owned by:
+    // the workspace it is bound to and the member who paired the
+    // machine. Without them the runtime stays ownerless, and an
+    // ownerless runtime is invisible to the picker's "mine" filter and
+    // marked locked — the daemon would be running but unusable.
+    //
+    // A token minted before the owner column existed has no owner; fall
+    // back to the workspace owner so an already-paired daemon still
+    // becomes usable.
+    const token_workspace_id = ctx.attributes.get("daemon_workspace_id") orelse "";
+    const token_owner_id = ctx.attributes.get("daemon_owner_id") orelse "";
+
+    if (token_workspace_id.len > 0) {
+        // A runtime belongs to exactly one workspace. Refuse to re-point
+        // a row that already lives in another workspace — that would let
+        // a daemon from workspace B hijack workspace A's machine.
+        if (model.runtimeWorkspaceId(req.runtime_id)) |existing_ws| {
+            if (!std.mem.eql(u8, existing_ws, token_workspace_id)) {
+                ctx.res_status = .bad_request;
+                try ctx.renderJson(.{ .@"error" = "runtime_id belongs to another workspace" });
+                return;
+            }
+        }
+
+        const owner_id = if (token_owner_id.len > 0)
+            token_owner_id
+        else
+            model.workspaceOwnerId(token_workspace_id) orelse "";
+
+        _ = model.upsertRuntimeForDaemon(req.runtime_id, token_workspace_id, owner_id, name);
+    }
+
     // A registering daemon brings its runtime online (DB mode). Mirrors
     // the Go daemonws handshake, which flips agent_runtime to online on
     // connect so runtime-scoped requests (update/models/local-skills)
@@ -202,7 +236,6 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
 
-    const name = if (req.name) |n| try memDup(n) else try memDup("daemon");
     const runtime_id_dup = try memDup(req.runtime_id);
     try mem_daemons.?.put(daemon_id, model.DaemonEntry{
         .id = try memDup(daemon_id),

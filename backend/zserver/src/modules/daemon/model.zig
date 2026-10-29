@@ -85,20 +85,95 @@ pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
 }
 
 /// Insert a minted daemon token (SHA-256 hash of the full 1d_ token)
-/// into the daemon_token table. Returns true on success.
-pub fn insertDaemonToken(workspace_id: []const u8, daemon_id: []const u8, token_hash: []const u8, ttl_days: i64) bool {
+/// into the daemon_token table. `owner_id` records the member who paired
+/// the machine — it is what the runtime row inherits at registration.
+/// Returns true on success.
+pub fn insertDaemonToken(workspace_id: []const u8, daemon_id: []const u8, token_hash: []const u8, ttl_days: i64, owner_id: []const u8) bool {
     const db = borrowDb() orelse return false;
     defer deps.releaseBack(db);
     const sql =
-        "INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, expires_at) " ++
-        "VALUES ($1, $2::uuid, $3, now() + make_interval(days => $4))";
+        "INSERT INTO daemon_token (token_hash, workspace_id, daemon_id, owner_id, expires_at) " ++
+        "VALUES ($1, $2::uuid, $3, $4::uuid, now() + make_interval(days => $5))";
     db.execParams(sql, &[_]SqlParam{
         .{ .text = token_hash },
         .{ .text = workspace_id },
         .{ .text = daemon_id },
+        .{ .text = owner_id },
         .{ .int = ttl_days },
     }) catch return false;
     return true;
+}
+
+/// Register the runtime row a daemon serves.
+///
+/// Upstream parity: `server/internal/handler/daemon.go` upserts
+/// `agent_runtime` at registration and writes `owner_id` with a
+/// `required_owner_id` fence — a re-registering daemon must not steal a
+/// row that already has an owner. The same fence is reproduced here:
+/// `owner_id = COALESCE(agent_runtime.owner_id, EXCLUDED.owner_id)`
+/// keeps the first owner and only fills in an ownerless row.
+///
+/// `workspace_id` is deliberately NOT updated on conflict: a runtime
+/// belongs to exactly one workspace, and a daemon presenting a token
+/// for another workspace must not be able to re-point somebody else's
+/// row. The caller checks that case before calling this.
+///
+/// Returns false when the DB write fails.
+pub fn upsertRuntimeForDaemon(
+    runtime_id: []const u8,
+    workspace_id: []const u8,
+    owner_id: []const u8,
+    name: []const u8,
+) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    const sql =
+        "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, status, owner_id, visibility) " ++
+        "VALUES ($1::uuid, $2::uuid, $3, 'local', 'auto', 'online', $4::uuid, 'private') " ++
+        "ON CONFLICT (id) DO UPDATE SET " ++
+        "status = 'online', " ++
+        "name = COALESCE(NULLIF(EXCLUDED.name, ''), agent_runtime.name), " ++
+        "owner_id = COALESCE(agent_runtime.owner_id, EXCLUDED.owner_id), " ++
+        "updated_at = now()";
+    db.execParams(sql, &[_]SqlParam{
+        .{ .text = runtime_id },
+        .{ .text = workspace_id },
+        .{ .text = name },
+        .{ .text = owner_id },
+    }) catch return false;
+    return true;
+}
+
+/// Read the workspace a runtime row belongs to. Returns null when no
+/// row with that id exists.
+pub fn runtimeWorkspaceId(runtime_id: []const u8) ?[]const u8 {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT workspace_id::text FROM agent_runtime WHERE id = $1::uuid",
+        &[_]SqlParam{.{ .text = runtime_id }},
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    return rs.rows.items[0].getText(0);
+}
+
+/// Read the owner of a workspace. Used as the fallback owner for a
+/// daemon token minted before the owner column existed. The fork stores
+/// the workspace owner in `member.role = 'owner'`, not on the workspace
+/// row.
+pub fn workspaceOwnerId(workspace_id: []const u8) ?[]const u8 {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT user_id::text FROM member " ++
+        "WHERE workspace_id = $1::uuid AND role = 'owner' " ++
+        "ORDER BY created_at LIMIT 1",
+        &[_]SqlParam{.{ .text = workspace_id }},
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    return rs.rows.items[0].getText(0);
 }
 
 pub const TaskProgressRequest = struct {

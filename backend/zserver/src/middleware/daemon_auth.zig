@@ -104,7 +104,8 @@ fn verifyDaemonToken(ctx: *zfinal.Context, token: []const u8, daemon_id: []const
     defer deps.releaseBack(db);
 
     var rs = db.queryParams(
-        "SELECT daemon_id FROM daemon_token WHERE token_hash = $1 AND expires_at > now()",
+        "SELECT daemon_id, workspace_id::text, COALESCE(owner_id::text, '') " ++
+        "FROM daemon_token WHERE token_hash = $1 AND expires_at > now()",
         &[_]zfinal.SqlParam{.{ .text = hash }},
     ) catch {
         log.err("daemon-token verification query failed", .{});
@@ -129,6 +130,16 @@ fn verifyDaemonToken(ctx: *zfinal.Context, token: []const u8, daemon_id: []const
         try ctx.renderJson(.{ .@"error" = "invalid_token" });
         return false;
     }
+
+    // The token also carries the identity the runtime row must be owned
+    // by: the workspace it is bound to, and the member who paired the
+    // machine. Upstream reads both off the request context
+    // (`DaemonTokenOwnerIDFromContext`) and stamps them onto the
+    // runtime row at registration.
+    const workspace_id = rs.rows.items[0].getText(1) orelse "";
+    if (workspace_id.len > 0) try ctx.setAttr("daemon_workspace_id", workspace_id);
+    const owner_id = rs.rows.items[0].getText(2) orelse "";
+    if (owner_id.len > 0) try ctx.setAttr("daemon_owner_id", owner_id);
     return true;
 }
 
