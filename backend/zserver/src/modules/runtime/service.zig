@@ -275,18 +275,22 @@ pub fn updateAgentRuntime(ctx: *zfinal.Context) !void {
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
 
-        const gop = try mem_runtimes.?.getOrPut(runtime_id);
-        if (!gop.found_existing) {
+        // Look the runtime up WITHOUT inserting it. The map outlives
+        // the request, but `runtime_id` points into the request
+        // context — a `getOrPut` would store that pointer as the map
+        // key and leave a dangling key behind, which the next lookup
+        // compares against.
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
+            ctx.res_status = .not_found;
+            try ctx.renderJson(.{ .@"error" = "runtime not found" });
+            return;
+        };
+        if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;
         }
-        if (!std.mem.eql(u8, gop.value_ptr.*.workspace_id, workspace_id)) {
-            ctx.res_status = .not_found;
-            try ctx.renderJson(.{ .@"error" = "runtime not found" });
-            return;
-        }
-        if (!model.canEditRuntime(null, user_id, gop.value_ptr.*.owner_id)) {
+        if (!model.canEditRuntime(null, user_id, entry.owner_id)) {
             ctx.res_status = .forbidden;
             try ctx.renderJson(.{ .@"error" = "you can only edit your own runtimes" });
             return;
@@ -297,12 +301,12 @@ pub fn updateAgentRuntime(ctx: *zfinal.Context) !void {
                 try ctx.renderJson(.{ .@"error" = "visibility must be 'private' or 'public'" });
                 return;
             }
-            memAlloc().free(gop.value_ptr.*.visibility);
-            gop.value_ptr.*.visibility = try memDup(v);
-            memAlloc().free(gop.value_ptr.*.updated_at);
-            gop.value_ptr.*.updated_at = try nowString();
+            memAlloc().free(entry.visibility);
+            entry.visibility = try memDup(v);
+            memAlloc().free(entry.updated_at);
+            entry.updated_at = try nowString();
         }
-        try ctx.renderJson(model.runtimeResponseFromEntry(gop.value_ptr.*));
+        try ctx.renderJson(model.runtimeResponseFromEntry(entry.*));
     }
 }
 
@@ -368,7 +372,7 @@ pub fn deleteAgentRuntime(ctx: *zfinal.Context) !void {
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
 
-        const entry = mem_runtimes.?.get(runtime_id) orelse {
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;
@@ -463,7 +467,7 @@ pub fn archiveAgentsAndDeleteRuntime(ctx: *zfinal.Context) !void {
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
 
-        const entry = mem_runtimes.?.get(runtime_id) orelse {
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;
@@ -1104,7 +1108,7 @@ pub fn initiateUpdate(ctx: *zfinal.Context) !void {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
-        const entry = mem_runtimes.?.get(runtime_id) orelse {
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;
@@ -1191,7 +1195,7 @@ pub fn initiateListModels(ctx: *zfinal.Context) !void {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
-        const entry = mem_runtimes.?.get(runtime_id) orelse {
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;
@@ -1285,7 +1289,7 @@ pub fn initiateListLocalSkills(ctx: *zfinal.Context) !void {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
-        const entry = mem_runtimes.?.get(runtime_id) orelse {
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;
@@ -1398,7 +1402,7 @@ pub fn initiateImportLocalSkill(ctx: *zfinal.Context) !void {
         try memInit();
         try mem_mutex.lock(zfinal.io_instance.io);
         defer mem_mutex.unlock(zfinal.io_instance.io);
-        const entry = mem_runtimes.?.get(runtime_id) orelse {
+        const entry = mem_runtimes.?.getPtr(runtime_id) orelse {
             ctx.res_status = .not_found;
             try ctx.renderJson(.{ .@"error" = "runtime not found" });
             return;

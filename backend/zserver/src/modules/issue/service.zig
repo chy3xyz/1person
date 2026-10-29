@@ -48,8 +48,18 @@ var mem_issue_counter: std.StringHashMap(i32) = std.StringHashMap(i32).init(mode
 /// Caller must hold `mem_mutex` (or, more commonly, call it from
 /// inside the no-DB `createIssue` path which already does).
 fn memNextIssueNumber(workspace_id: []const u8) i32 {
+    // The map stores its key by reference. `workspace_id` points into
+    // the request context, which is released when the request ends — a
+    // stored reference dangles, and the NEXT lookup compares against
+    // that freed key and segfaults. Copy the key into the map's own
+    // allocator, the same way the other long-lived maps in this
+    // codebase do (`gop.key_ptr.* = memDup(...)`).
+    const a = mem_issue_counter.allocator;
     const gop = mem_issue_counter.getOrPut(workspace_id) catch return 0;
-    if (!gop.found_existing) gop.value_ptr.* = 0;
+    if (!gop.found_existing) {
+        gop.key_ptr.* = a.dupe(u8, workspace_id) catch return 0;
+        gop.value_ptr.* = 0;
+    }
     gop.value_ptr.* += 1;
     return gop.value_ptr.*;
 }

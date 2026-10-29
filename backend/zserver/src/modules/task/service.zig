@@ -88,7 +88,7 @@ pub fn listTaskMessagesByUser(ctx: *zfinal.Context) !void {
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
 
-    const entry = mem_tasks.?.get(task_id) orelse {
+    const entry = mem_tasks.?.getPtr(task_id) orelse {
         ctx.res_status = .not_found;
         try ctx.renderJson(.{ .@"error" = "task not found" });
         return;
@@ -148,20 +148,23 @@ pub fn cancelTaskByUser(ctx: *zfinal.Context) !void {
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
 
-    const gop = mem_tasks.?.getOrPut(task_id) catch |err| return err;
-    if (!gop.found_existing) {
+    // Look the task up WITHOUT inserting it. The map outlives the
+    // request, but `task_id` points into the request context — a
+    // `getOrPut` would store that pointer as the map key and leave a
+    // dangling key behind, which the next lookup compares against.
+    const entry = mem_tasks.?.getPtr(task_id) orelse {
+        ctx.res_status = .not_found;
+        try ctx.renderJson(.{ .@"error" = "task not found" });
+        return;
+    };
+    if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) {
         ctx.res_status = .not_found;
         try ctx.renderJson(.{ .@"error" = "task not found" });
         return;
     }
-    if (!std.mem.eql(u8, gop.value_ptr.*.workspace_id, workspace_id)) {
-        ctx.res_status = .not_found;
-        try ctx.renderJson(.{ .@"error" = "task not found" });
-        return;
-    }
-    memAlloc().free(gop.value_ptr.*.status);
-    gop.value_ptr.*.status = try memDup("cancelled");
-    memAlloc().free(gop.value_ptr.*.updated_at);
-    gop.value_ptr.*.updated_at = try nowString();
-    try ctx.renderJson(model.taskResponseFromEntry(gop.value_ptr.*));
+    memAlloc().free(entry.status);
+    entry.status = try memDup("cancelled");
+    memAlloc().free(entry.updated_at);
+    entry.updated_at = try nowString();
+    try ctx.renderJson(model.taskResponseFromEntry(entry.*));
 }
