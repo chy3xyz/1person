@@ -149,7 +149,19 @@ export function CreateAgentDialog({
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !selectedRuntime || selectedRuntimeLocked) return;
+    if (!name.trim()) return;
+    if (!selectedRuntime) {
+      // A runtime is required — upstream refuses the create without one
+      // too. The button is disabled in this state, but Enter reaches
+      // this handler as well, and returning in silence left the user
+      // pressing keys with no response at all.
+      toast.error(t(($) => $.create_dialog.runtime_required_toast));
+      return;
+    }
+    if (selectedRuntimeLocked) {
+      toast.error(t(($) => $.create_dialog.runtime_private_locked_tooltip));
+      return;
+    }
     setCreating(true);
 
     try {

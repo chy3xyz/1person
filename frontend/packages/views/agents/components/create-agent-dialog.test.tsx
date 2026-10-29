@@ -42,9 +42,10 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
+import { toast } from "sonner";
 import { CreateAgentDialog } from "./create-agent-dialog";
 
 const ME = "user-me";
@@ -283,5 +284,50 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
     expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("explains an empty workspace instead of leaving a dead Create button", async () => {
+    // A workspace with no runtime used to render a permanently disabled
+    // picker and a disabled Create button, with nothing on screen to
+    // say why. The agent still needs a runtime, but the reason and the
+    // way out have to be visible.
+    const { onCreate } = renderDialog([]);
+
+    expect(
+      screen.getByText("No runtime in this workspace yet"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Go to Runtimes")).toBeInTheDocument();
+
+    const createBtn = screen
+      .getAllByRole("button")
+      .find((b) => b.textContent === "Create");
+    expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+
+    // Enter in the name field must not fail silently either.
+    const nameInput = screen.getByPlaceholderText("e.g. Deep Research Agent");
+    fireEvent.change(nameInput, { target: { value: "Agent" } });
+    fireEvent.keyDown(nameInput, { key: "Enter" });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  it("says so when the filter hides every runtime instead of showing an empty dropdown", () => {
+    // The workspace HAS a runtime, but the default "Mine" filter hides
+    // it because another member owns it. An empty dropdown reads as a
+    // broken list, so name the reason.
+    const othersPrivate = makeRuntime({
+      id: "rt-others-private",
+      name: "Others Private",
+      owner_id: OTHER,
+      visibility: "private",
+    });
+    renderDialog([othersPrivate]);
+
+    fireEvent.click(screen.getByText("No runtime available"));
+
+    expect(screen.getByText("No runtime to show")).toBeInTheDocument();
+    expect(screen.getByText(/Switch to/)).toBeInTheDocument();
   });
 });

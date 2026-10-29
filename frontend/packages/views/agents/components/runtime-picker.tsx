@@ -5,12 +5,15 @@ import { ChevronDown, Cloud, Loader2, Lock } from "lucide-react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
 import type { MemberWithUser, RuntimeDevice } from "@1person/core/types";
+import { paths, useWorkspaceSlug } from "@1person/core/paths";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from "@1person/ui/components/ui/popover";
 import { Label } from "@1person/ui/components/ui/label";
+import { Button } from "@1person/ui/components/ui/button";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 export type RuntimeFilter = "mine" | "all";
@@ -33,6 +36,8 @@ export function RuntimePicker({
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<RuntimeFilter>("mine");
+  const navigation = useNavigation();
+  const slug = useWorkspaceSlug();
 
   const getOwnerMember = (ownerId: string | null) => {
     if (!ownerId) return null;
@@ -74,6 +79,44 @@ export function RuntimePicker({
     );
     onSelect(firstUsable?.id ?? "");
   };
+
+  // A workspace with no runtime at all used to render a permanently
+  // disabled trigger. The Create button stayed disabled and pressing
+  // Enter submitted nothing — no request, no error, no toast. Say what
+  // is missing and where to fix it instead of going quiet.
+  const workspaceHasNoRuntime = runtimes.length === 0 && !runtimesLoading;
+
+  if (workspaceHasNoRuntime) {
+    return (
+      <div className="flex flex-col min-w-0">
+        <Label className="text-xs text-muted-foreground">
+          {t(($) => $.create_dialog.runtime_label)}
+        </Label>
+        <div className="mt-1.5 flex items-start gap-2.5 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5">
+          <Cloud className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium">
+              {t(($) => $.create_dialog.runtime_empty_title)}
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.runtime_empty_hint)}
+            </div>
+            {slug && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 h-7 px-2 text-xs"
+                onClick={() => navigation.push(paths.workspace(slug).runtimes())}
+              >
+                {t(($) => $.create_dialog.runtime_empty_action)}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-w-0">
@@ -154,75 +197,89 @@ export function RuntimePicker({
           align="start"
           className="w-[var(--anchor-width)] p-1 max-h-60 overflow-y-auto"
         >
-          {filteredRuntimes.map((device) => {
-            const ownerMember = getOwnerMember(device.owner_id);
-            const disabled = !isRuntimeUsableForUser(device, currentUserId);
-            const disabledTitle = disabled
-              ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
-              : undefined;
-            return (
-              <button
-                key={device.id}
-                type="button"
-                disabled={disabled}
-                title={disabledTitle}
-                onClick={() => {
-                  if (disabled) return;
-                  onSelect(device.id);
-                  setOpen(false);
-                }}
-                className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                  disabled
-                    ? "cursor-not-allowed opacity-50"
-                    : device.id === selectedRuntimeId
-                      ? "bg-accent"
-                      : "hover:bg-accent/50"
-                }`}
-              >
-                <ProviderLogo
-                  provider={device.provider}
-                  className="h-4 w-4 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-medium">{device.name}</span>
-                    {device.runtime_mode === "cloud" && (
-                      <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                        {t(($) => $.create_dialog.runtime_cloud_badge)}
-                      </span>
-                    )}
-                    {disabled && (
-                      <span className="shrink-0 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                        <Lock className="h-3 w-3" />
-                        {t(($) => $.create_dialog.runtime_private_badge)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                    {ownerMember ? (
-                      <>
-                        <ActorAvatar
-                          actorType="member"
-                          actorId={ownerMember.user_id}
-                          size={14}
-                        />
-                        <span className="truncate">{ownerMember.name}</span>
-                      </>
-                    ) : (
-                      <span className="truncate">{device.device_info}</span>
-                    )}
-                  </div>
+          {filteredRuntimes.length === 0 ? (
+            // The workspace HAS runtimes, but none of them match the
+            // active filter ("Mine" hides runtimes owned by somebody
+            // else). Say so — an empty dropdown reads as a broken list.
+            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+              <div>{t(($) => $.create_dialog.runtime_no_results)}</div>
+              {hasOtherRuntimes && (
+                <div className="mt-1">
+                  {t(($) => $.create_dialog.runtime_no_results_hint)}
                 </div>
-                <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
-                    device.status === "online"
-                      ? "bg-success"
-                      : "bg-muted-foreground/40"
+              )}
+            </div>
+          ) : (
+            filteredRuntimes.map((device) => {
+              const ownerMember = getOwnerMember(device.owner_id);
+              const disabled = !isRuntimeUsableForUser(device, currentUserId);
+              const disabledTitle = disabled
+                ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
+                : undefined;
+              return (
+                <button
+                  key={device.id}
+                  type="button"
+                  disabled={disabled}
+                  title={disabledTitle}
+                  onClick={() => {
+                    if (disabled) return;
+                    onSelect(device.id);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                    disabled
+                      ? "cursor-not-allowed opacity-50"
+                      : device.id === selectedRuntimeId
+                        ? "bg-accent"
+                        : "hover:bg-accent/50"
                   }`}
-                />
-              </button>
-            );
-          })}
+                >
+                  <ProviderLogo
+                    provider={device.provider}
+                    className="h-4 w-4 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium">{device.name}</span>
+                      {device.runtime_mode === "cloud" && (
+                        <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
+                          {t(($) => $.create_dialog.runtime_cloud_badge)}
+                        </span>
+                      )}
+                      {disabled && (
+                        <span className="shrink-0 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          <Lock className="h-3 w-3" />
+                          {t(($) => $.create_dialog.runtime_private_badge)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                      {ownerMember ? (
+                        <>
+                          <ActorAvatar
+                            actorType="member"
+                            actorId={ownerMember.user_id}
+                            size={14}
+                          />
+                          <span className="truncate">{ownerMember.name}</span>
+                        </>
+                      ) : (
+                        <span className="truncate">{device.device_info}</span>
+                      )}
+                    </div>
+                  </div>
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      device.status === "online"
+                        ? "bg-success"
+                        : "bg-muted-foreground/40"
+                    }`}
+                  />
+                </button>
+              );
+          })
+          )}
         </PopoverContent>
       </Popover>
     </div>
