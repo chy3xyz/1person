@@ -199,18 +199,28 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
         // A runtime belongs to exactly one workspace. Refuse to re-point
         // a row that already lives in another workspace — that would let
         // a daemon from workspace B hijack workspace A's machine.
-        if (model.runtimeWorkspaceId(req.runtime_id)) |existing_ws| {
-            if (!std.mem.eql(u8, existing_ws, token_workspace_id)) {
+        const existing_ws = try model.runtimeWorkspaceId(allocator, req.runtime_id);
+        defer if (existing_ws) |ws| allocator.free(ws);
+        if (existing_ws) |ws| {
+            if (!std.mem.eql(u8, ws, token_workspace_id)) {
                 ctx.res_status = .bad_request;
                 try ctx.renderJson(.{ .@"error" = "runtime_id belongs to another workspace" });
                 return;
             }
         }
 
-        const owner_id = if (token_owner_id.len > 0)
-            token_owner_id
-        else
-            model.workspaceOwnerId(token_workspace_id) orelse "";
+        // The token owner is authoritative. Only a token minted before
+        // the owner column existed falls back to the workspace owner.
+        var owner_buf: ?[]const u8 = null;
+        defer if (owner_buf) |b| allocator.free(b);
+        const owner_id = if (token_owner_id.len > 0) token_owner_id else blk: {
+            const ws_owner = try model.workspaceOwnerId(allocator, token_workspace_id);
+            if (ws_owner) |w| {
+                owner_buf = w;
+                break :blk w;
+            }
+            break :blk "";
+        };
 
         _ = model.upsertRuntimeForDaemon(req.runtime_id, token_workspace_id, owner_id, name);
     }

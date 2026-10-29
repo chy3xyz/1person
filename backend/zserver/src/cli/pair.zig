@@ -39,7 +39,15 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: PairOptions) !void {
     const daemon_id = resp.getString("daemon_id") orelse "";
 
     const alloc = cfg.daemon_tokens.allocator;
-    if (cfg.daemon_tokens.get(opts.workspace_id)) |old| alloc.free(old);
+    // Re-pairing a workspace replaces its entry. The map owns neither
+    // the key nor the value, so both have to be released by hand —
+    // freeing only the value leaked the old key, and the CLI's leak
+    // detector turned that into a non-zero exit for a command that had
+    // actually succeeded.
+    if (cfg.daemon_tokens.fetchRemove(opts.workspace_id)) |kv| {
+        alloc.free(kv.key);
+        alloc.free(kv.value);
+    }
     try cfg.daemon_tokens.put(try alloc.dupe(u8, opts.workspace_id), try alloc.dupe(u8, token));
 
     try config_store.save(allocator, io, opts.path, &cfg);

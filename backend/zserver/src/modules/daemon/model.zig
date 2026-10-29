@@ -139,30 +139,41 @@ pub fn upsertRuntimeForDaemon(
         .{ .text = runtime_id },
         .{ .text = workspace_id },
         .{ .text = name },
-        .{ .text = owner_id },
+        // An empty owner means "this token predates the owner column".
+        // Pass SQL NULL for it — an empty string is not a uuid and the
+        // cast would abort the whole insert.
+        if (owner_id.len > 0) SqlParam{ .text = owner_id } else SqlParam.null,
     }) catch return false;
     return true;
 }
 
 /// Read the workspace a runtime row belongs to. Returns null when no
 /// row with that id exists.
-pub fn runtimeWorkspaceId(runtime_id: []const u8) ?[]const u8 {
+///
+/// The returned slice is owned by `allocator`: the result set frees its
+/// own cell text on `deinit`, so handing that text to the caller would
+/// leave it reading freed memory (zfinal's own history has a "UUUU
+/// symptoms" bug report for exactly this shape).
+pub fn runtimeWorkspaceId(allocator: std.mem.Allocator, runtime_id: []const u8) !?[]const u8 {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
     var rs = db.queryParams(
-        "SELECT workspace_id::text FROM agent_runtime WHERE id = $1::uuid",
+        "SELECT workspace_id FROM agent_runtime WHERE id = $1::uuid",
         &[_]SqlParam{.{ .text = runtime_id }},
     ) catch return null;
     defer rs.deinit();
     if (rs.rows.items.len == 0) return null;
-    return rs.rows.items[0].getText(0);
+    const text = rs.rows.items[0].getText(0) orelse return null;
+    return try allocator.dupe(u8, text);
 }
 
 /// Read the owner of a workspace. Used as the fallback owner for a
 /// daemon token minted before the owner column existed. The fork stores
 /// the workspace owner in `member.role = 'owner'`, not on the workspace
 /// row.
-pub fn workspaceOwnerId(workspace_id: []const u8) ?[]const u8 {
+///
+/// The returned slice is owned by `allocator` — see `runtimeWorkspaceId`.
+pub fn workspaceOwnerId(allocator: std.mem.Allocator, workspace_id: []const u8) !?[]const u8 {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
     var rs = db.queryParams(
@@ -173,7 +184,8 @@ pub fn workspaceOwnerId(workspace_id: []const u8) ?[]const u8 {
     ) catch return null;
     defer rs.deinit();
     if (rs.rows.items.len == 0) return null;
-    return rs.rows.items[0].getText(0);
+    const text = rs.rows.items[0].getText(0) orelse return null;
+    return try allocator.dupe(u8, text);
 }
 
 pub const TaskProgressRequest = struct {
