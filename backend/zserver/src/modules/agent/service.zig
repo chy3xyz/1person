@@ -333,16 +333,53 @@ fn createAgentCore(
     if (model.borrowDb()) |db| {
         defer deps.releaseBack(db);
 
-        _ = .{ db, runtime_id, workspace_id }; // runtime validation skipped — hardcode to "local"
+        // The fork has no runtime_mode negotiation yet: every agent runs
+        // on a local machine, so the mode is hardcoded here.
         const runtime_mode = "local";
 
-        // Ensure the runtime row exists (FK constraint for agent.runtime_id).
-        _ = db.execParams(
-            "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, status) " ++
-            "VALUES ($1::uuid, $2::uuid, 'auto-created', 'local', 'auto', 'offline') " ++
-            "ON CONFLICT (id) DO NOTHING",
-            &[_]SqlParam{ .{ .text = runtime_id }, .{ .text = workspace_id } },
-        ) catch {};
+        // Resolve the runtime the agent binds to.
+        //
+        // Upstream parity (`server/internal/handler/agent.go`): the
+        // runtime must exist inside this workspace
+        // (`GetAgentRuntimeForWorkspace` → 400 invalid runtime_id) and
+        // the caller must be allowed to use it (`canUseRuntimeForAgent`
+        // → 403). Without the workspace check any member could bind an
+        // agent to another workspace's machine — the agent would then
+        // execute on hardware it has no right to reach.
+        //
+        // The fork additionally creates a placeholder runtime when the
+        // id is unknown, so a workspace without a paired daemon can
+        // still hold agents. The placeholder is created in THIS
+        // workspace and owned by the caller, so it can never become a
+        // cross-workspace back door.
+        const existing_runtime = model.findRuntime(runtime_id);
+        if (existing_runtime) |rt| {
+            if (!std.mem.eql(u8, rt.workspace_id, workspace_id)) {
+                ctx.res_status = .bad_request;
+                try ctx.renderJson(.{ .@"error" = "invalid runtime_id" });
+                return;
+            }
+            if (!model.runtimeAllowsUser(rt, user_id)) {
+                ctx.res_status = .forbidden;
+                try ctx.renderJson(.{ .@"error" = "this runtime is private; ask its owner to grant you access before creating agents" });
+                return;
+            }
+        } else {
+            // Ensure the runtime row exists (FK constraint for
+            // agent.runtime_id). Owned by the caller so the runtime
+            // shows up under their own "mine" filter and can be picked
+            // for the next agent.
+            _ = db.execParams(
+                "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, status, owner_id, visibility) " ++
+                "VALUES ($1::uuid, $2::uuid, 'auto-created', 'local', 'auto', 'offline', $3::uuid, 'private') " ++
+                "ON CONFLICT (id) DO NOTHING",
+                &[_]SqlParam{
+                    .{ .text = runtime_id },
+                    .{ .text = workspace_id },
+                    .{ .text = user_id },
+                },
+            ) catch {};
+        }
 
         const runtime_config_json = try model.jsonValueToString(allocator, req.runtime_config, "{}");
         defer allocator.free(runtime_config_json);
@@ -494,6 +531,12 @@ pub fn updateAgent(ctx: *zfinal.Context) !void {
     };
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
+    const caller_id = getUserId(ctx) orelse {
+        ctx.res_status = .unauthorized;
+        try ctx.renderJson(.{ .@"error" = "unauthorized" });
+        return;
+    };
+
     if (req.name) |n| {
         if (std.mem.trim(u8, n, &std.ascii.whitespace).len == 0) {
             ctx.res_status = .bad_request;
@@ -527,6 +570,23 @@ pub fn updateAgent(ctx: *zfinal.Context) !void {
                 ctx.res_status = .bad_request;
                 try ctx.renderJson(.{ .@"error" = "invalid runtime_id" });
                 return;
+            }
+            // Same workspace + consent gate as the create path: a
+            // rebind must not be able to reach another workspace's
+            // machine. Upstream only checks when the request actually
+            // carries a runtime_id, so an unrelated field update on an
+            // agent that already holds a runtime keeps working.
+            if (model.findRuntime(rid)) |rt| {
+                if (!std.mem.eql(u8, rt.workspace_id, workspace_id)) {
+                    ctx.res_status = .bad_request;
+                    try ctx.renderJson(.{ .@"error" = "invalid runtime_id" });
+                    return;
+                }
+                if (!model.runtimeAllowsUser(rt, caller_id)) {
+                    ctx.res_status = .forbidden;
+                    try ctx.renderJson(.{ .@"error" = "this runtime is private; ask its owner to grant you access before creating agents" });
+                    return;
+                }
             }
             runtime_id = rid;
             runtime_mode = "local";

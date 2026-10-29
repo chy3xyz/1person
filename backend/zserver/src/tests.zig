@@ -48,6 +48,7 @@ test {
     _ = @import("modules/agent/service.zig");
     _ = @import("modules/agent/service_test.zig");
     _ = @import("modules/agent/model.zig");
+    _ = @import("modules/agent/model_test.zig");
     _ = @import("modules/agent/routes.zig");
     _ = @import("modules/agent_template/handler.zig");
     _ = @import("modules/agent_template/service.zig");

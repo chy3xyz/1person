@@ -272,6 +272,45 @@ pub fn isValidVisibility(v: []const u8) bool {
     return std.mem.eql(u8, v, "workspace") or std.mem.eql(u8, v, "private");
 }
 
+/// The runtime row an agent can be bound to.
+pub const RuntimeBinding = struct {
+    workspace_id: []const u8,
+    owner_id: []const u8,
+    visibility: []const u8,
+};
+
+/// Look up the runtime an agent would be bound to. Returns null when no
+/// runtime row carries that id.
+pub fn findRuntime(runtime_id: []const u8) ?RuntimeBinding {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT workspace_id::text, COALESCE(owner_id::text, ''), visibility " ++
+        "FROM agent_runtime WHERE id = $1::uuid",
+        &[_]SqlParam{.{ .text = runtime_id }},
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    return RuntimeBinding{
+        .workspace_id = rs.rows.items[0].getText(0) orelse "",
+        .owner_id = rs.rows.items[0].getText(1) orelse "",
+        .visibility = rs.rows.items[0].getText(2) orelse "private",
+    };
+}
+
+/// Whether `user_id` may bind an agent to this runtime.
+///
+/// Upstream parity: `service.RuntimeAllowsUser` — a runtime admits its
+/// owner, and a public runtime admits every workspace member. The
+/// fork's `agent_runtime` has no `shared_with` column, so the rule
+/// reduces to owner-or-public. An ownerless runtime admits nobody:
+/// upstream treats it as unusable because it cannot mint task tokens.
+pub fn runtimeAllowsUser(rt: RuntimeBinding, user_id: []const u8) bool {
+    if (rt.owner_id.len == 0) return false;
+    if (std.mem.eql(u8, rt.owner_id, user_id)) return true;
+    return std.mem.eql(u8, rt.visibility, "public");
+}
+
 pub fn isValidStatus(s: []const u8) bool {
     const valid = [_][]const u8{ "idle", "working", "blocked", "error", "offline" };
     for (valid) |v| if (std.mem.eql(u8, s, v)) return true;
