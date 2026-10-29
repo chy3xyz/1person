@@ -352,7 +352,8 @@ fn createAgentCore(
         // still hold agents. The placeholder is created in THIS
         // workspace and owned by the caller, so it can never become a
         // cross-workspace back door.
-        const existing_runtime = model.findRuntime(runtime_id);
+        const existing_runtime = try model.findRuntime(allocator, runtime_id);
+        defer if (existing_runtime) |rt| rt.deinit(allocator);
         if (existing_runtime) |rt| {
             if (!std.mem.eql(u8, rt.workspace_id, workspace_id)) {
                 ctx.res_status = .bad_request;
@@ -576,7 +577,8 @@ pub fn updateAgent(ctx: *zfinal.Context) !void {
             // machine. Upstream only checks when the request actually
             // carries a runtime_id, so an unrelated field update on an
             // agent that already holds a runtime keeps working.
-            if (model.findRuntime(rid)) |rt| {
+            if (try model.findRuntime(allocator, rid)) |rt| {
+                defer rt.deinit(allocator);
                 if (!std.mem.eql(u8, rt.workspace_id, workspace_id)) {
                     ctx.res_status = .bad_request;
                     try ctx.renderJson(.{ .@"error" = "invalid runtime_id" });

@@ -277,11 +277,22 @@ pub const RuntimeBinding = struct {
     workspace_id: []const u8,
     owner_id: []const u8,
     visibility: []const u8,
+
+    /// Release the slices held by this binding.
+    pub fn deinit(self: RuntimeBinding, allocator: std.mem.Allocator) void {
+        allocator.free(self.workspace_id);
+        allocator.free(self.owner_id);
+        allocator.free(self.visibility);
+    }
 };
 
 /// Look up the runtime an agent would be bound to. Returns null when no
 /// runtime row carries that id.
-pub fn findRuntime(runtime_id: []const u8) ?RuntimeBinding {
+///
+/// The returned strings are owned by `allocator`: the result set frees
+/// its own cell text on `deinit`, so returning that text directly would
+/// leave the caller reading freed memory.
+pub fn findRuntime(allocator: std.mem.Allocator, runtime_id: []const u8) !?RuntimeBinding {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
     var rs = db.queryParams(
@@ -292,9 +303,9 @@ pub fn findRuntime(runtime_id: []const u8) ?RuntimeBinding {
     defer rs.deinit();
     if (rs.rows.items.len == 0) return null;
     return RuntimeBinding{
-        .workspace_id = rs.rows.items[0].getText(0) orelse "",
-        .owner_id = rs.rows.items[0].getText(1) orelse "",
-        .visibility = rs.rows.items[0].getText(2) orelse "private",
+        .workspace_id = try allocator.dupe(u8, rs.rows.items[0].getText(0) orelse ""),
+        .owner_id = try allocator.dupe(u8, rs.rows.items[0].getText(1) orelse ""),
+        .visibility = try allocator.dupe(u8, rs.rows.items[0].getText(2) orelse "private"),
     };
 }
 
