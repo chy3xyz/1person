@@ -611,9 +611,100 @@ else
     warn "DATABASE_URL is empty; skipping agent runtime scoping tests 43-44"
 fi
 
+# ─── 45. many concurrent WebSockets must not starve the server ─────────
+# A WebSocket handler never returns: it parks in the connection for as
+# long as the client stays connected. The server hands out a fixed number
+# of connection slots, and when they run out it has no choice but to run
+# the next handler inline on the accept loop — which then stops accepting
+# connections, so the whole API goes silent (every request hangs until
+# its socket times out). Measured before the fix: 7 open sockets were
+# enough to freeze the server.
+#
+# So: park a dozen sockets in the WebSocket handler and require the HTTP
+# API to keep answering. This is the regression guard for that freeze.
+N_WS=16
+ws45=$(python3 - <<PYEOF 2>&1 || true
+import base64, os, socket, time
+
+PORT = ${PORT}
+WS_ID = "${WS_ID}"
+TOKEN = "${TOKEN}"
+N = ${N_WS}
+
+
+def open_ws():
+    key = base64.b64encode(os.urandom(16)).decode()
+    sock = socket.create_connection(("127.0.0.1", PORT), timeout=10)
+    sock.sendall((
+        f"GET /ws?workspace_id={WS_ID} HTTP/1.1\r\n"
+        f"Host: 127.0.0.1:{PORT}\r\n"
+        "Upgrade: websocket\r\n"
+        "Connection: Upgrade\r\n"
+        f"Sec-WebSocket-Key: {key}\r\n"
+        "Sec-WebSocket-Version: 13\r\n"
+        f"Cookie: 1person_auth={TOKEN}\r\n\r\n"
+    ).encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        chunk = sock.recv(4096)
+        if not chunk:
+            raise RuntimeError("closed during handshake")
+        head += chunk
+    return sock, head.split(b"\r\n")[0].decode()
+
+
+socks = []
+upgraded = 0
+error = ""
+for _ in range(N):
+    try:
+        sock, status = open_ws()
+        socks.append(sock)
+        if "101" in status:
+            upgraded += 1
+    except Exception as exc:  # noqa: BLE001
+        error = str(exc)
+        break
+    time.sleep(0.05)
+
+api_ok = False
+api_seconds = -1.0
+if upgraded == N:
+    started = time.time()
+    try:
+        probe = socket.create_connection(("127.0.0.1", PORT), timeout=5)
+        probe.sendall(b"GET /api/config HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+        data = probe.recv(64)
+        probe.close()
+        api_ok = data.startswith(b"HTTP/1.1 200")
+    except Exception:  # noqa: BLE001
+        api_ok = False
+    api_seconds = time.time() - started
+
+for sock in socks:
+    try:
+        sock.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+print(f"UPGRADED={upgraded}/{N}")
+print(f"OPEN_ERROR={error}")
+print(f"API_OK={'YES' if api_ok else 'NO'}")
+print(f"API_SECONDS={api_seconds:.2f}")
+PYEOF
+)
+ws45_upgraded=$(echo "${ws45}" | grep -o "UPGRADED=[0-9]*/[0-9]*" | head -1 || true)
+ws45_api_ok=$(echo "${ws45}" | grep -o "API_OK=[A-Z]*" | head -1 || true)
+ws45_seconds=$(echo "${ws45}" | grep -o "API_SECONDS=[-0-9.]*" | head -1 || true)
+if [[ "${ws45_upgraded}" == "UPGRADED=${N_WS}/${N_WS}" ]] && [[ "${ws45_api_ok}" == "API_OK=YES" ]]; then
+    pass "45 ${N_WS} concurrent WebSockets keep the API responsive (${ws45_seconds})"
+else
+    fail "45 concurrent WebSockets keep the API responsive: ${ws45_upgraded} ${ws45_api_ok} ${ws45_seconds} ${ws45}"
+fi
+
 echo
 if [[ ${failures} -eq 0 ]]; then
-    echo -e "${GREEN}All 44 issue endpoints responded correctly${RESET}"
+    echo -e "${GREEN}All 45 issue endpoints responded correctly${RESET}"
     exit 0
 else
     echo -e "${RED}${failures} check(s) failed${RESET}"

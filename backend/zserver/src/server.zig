@@ -55,6 +55,30 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     // keepalive ping keeps a live peer alive.
     app.config.write_timeout_ms = 0;
 
+    // zfinal's Io thread pool caps how many connection handlers may run
+    // concurrently at `thread_count` (0 → `cpu_count - 1`). Every live
+    // connection holds one slot for its whole lifetime, and a WebSocket
+    // holds it for as long as the client stays connected.
+    //
+    // When the cap is reached, `group.async` has no choice but to run the
+    // next handler *inline on the accept-loop fiber*. A WebSocket handler
+    // never returns, so the accept loop stops accepting connections and
+    // the whole server goes silent: every subsequent request hangs until
+    // its socket times out. Measured on a 10-core box, 7 concurrent `/ws`
+    // connections were enough to freeze the API — and one browser page
+    // load already fires ~9 parallel API requests, so a handful of open
+    // tabs was enough to take the whole backend down.
+    //
+    // The cap must therefore sit far above the number of connections a
+    // team produces (one WebSocket per browser tab, plus the HTTP
+    // requests in flight) and must not depend on the CPU count of the
+    // machine the server happens to run on: a 2-core CI runner would
+    // otherwise allow a single connection before falling over.
+    //
+    // The pool still grows on demand (one worker per concurrent
+    // connection), so this is a ceiling, not a reservation.
+    app.config.thread_count = 256;
+
     // The single zfinal.ConnectionPool that backs every handler. Lives
     // in `deps.pool`; handlers borrow from it via `deps.acquire()`.
     // An empty db_url (e.g. `DATABASE_URL=""` from the e2e scripts)
