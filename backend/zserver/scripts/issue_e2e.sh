@@ -566,9 +566,54 @@ else
     warn "websocket-client not installed; skipping WS tests 41-42"
 fi
 
+# ─── 43. agent runtime binding is workspace-scoped ─────────────────────
+# A runtime belongs to exactly one workspace. Binding an agent to a
+# runtime that lives in another workspace must be refused: the agent
+# would otherwise execute on hardware the caller has no right to reach.
+#
+# The check lives in the DB path (the runtime has to be looked up), so
+# this only runs with a database — the no-DB suite has no runtime rows
+# to compare against.
+if [[ -n "${DATABASE_URL}" ]]; then
+    ws2_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" \
+        -d "{\"name\":\"E2E other\",\"slug\":\"e2e-other-$(date +%s)\"}" "${BASE}/api/workspaces")
+    WS2_ID=$(jget "${ws2_body}" id)
+    if [[ -z "${WS2_ID}" ]]; then
+        fail "43 agent runtime scoping: could not create second workspace: ${ws2_body}"
+    else
+        HWS2="X-Workspace-ID: ${WS2_ID}"
+        # An id nobody has used yet: creating the agent in workspace 1
+        # registers the placeholder runtime THERE.
+        AGENT_RUNTIME_ID=$(python3 -c "import uuid;print(uuid.uuid4())")
+        own_status=$(http_status -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+            -d "{\"name\":\"agent with runtime\",\"runtime_id\":\"${AGENT_RUNTIME_ID}\"}" \
+            "${BASE}/api/agents")
+        if [[ "${own_status}" == "201" ]]; then
+            pass "43 agent binds a runtime in its own workspace"
+        else
+            fail "43 agent binds a runtime in its own workspace: HTTP ${own_status}"
+        fi
+
+        # The same runtime id from the other workspace must be refused.
+        other_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS2}" \
+            -d "{\"name\":\"agent crossing workspaces\",\"runtime_id\":\"${AGENT_RUNTIME_ID}\"}" \
+            "${BASE}/api/agents")
+        other_status=$(http_status -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS2}" \
+            -d "{\"name\":\"agent crossing workspaces 2\",\"runtime_id\":\"${AGENT_RUNTIME_ID}\"}" \
+            "${BASE}/api/agents")
+        if [[ "${other_status}" == "400" ]] && echo "${other_body}" | grep -q "invalid runtime_id"; then
+            pass "44 agent refuses a runtime from another workspace"
+        else
+            fail "44 agent refuses a runtime from another workspace: HTTP ${other_status} ${other_body}"
+        fi
+    fi
+else
+    warn "DATABASE_URL is empty; skipping agent runtime scoping tests 43-44"
+fi
+
 echo
 if [[ ${failures} -eq 0 ]]; then
-    echo -e "${GREEN}All 42 issue endpoints responded correctly${RESET}"
+    echo -e "${GREEN}All 44 issue endpoints responded correctly${RESET}"
     exit 0
 else
     echo -e "${RED}${failures} check(s) failed${RESET}"
