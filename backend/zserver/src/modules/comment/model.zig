@@ -17,6 +17,12 @@ const deps = @import("../../deps.zig");
 const attachment = @import("../attachment/service.zig");
 const common_mem = @import("../../common/mem.zig");
 
+/// Copy a string into the module's long-lived allocator.
+///
+/// The result set frees its cell text when it is deinited, so any string
+/// that outlives the query has to be copied out first.
+const memDup = common_mem.memDup;
+
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode or when the pool is uninitialised.
 pub fn borrowDb() ?*zfinal.DB {
@@ -149,6 +155,11 @@ pub const CommentRow = struct {
 /// Read `row` from a `comment` table projection. `reply_count_idx` /
 /// `last_activity_idx` are `null` for the plain-row queries that
 /// don't project the aggregate columns.
+/// Project a row of the `comment` table into a `CommentRow`.
+///
+/// Every string is copied out of the result set: the cell text belongs
+/// to the `ResultSet` and dies with it, but the row outlives the query
+/// — the callers append the rows to a list that is rendered later.
 pub fn rowFromCommentTable(rs: *zfinal.ResultSet, row: usize, has_aggregates: bool) CommentRow {
     const r = &rs.rows.items[row];
     var reply_count: i64 = 0;
@@ -158,20 +169,20 @@ pub fn rowFromCommentTable(rs: *zfinal.ResultSet, row: usize, has_aggregates: bo
         last_activity_at = r.getText(13);
     }
     return .{
-        .id = r.getText(0) orelse "",
-        .issue_id = r.getText(1) orelse "",
-        .author_type = r.getText(2) orelse "",
-        .author_id = r.getText(3) orelse "",
-        .content = r.getText(4) orelse "",
-        .type = r.getText(5) orelse "",
-        .parent_id = r.getText(6),
-        .created_at = r.getText(7) orelse "",
-        .updated_at = r.getText(8) orelse "",
-        .resolved_at = r.getText(9),
-        .resolved_by_type = r.getText(10),
-        .resolved_by_id = r.getText(11),
+        .id = memDup(r.getText(0) orelse "") catch "",
+        .issue_id = memDup(r.getText(1) orelse "") catch "",
+        .author_type = memDup(r.getText(2) orelse "") catch "",
+        .author_id = memDup(r.getText(3) orelse "") catch "",
+        .content = memDup(r.getText(4) orelse "") catch "",
+        .type = memDup(r.getText(5) orelse "") catch "",
+        .parent_id = if (r.getText(6)) |s| (memDup(s) catch null) else null,
+        .created_at = memDup(r.getText(7) orelse "") catch "",
+        .updated_at = memDup(r.getText(8) orelse "") catch "",
+        .resolved_at = if (r.getText(9)) |s| (memDup(s) catch null) else null,
+        .resolved_by_type = if (r.getText(10)) |s| (memDup(s) catch null) else null,
+        .resolved_by_id = if (r.getText(11)) |s| (memDup(s) catch null) else null,
         .reply_count = reply_count,
-        .last_activity_at = last_activity_at,
+        .last_activity_at = if (last_activity_at) |s| (memDup(s) catch null) else null,
     };
 }
 
@@ -235,6 +246,7 @@ pub fn fetchReactions(comment_id: []const u8) ![]ReactionResponse {
 /// all rows. Each row is appended as a 14-column projection so
 /// `rowFromCommentTable` can decode it with `has_aggregates = true`.
 pub fn appendRootComments(
+    allocator: std.mem.Allocator,
     out: *std.ArrayList(CommentRow),
     workspace_id: []const u8,
     issue_id: []const u8,
@@ -268,7 +280,7 @@ pub fn appendRootComments(
     );
     defer rs.deinit();
     for (0..rs.rows.items.len) |i| {
-        try out.append(out.allocator, rowFromCommentTable(&rs, i, true));
+        try out.append(allocator, rowFromCommentTable(&rs, i, true));
     }
 }
 
@@ -277,6 +289,7 @@ pub fn appendRootComments(
 /// list (no aggregates), so `rowFromCommentTable` decodes with
 /// `has_aggregates = false`.
 pub fn appendAllComments(
+    allocator: std.mem.Allocator,
     out: *std.ArrayList(CommentRow),
     workspace_id: []const u8,
     issue_id: []const u8,
@@ -306,7 +319,7 @@ pub fn appendAllComments(
     );
     defer rs.deinit();
     for (0..rs.rows.items.len) |i| {
-        try out.append(out.allocator, rowFromCommentTable(&rs, i, false));
+        try out.append(allocator, rowFromCommentTable(&rs, i, false));
     }
 }
 

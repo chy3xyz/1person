@@ -29,6 +29,8 @@ const cli_gate = @import("../../common/cli_version.zig");
 const realtime = @import("../realtime/service.zig");
 const attachment = @import("../attachment/service.zig");
 const runtime_model = @import("../runtime/model.zig");
+const comment_model = @import("../comment/model.zig");
+const comment_service = @import("../comment/service.zig");
 
 const log = std.log.scoped(.issue_service);
 
@@ -1747,6 +1749,7 @@ pub fn listChildren(ctx: *zfinal.Context) !void {
 pub fn listTimeline(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
     const issue_id = try response.parseStringId(ctx, "id");
+    const workspace_id = model.getWorkspaceId(ctx) orelse "";
 
     if (deps.hasPool()) {
         // DB path: query activity_log for events on this issue.
@@ -1778,6 +1781,15 @@ pub fn listTimeline(ctx: *zfinal.Context) !void {
         for (mem_events) |ev| {
             try out.append(allocator, model.timelineEntryFromEvent(ev));
         }
+        // The conversation is part of the timeline: the issue detail page
+        // renders comments and activities from this one list, so without
+        // the comments half of it the page shows no conversation at all.
+        if (workspace_id.len > 0) {
+            appendCommentTimelineEntries(allocator, &out, workspace_id, issue_id) catch |err| {
+                log.warn("timeline: comments unavailable ({s})", .{@errorName(err)});
+            };
+        }
+        sortTimelineEntries(out.items);
         // Upstream answers with a flat array. The rendered JSON points
         // into the ResultSet, so it must happen before the deferred
         // deinit/release — the render is inside the borrowed scope.
@@ -1790,6 +1802,56 @@ pub fn listTimeline(ctx: *zfinal.Context) !void {
     defer out.deinit(allocator);
     for (events) |ev| try out.append(allocator, model.timelineEntryFromEvent(ev));
     try response.ok(ctx, out.items);
+}
+
+/// Append every comment on the issue to the timeline, as comment entries.
+///
+/// The comment rows are projected by the comment module, which copies
+/// them out of its result set — the timeline outlives that query.
+fn appendCommentTimelineEntries(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(model.TimelineEntry),
+    workspace_id: []const u8,
+    issue_id: []const u8,
+) !void {
+    var rows: std.ArrayList(comment_model.CommentRow) = .empty;
+    defer rows.deinit(allocator);
+    try comment_model.appendAllComments(allocator, &rows, workspace_id, issue_id, null);
+
+    for (rows.items) |row| {
+        const resp = comment_model.responseFromRow(row, false, null);
+        const reactions = try comment_service.loadReactions(allocator, resp.id);
+        const attachments = try comment_service.loadAttachments(allocator, workspace_id, resp.id);
+        try out.append(allocator, .{
+            .type = "comment",
+            .id = resp.id,
+            .actor_type = resp.author_type,
+            .actor_id = resp.author_id,
+            .created_at = resp.created_at,
+            .content = resp.content,
+            .parent_id = resp.parent_id,
+            .updated_at = resp.updated_at,
+            .comment_type = resp.type,
+            .reactions = reactions,
+            .attachments = attachments,
+            .resolved_at = resp.resolved_at,
+            .resolved_by_type = resp.resolved_by_type,
+            .resolved_by_id = resp.resolved_by_id,
+        });
+    }
+}
+
+/// Order the timeline oldest first.
+///
+/// Comments and activities come from two queries, so they arrive
+/// interleaved — the client sorts them too, but the server's order is
+/// what a client that trusts it sees.
+fn sortTimelineEntries(entries: []model.TimelineEntry) void {
+    std.sort.heap(model.TimelineEntry, entries, {}, struct {
+        fn lessThan(_: void, a: model.TimelineEntry, b: model.TimelineEntry) bool {
+            return std.mem.order(u8, a.created_at, b.created_at) == .lt;
+        }
+    }.lessThan);
 }
 
 /// `GET /api/issues/:id/subscribers` — upstream answers with a flat array

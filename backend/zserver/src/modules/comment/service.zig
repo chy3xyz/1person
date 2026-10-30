@@ -134,25 +134,32 @@ fn commentResponseFromEntry(entry: model.CommentEntry, with_stats: bool, reply_c
     };
 }
 
+/// Build one comment DTO out of a result row.
+///
+/// Every string is copied out of the result set: the cell text belongs
+/// to the `ResultSet` and is freed when it is deinited, but the DTO
+/// outlives the query — it is rendered after the set is gone. Reading
+/// the cells directly left the DTO pointing at freed memory, which
+/// crashed the server while serializing the list.
 fn commentResponseFromRow(rs: *zfinal.ResultSet, row: usize, with_stats: bool, reply_count: i32, last_activity_at: ?[]const u8, summary_truncated: ?bool) model.CommentResponse {
     const r = &rs.rows.items[row];
     return model.CommentResponse{
-        .id = r.getText(0) orelse "",
-        .issue_id = r.getText(1) orelse "",
-        .author_type = r.getText(2) orelse "",
-        .author_id = r.getText(3) orelse "",
-        .content = r.getText(4) orelse "",
-        .type = r.getText(5) orelse "",
-        .parent_id = r.getText(6),
-        .created_at = r.getText(7) orelse "",
-        .updated_at = r.getText(8) orelse "",
-        .resolved_at = r.getText(9),
-        .resolved_by_type = r.getText(10),
-        .resolved_by_id = r.getText(11),
+        .id = memDup(r.getText(0) orelse "") catch "",
+        .issue_id = memDup(r.getText(1) orelse "") catch "",
+        .author_type = memDup(r.getText(2) orelse "") catch "",
+        .author_id = memDup(r.getText(3) orelse "") catch "",
+        .content = memDup(r.getText(4) orelse "") catch "",
+        .type = memDup(r.getText(5) orelse "") catch "",
+        .parent_id = if (r.getText(6)) |s| (memDup(s) catch null) else null,
+        .created_at = memDup(r.getText(7) orelse "") catch "",
+        .updated_at = memDup(r.getText(8) orelse "") catch "",
+        .resolved_at = if (r.getText(9)) |s| (memDup(s) catch null) else null,
+        .resolved_by_type = if (r.getText(10)) |s| (memDup(s) catch null) else null,
+        .resolved_by_id = if (r.getText(11)) |s| (memDup(s) catch null) else null,
         .reactions = &.{},
         .attachments = &.{},
         .reply_count = if (with_stats) reply_count else null,
-        .last_activity_at = last_activity_at,
+        .last_activity_at = if (last_activity_at) |s| (memDup(s) catch null) else null,
         .content_truncated = summary_truncated,
     };
 }
@@ -180,7 +187,9 @@ fn reactionResponseFromRow(rs: *zfinal.ResultSet, row: usize) model.ReactionResp
     };
 }
 
-fn loadReactions(allocator: std.mem.Allocator, comment_id: []const u8) ![]model.ReactionResponse {
+/// Load the reactions on one comment. Exported so the issue timeline can
+/// render a comment with its reactions attached.
+pub fn loadReactions(allocator: std.mem.Allocator, comment_id: []const u8) ![]model.ReactionResponse {
     if (model.borrowDb()) |db| {
         defer deps.releaseBack(db);
         var rs = try db.queryParams(
@@ -212,16 +221,24 @@ fn loadReactions(allocator: std.mem.Allocator, comment_id: []const u8) ![]model.
     }
 }
 
-fn loadAttachments(allocator: std.mem.Allocator, workspace_id: []const u8, comment_id: []const u8) ![]attachment.AttachmentResponse {
+/// Load the attachments of one comment. Exported so the issue timeline can
+/// render a comment with its attachments attached.
+pub fn loadAttachments(allocator: std.mem.Allocator, workspace_id: []const u8, comment_id: []const u8) ![]attachment.AttachmentResponse {
     var list: std.ArrayList(attachment.AttachmentResponse) = .empty;
     defer list.deinit(allocator);
     try attachment.listForComment(allocator, workspace_id, comment_id, &list);
     return list.toOwnedSlice(allocator);
 }
 
-fn summarizeContent(allocator: std.mem.Allocator, content: []const u8, truncated: ?bool) !struct { content: []const u8, was_truncated: bool } {
+/// Shorten a comment body to a readable summary.
+///
+/// The result is always a fresh allocation in the module's long-lived
+/// allocator: the caller hands in text that may live in a result set,
+/// and the summary has to outlive both that and the loop body that
+/// built it — the comment list is rendered after the loop.
+fn summarizeContent(content: []const u8, truncated: ?bool) !struct { content: []const u8, was_truncated: bool } {
     if (truncated != null and truncated.? == false) {
-        return .{ .content = content, .was_truncated = false };
+        return .{ .content = try memDup(content), .was_truncated = false };
     }
     const budget = 200;
     var iter = std.unicode.Utf8Iterator{ .bytes = content, .i = 0 };
@@ -230,13 +247,13 @@ fn summarizeContent(allocator: std.mem.Allocator, content: []const u8, truncated
     while (iter.nextCodepoint()) |cp| {
         _ = cp;
         if (count == budget) {
-            const suffix = try std.fmt.allocPrint(allocator, "{s}…", .{content[0..end_byte]});
+            const suffix = try std.fmt.allocPrint(memAlloc(), "{s}…", .{content[0..end_byte]});
             return .{ .content = suffix, .was_truncated = true };
         }
         end_byte = iter.i;
         count += 1;
     }
-    return .{ .content = content, .was_truncated = false };
+    return .{ .content = try memDup(content), .was_truncated = false };
 }
 
 fn issueExists(workspace_id: []const u8, issue_id: []const u8) !bool {
@@ -321,17 +338,16 @@ pub fn listComments(ctx: *zfinal.Context) !void {
                 const raw = r.getText(4) orelse "";
                 const reply_count: i32 = @intCast(std.fmt.parseInt(i64, r.getText(12) orelse "0", 10) catch 0);
                 const last_activity_at = r.getText(13);
-                var summary_holder: ?[]const u8 = null;
-                defer if (summary_holder) |s| allocator.free(s);
                 var truncated: ?bool = null;
                 const content = if (summary) b: {
-                    const sr = try summarizeContent(allocator, raw, null);
-                    summary_holder = sr.content;
+                    const sr = try summarizeContent(raw, null);
                     truncated = sr.was_truncated;
                     break :b sr.content;
-                } else raw;
+                } else null;
                 try list.append(allocator, commentResponseFromRow(&rs, i, true, reply_count, last_activity_at, truncated));
-                list.items[list.items.len - 1].content = content;
+                // Only the summary replaces the row's own content — see the
+                // note in the sibling branch above.
+                if (content) |c| list.items[list.items.len - 1].content = c;
                 const comment_id = list.items[list.items.len - 1].id;
                 list.items[list.items.len - 1].reactions = try loadReactions(allocator, comment_id);
                 list.items[list.items.len - 1].attachments = try loadAttachments(allocator, workspace_id, comment_id);
@@ -361,17 +377,18 @@ pub fn listComments(ctx: *zfinal.Context) !void {
             for (0..rs.rows.items.len) |i| {
                 const r = &rs.rows.items[i];
                 const raw = r.getText(4) orelse "";
-                var summary_holder: ?[]const u8 = null;
-                defer if (summary_holder) |s| allocator.free(s);
                 var truncated: ?bool = null;
                 const content = if (summary) b: {
-                    const sr = try summarizeContent(allocator, raw, null);
-                    summary_holder = sr.content;
+                    const sr = try summarizeContent(raw, null);
                     truncated = sr.was_truncated;
                     break :b sr.content;
-                } else raw;
+                } else null;
                 try list.append(allocator, commentResponseFromRow(&rs, i, false, 0, null, truncated));
-                list.items[list.items.len - 1].content = content;
+                // The summary is a fresh allocation; without it the row's
+                // own (copied) content stays in place. Assigning the raw
+                // cell text here would point it at the result set's
+                // memory, which is freed before the list is rendered.
+                if (content) |c| list.items[list.items.len - 1].content = c;
                 const comment_id = list.items[list.items.len - 1].id;
                 list.items[list.items.len - 1].reactions = try loadReactions(allocator, comment_id);
                 list.items[list.items.len - 1].attachments = try loadAttachments(allocator, workspace_id, comment_id);
@@ -409,12 +426,9 @@ pub fn listComments(ctx: *zfinal.Context) !void {
             }
 
             const raw = entry.content;
-            var summary_holder: ?[]const u8 = null;
-            defer if (summary_holder) |s| allocator.free(s);
             var truncated: ?bool = null;
             const content = if (summary) b: {
-                const sr = try summarizeContent(allocator, raw, null);
-                summary_holder = sr.content;
+                const sr = try summarizeContent(raw, null);
                 truncated = sr.was_truncated;
                 break :b sr.content;
             } else raw;

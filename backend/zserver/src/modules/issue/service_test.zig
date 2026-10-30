@@ -227,7 +227,7 @@ test "timeline details serialise as a JSON object, not a string" {
     const details = model.parseDetailsValue(
         std.heap.page_allocator,
         "{\"from\":\"todo\",\"to\":\"in_progress\"}",
-    ) orelse return error.TestUnexpectedResult;
+    );
 
     const entry = model.TimelineEntry{ .details = details };
     const json = try std.json.Stringify.valueAlloc(std.testing.allocator, entry, .{});

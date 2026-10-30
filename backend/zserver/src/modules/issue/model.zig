@@ -35,6 +35,8 @@ const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
 const common_mem = @import("../../common/mem.zig");
+const comment_model = @import("../comment/model.zig");
+const attachment = @import("../attachment/service.zig");
 
 // ──────────────────────────────────────────────────────────────────────
 // DB borrow helper
@@ -773,8 +775,26 @@ pub const TimelineEntry = struct {
     actor_type: []const u8 = "",
     actor_id: []const u8 = "",
     action: []const u8 = "",
-    details: ?std.json.Value = null,
+    /// The activity's details object.
+    ///
+    /// Always an object, never null: the client's schema takes a record
+    /// here, and a null made every timeline entry fail validation — the
+    /// panel silently fell back to an empty list.
+    details: std.json.Value = .{ .object = .empty },
     created_at: []const u8 = "",
+
+    // The comment fields. A timeline entry is either an activity or a
+    // comment, and the comment half of the shape is what the issue
+    // detail page renders the conversation from.
+    content: []const u8 = "",
+    parent_id: ?[]const u8 = null,
+    updated_at: []const u8 = "",
+    comment_type: []const u8 = "",
+    reactions: []comment_model.ReactionResponse = &.{},
+    attachments: []attachment.AttachmentResponse = &.{},
+    resolved_at: ?[]const u8 = null,
+    resolved_by_type: ?[]const u8 = null,
+    resolved_by_id: ?[]const u8 = null,
 };
 
 /// Parse a JSONB column into a `std.json.Value` so it can be embedded
@@ -782,11 +802,16 @@ pub const TimelineEntry = struct {
 ///
 /// The text is duplicated into `allocator` first: the column text points
 /// into the ResultSet, and a parsed `Value` may alias its input.
-pub fn parseDetailsValue(allocator: std.mem.Allocator, text: []const u8) ?std.json.Value {
-    if (text.len == 0) return null;
-    const owned = allocator.dupe(u8, text) catch return null;
-    const parsed = std.json.parseFromSlice(std.json.Value, allocator, owned, .{}) catch return null;
-    return parsed.value;
+pub fn parseDetailsValue(allocator: std.mem.Allocator, text: []const u8) std.json.Value {
+    if (text.len == 0) return .{ .object = .empty };
+    const owned = allocator.dupe(u8, text) catch return .{ .object = .empty };
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, owned, .{}) catch return .{ .object = .empty };
+    // The client reads `details` as a record. A scalar there (the column
+    // is free-form JSON) would fail validation, so it becomes an object.
+    return switch (parsed.value) {
+        .object => parsed.value,
+        else => .{ .object = .empty },
+    };
 }
 
 /// Project an `activity_log` row into a timeline entry.
