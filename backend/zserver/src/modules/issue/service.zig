@@ -2214,7 +2214,8 @@ pub fn taskRuns(ctx: *zfinal.Context) !void {
         };
         defer deps.releaseBack(db);
         var rs = db.queryParams(
-            "SELECT id::text, issue_id::text, status, created_at " ++
+            "SELECT id::text, issue_id::text, status, created_at, " ++
+                "dispatched_at, started_at, completed_at, error, failure_reason " ++
                 "FROM agent_task_queue WHERE issue_id = $1::uuid",
             &[_]zfinal.SqlParam{.{ .text = issue_id }},
         ) catch {
@@ -2225,11 +2226,17 @@ pub fn taskRuns(ctx: *zfinal.Context) !void {
         var out: std.ArrayList(model.TaskResponse) = .empty;
         defer out.deinit(allocator);
         for (0..rs.rows.items.len) |i| {
+            const row = &rs.rows.items[i];
             try out.append(allocator, .{
-                .id = rs.rows.items[i].getText(0) orelse "",
-                .issue_id = rs.rows.items[i].getText(1) orelse "",
-                .status = rs.rows.items[i].getText(2) orelse "",
-                .created_at = rs.rows.items[i].getText(3) orelse "",
+                .id = row.getText(0) orelse "",
+                .issue_id = row.getText(1) orelse "",
+                .status = row.getText(2) orelse "",
+                .created_at = row.getText(3) orelse "",
+                .dispatched_at = row.getText(4),
+                .started_at = row.getText(5),
+                .completed_at = row.getText(6),
+                .@"error" = row.getText(7),
+                .failure_reason = row.getText(8) orelse "",
             });
         }
         try response.ok(ctx, out.items);

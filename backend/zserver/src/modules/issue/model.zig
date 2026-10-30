@@ -403,6 +403,15 @@ pub const TaskResponse = struct {
     issue_id: []const u8,
     status: []const u8,
     created_at: []const u8,
+    dispatched_at: ?[]const u8 = null,
+    started_at: ?[]const u8 = null,
+    completed_at: ?[]const u8 = null,
+    @"error": ?[]const u8 = null,
+    /// The coarse class of a failure ("agent_error", "timeout", …).
+    ///
+    /// The frontend renders it as a label next to a failed task row, so
+    /// it has to reach the client. Empty when the task did not fail.
+    failure_reason: []const u8 = "",
 };
 
 /// Wire DTO for `/api/issues/:id/pull-requests`.

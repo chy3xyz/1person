@@ -871,7 +871,7 @@ pub fn listTasks(ctx: *zfinal.Context) !void {
         defer deps.releaseBack(db);
         var rs = try db.queryParams(
             "SELECT id::text, agent_id::text, issue_id::text, status, priority, " ++
-                "dispatched_at, started_at, completed_at, result, error, created_at " ++
+                "dispatched_at, started_at, completed_at, result, error, created_at, failure_reason " ++
                 "FROM agent_task_queue WHERE agent_id = $1::uuid ORDER BY created_at DESC",
             &[_]SqlParam{.{ .text = agent_id }},
         );
@@ -893,6 +893,7 @@ pub fn listTasks(ctx: *zfinal.Context) !void {
                 .result = row.getText(8),
                 .@"error" = row.getText(9),
                 .created_at = row.getText(10) orelse "",
+                .failure_reason = row.getText(11) orelse "",
             });
         }
         try ctx.renderJson(list.items);
@@ -911,12 +912,12 @@ pub fn listTasks(ctx: *zfinal.Context) !void {
 /// "bind message supplies 2 parameters, but prepared statement requires 1".
 pub const agentTaskSnapshotSql =
     "SELECT atq.id::text, atq.agent_id::text, atq.issue_id::text, atq.status, atq.priority, " ++
-        "atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at " ++
+        "atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.failure_reason " ++
         "FROM agent_task_queue atq JOIN agent a ON a.id = atq.agent_id " ++
         "WHERE a.workspace_id = $1::uuid AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory') " ++
         "UNION ALL " ++
         "SELECT t.id::text, t.agent_id::text, t.issue_id::text, t.status, t.priority, " ++
-        "t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at " ++
+        "t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.failure_reason " ++
         "FROM (SELECT DISTINCT ON (atq.agent_id) atq.* FROM agent_task_queue atq " ++
         "JOIN agent a ON a.id = atq.agent_id WHERE a.workspace_id = $1::uuid " ++
         "AND atq.status IN ('completed', 'failed') ORDER BY atq.agent_id, atq.created_at DESC) t";
@@ -970,6 +971,7 @@ pub fn getAgentTaskSnapshot(ctx: *zfinal.Context) !void {
                 .result = row.getText(8),
                 .@"error" = row.getText(9),
                 .created_at = row.getText(10) orelse "",
+                .failure_reason = row.getText(11) orelse "",
             });
         }
         try ctx.renderJson(list.items);

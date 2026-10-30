@@ -160,6 +160,15 @@ pub const TaskResponse = struct {
     result: ?[]const u8 = null,
     @"error": ?[]const u8 = null,
     created_at: []const u8,
+    /// The coarse class of a failure ("agent_error", "timeout", …).
+    ///
+    /// The frontend renders it as a label next to the task row, so it
+    /// has to reach the client — the column exists upstream and the
+    /// frontend already reads it, but the response did not carry it.
+    ///
+    /// Empty when the task did not fail: the frontend's schema takes a
+    /// string here, not a nullable one.
+    failure_reason: []const u8 = "",
 };
 
 /// Response body for `GET/PUT /api/agents/:id/env`.
