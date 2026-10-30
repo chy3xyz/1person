@@ -478,18 +478,29 @@ pub fn rfc3339(allocator: std.mem.Allocator, secs: i64) ![]u8 {
 /// All fields are optional in the PATCH case (only present fields
 /// are updated) and required-ish in the POST case (`title` is the
 /// only mandatory field — everything else has a sensible default).
+/// Request body for `POST /api/issues` and `PATCH /api/issues/:id`.
+///
+/// The field names ARE the wire contract, and they match the upstream Go
+/// server: `status` and `parent_issue_id`, never `state` and `parent_id`.
+/// The request parser ignores unknown fields, so a DTO that used the
+/// internal names silently swallowed everything the client sent — the
+/// request answered 200 and changed nothing. The response side always
+/// used the wire names, which is why the mismatch stayed invisible until
+/// someone tried to move an issue between statuses.
+///
+/// The creator is not part of the request: it comes from the acting
+/// member or agent, exactly like upstream. The DTO used to carry
+/// `creator_type` / `creator_id`, which only the in-memory path honoured
+/// — the DB path always used the actor, so the two paths disagreed.
 pub const CreateIssueRequest = struct {
     title: []const u8,
     description: ?[]const u8 = null,
-    state: ?[]const u8 = null,
+    status: ?[]const u8 = null,
     project_id: ?[]const u8 = null,
-    parent_id: ?[]const u8 = null,
+    parent_issue_id: ?[]const u8 = null,
     assignee_id: ?[]const u8 = null,
     priority: ?[]const u8 = null,
-    // Go alignment fields
     assignee_type: ?[]const u8 = null,
-    creator_type: ?[]const u8 = null,
-    creator_id: ?[]const u8 = null,
     position: ?f64 = null,
     due_date: ?[]const u8 = null,
     start_date: ?[]const u8 = null,
@@ -498,18 +509,59 @@ pub const CreateIssueRequest = struct {
 pub const UpdateIssueRequest = struct {
     title: ?[]const u8 = null,
     description: ?[]const u8 = null,
-    state: ?[]const u8 = null,
+    status: ?[]const u8 = null,
     project_id: ?[]const u8 = null,
-    parent_id: ?[]const u8 = null,
+    parent_issue_id: ?[]const u8 = null,
     assignee_id: ?[]const u8 = null,
     priority: ?[]const u8 = null,
-    // Go alignment fields
     assignee_type: ?[]const u8 = null,
-    creator_type: ?[]const u8 = null,
-    creator_id: ?[]const u8 = null,
     position: ?f64 = null,
     due_date: ?[]const u8 = null,
     start_date: ?[]const u8 = null,
+};
+
+/// The columns one issue write touches.
+///
+/// Every column uses the same three-state encoding: `null` means "leave
+/// this column alone", the empty string means "clear it", and any other
+/// value is written as-is. The distinction is load-bearing — a PATCH
+/// field has exactly three states in the request body ("absent", "null"
+/// and "a value") and a typed `?T` only ever sees two of them.
+///
+/// Columns whose upstream counterpart is a plain string (title, status,
+/// priority, …) treat the empty string as a value, not as a clear:
+/// upstream's Go pointers make `null` mean "absent" for those, and only
+/// the explicitly nullable ones (assignee pair, project, parent, dates)
+/// use `null` to clear.
+pub const IssuePatch = struct {
+    title: ?[]const u8 = null,
+    description: ?[]const u8 = null,
+    status: ?[]const u8 = null,
+    priority: ?[]const u8 = null,
+    position: ?f64 = null,
+    project_id: ?[]const u8 = null,
+    parent_issue_id: ?[]const u8 = null,
+    assignee_id: ?[]const u8 = null,
+    assignee_type: ?[]const u8 = null,
+    start_date: ?[]const u8 = null,
+    due_date: ?[]const u8 = null,
+};
+
+/// The columns one issue insert sets.
+pub const IssueCreate = struct {
+    title: []const u8,
+    description: []const u8 = "",
+    status: []const u8 = DEFAULT_STATE,
+    priority: []const u8 = DEFAULT_PRIORITY,
+    position: f64 = 0,
+    project_id: []const u8 = "",
+    parent_issue_id: []const u8 = "",
+    assignee_id: []const u8 = "",
+    assignee_type: ?[]const u8 = null,
+    creator_id: []const u8,
+    creator_type: []const u8,
+    start_date: ?[]const u8 = null,
+    due_date: ?[]const u8 = null,
 };
 
 /// Request body for `PATCH /api/issues/:id/metadata`. The wire shape
@@ -653,6 +705,39 @@ pub fn isValidPriority(priority: []const u8) bool {
 }
 
 pub const DEFAULT_PRIORITY: []const u8 = "none";
+
+/// Calendar-date validator for the `start_date` / `due_date` columns.
+/// The columns are `date` in Postgres, so a malformed value would abort
+/// the whole UPDATE instead of failing the request — the shape is checked
+/// here first, exactly like upstream's `util.ParseCalendarDate`.
+pub fn isValidCalendarDate(value: []const u8) bool {
+    if (value.len != 10) return false;
+    if (value[4] != '-' or value[7] != '-') return false;
+    for ([_]usize{ 0, 1, 2, 5, 6, 8, 9 }) |i| {
+        if (!std.ascii.isDigit(value[i])) return false;
+    }
+    const year = std.fmt.parseInt(u16, value[0..4], 10) catch return false;
+    const month = std.fmt.parseInt(u8, value[5..7], 10) catch return false;
+    const day = std.fmt.parseInt(u8, value[8..10], 10) catch return false;
+    if (month < 1 or month > 12) return false;
+    if (day < 1) return false;
+    return day <= daysInMonth(year, month);
+}
+
+fn daysInMonth(year: u16, month: u8) u8 {
+    return switch (month) {
+        1, 3, 5, 7, 8, 10, 12 => 31,
+        4, 6, 9, 11 => 30,
+        2 => if (isLeapYear(year)) 29 else 28,
+        else => 0,
+    };
+}
+
+fn isLeapYear(year: u16) bool {
+    if (year % 4 != 0) return false;
+    if (year % 100 != 0) return true;
+    return year % 400 == 0;
+}
 
 /// Trim + non-empty check. Returns the trimmed slice or `null` when
 /// the field is empty.
@@ -1135,38 +1220,33 @@ pub fn issueExistsAny(issue_id: []const u8) bool {
 /// with type "member", so every issue claimed the workspace as its
 /// author. `assignee_type` is the kind of the assignee (agent /
 /// member); `null` leaves the issue unassigned.
-pub fn insertIssue(
-    workspace_id: []const u8,
-    title: []const u8,
-    description: []const u8,
-    state: []const u8,
-    project_id: []const u8,
-    parent_id: []const u8,
-    assignee_id: []const u8,
-    assignee_type: ?[]const u8,
-    creator_id: []const u8,
-    creator_type: []const u8,
-) ?IssueResponse {
+pub fn insertIssue(workspace_id: []const u8, issue: IssueCreate) ?IssueResponse {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
     var rs = db.queryParams(
-        "INSERT INTO issue (workspace_id, title, description, status, project_id, parent_issue_id, " ++
-            "assignee_type, assignee_id, creator_type, creator_id, number) " ++
-            "VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid, NULLIF($6, '')::uuid, " ++
-            "NULLIF($7, ''), NULLIF($8, '')::uuid, $9, NULLIF($10, '')::uuid, " ++
+        "INSERT INTO issue (workspace_id, title, description, status, priority, position, " ++
+            "project_id, parent_issue_id, assignee_type, assignee_id, creator_type, creator_id, " ++
+            "start_date, due_date, number) " ++
+            "VALUES ($1::uuid, $2, $3, $4, $5, $6, " ++
+            "NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, ''), NULLIF($10, '')::uuid, " ++
+            "$11, $12::uuid, NULLIF($13, '')::date, NULLIF($14, '')::date, " ++
             "(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1::uuid)) " ++
             "RETURNING " ++ issueReturningColumns,
         &[_]SqlParam{
             .{ .text = workspace_id },
-            .{ .text = title },
-            .{ .text = description },
-            .{ .text = state },
-            .{ .text = project_id },
-            .{ .text = parent_id },
-            .{ .text = assignee_type orelse "" },
-            .{ .text = assignee_id },
-            .{ .text = creator_type },
-            .{ .text = creator_id },
+            .{ .text = issue.title },
+            .{ .text = issue.description },
+            .{ .text = issue.status },
+            .{ .text = issue.priority },
+            .{ .real = issue.position },
+            .{ .text = issue.project_id },
+            .{ .text = issue.parent_issue_id },
+            .{ .text = issue.assignee_type orelse "" },
+            .{ .text = issue.assignee_id },
+            .{ .text = issue.creator_type },
+            .{ .text = issue.creator_id },
+            .{ .text = issue.start_date orelse "" },
+            .{ .text = issue.due_date orelse "" },
         },
     ) catch return null;
     defer rs.deinit();
@@ -1329,6 +1409,151 @@ pub fn resolveAssigneeType(workspace_id: []const u8, assignee_id: []const u8) ?[
     return null;
 }
 
+/// Why an `(assignee_type, assignee_id)` pair was rejected. Mirrors the
+/// upstream `validateAssigneePair`
+/// (`server/internal/handler/issue.go`): the pair must name an existing,
+/// non-archived entity of that kind inside the workspace.
+pub const AssigneePairError = error{
+    /// Only one half of the pair was supplied — an assignee is always a
+    /// (type, id) tuple.
+    IncompletePair,
+    /// `assignee_type` is not one of member / agent / squad.
+    UnknownType,
+    /// The id does not name an entity of that kind in this workspace.
+    NotFound,
+    /// The target agent / squad is archived.
+    Archived,
+};
+
+/// The assignee pair currently stored on an issue. Both fields are owned
+/// by the allocator passed to `selectIssueAssignee`; free them with
+/// `IssueAssignee.deinit`.
+pub const IssueAssignee = struct {
+    assignee_type: ?[]const u8,
+    assignee_id: ?[]const u8,
+
+    pub fn deinit(self: IssueAssignee, allocator: std.mem.Allocator) void {
+        if (self.assignee_type) |t| allocator.free(t);
+        if (self.assignee_id) |i| allocator.free(i);
+    }
+};
+
+/// `SELECT assignee_type, assignee_id FROM issue WHERE id = $1 AND
+/// workspace_id = $2`. Returns `null` when no row matches.
+///
+/// The update path needs the pair before it can apply the upstream
+/// "merge with the current value" rule: a PATCH that only mentions
+/// `assignee_id` keeps the existing `assignee_type`, and vice versa.
+pub fn selectIssueAssignee(
+    allocator: std.mem.Allocator,
+    workspace_id: []const u8,
+    issue_id: []const u8,
+) ?IssueAssignee {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT assignee_type, assignee_id::text FROM issue " ++
+            "WHERE id = $1::uuid AND workspace_id = $2::uuid",
+        &[_]SqlParam{
+            .{ .text = issue_id },
+            .{ .text = workspace_id },
+        },
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    const row = &rs.rows.items[0];
+    const type_raw = row.getText(0);
+    const id_raw = row.getText(1);
+    const dup_type: ?[]const u8 = if (type_raw) |t| blk: {
+        if (t.len == 0) break :blk null;
+        const d = allocator.dupe(u8, t) catch return null;
+        break :blk d;
+    } else null;
+    errdefer if (dup_type) |t| allocator.free(t);
+    const dup_id: ?[]const u8 = if (id_raw) |i| blk: {
+        if (i.len == 0) break :blk null;
+        const d = allocator.dupe(u8, i) catch return null;
+        break :blk d;
+    } else null;
+    return .{ .assignee_type = dup_type, .assignee_id = dup_id };
+}
+
+/// Validate an `(assignee_type, assignee_id)` pair against the workspace.
+///
+/// Both fields must be supplied together (an assignee without a kind, or a
+/// kind without a target, is ambiguous), the kind must be one of
+/// `member` / `agent` / `squad`, and the target must exist in this
+/// workspace and not be archived. Squad targets additionally require a
+/// live leader — upstream rejects assigning a squad whose leader is
+/// archived.
+///
+/// The permission gate (upstream's `canInvokeAgent`) is not implemented
+/// here: it needs the request originator chain, which this fork does not
+/// model. The client applies the visibility gate before offering an
+/// agent in the picker.
+///
+/// Without a database there is nothing to look the target up in (the
+/// no-DB mode has no agent / member / squad tables at all), so the
+/// existence and archived checks are skipped there and only the pair
+/// shape is enforced.
+pub fn validateAssigneePair(
+    workspace_id: []const u8,
+    assignee_type: []const u8,
+    assignee_id: []const u8,
+) AssigneePairError!void {
+    if (assignee_type.len == 0 or assignee_id.len == 0) return error.IncompletePair;
+
+    const db = borrowDb() orelse return;
+    defer deps.releaseBack(db);
+
+    if (std.mem.eql(u8, assignee_type, "member")) {
+        var rs = db.queryParams(
+            "SELECT EXISTS(SELECT 1 FROM member WHERE workspace_id = $1::uuid AND user_id = $2::uuid)",
+            &[_]SqlParam{
+                .{ .text = workspace_id },
+                .{ .text = assignee_id },
+            },
+        ) catch return;
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) return error.NotFound;
+        if (((rs.rows.items[0].getInt(0) catch null) orelse 0) == 0) return error.NotFound;
+        return;
+    }
+
+    if (std.mem.eql(u8, assignee_type, "agent")) {
+        var rs = db.queryParams(
+            "SELECT archived_at IS NOT NULL FROM agent WHERE id = $1::uuid AND workspace_id = $2::uuid",
+            &[_]SqlParam{
+                .{ .text = assignee_id },
+                .{ .text = workspace_id },
+            },
+        ) catch return;
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) return error.NotFound;
+        if (((rs.rows.items[0].getInt(0) catch null) orelse 0) != 0) return error.Archived;
+        return;
+    }
+
+    if (std.mem.eql(u8, assignee_type, "squad")) {
+        var rs = db.queryParams(
+            "SELECT s.archived_at IS NOT NULL, " ++
+                "(SELECT a.archived_at IS NOT NULL FROM agent a WHERE a.id = s.leader_id) " ++
+                "FROM squad s WHERE s.id = $1::uuid AND s.workspace_id = $2::uuid",
+            &[_]SqlParam{
+                .{ .text = assignee_id },
+                .{ .text = workspace_id },
+            },
+        ) catch return;
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) return error.NotFound;
+        if (((rs.rows.items[0].getInt(0) catch null) orelse 0) != 0) return error.Archived;
+        if (((rs.rows.items[0].getInt(1) catch null) orelse 0) != 0) return error.Archived;
+        return;
+    }
+
+    return error.UnknownType;
+}
+
 /// `SELECT <issueSelectColumns> FROM issue i LEFT JOIN workspace w ...
 /// WHERE i.id = $1::uuid AND i.workspace_id = $2::uuid`. Returns
 /// `null` when no row matches.
@@ -1348,43 +1573,90 @@ pub fn selectIssueById(workspace_id: []const u8, issue_id: []const u8) ?IssueRes
     return issueResponseFromRowDuped(db.allocator, &rs, 0);
 }
 
-/// `UPDATE issue SET <patch> WHERE id = $1 AND workspace_id = $2
-/// RETURNING ...`. Empty strings for fields the caller doesn't want
-/// to update; the SQL `COALESCE(NULLIF(..., ''), ...)` pattern keeps
-/// the previous value in that case. The `status` column is renamed
-/// to `state` in the API.
+/// The `SET` clause of an issue patch, shared by the single-issue and the
+/// batch update so the two paths cannot drift apart.
+///
+/// Every column uses the same three-state encoding: a SQL NULL parameter
+/// leaves the column alone, the empty string clears it (for the nullable
+/// columns), and any other value is written as-is.
+///
+/// The old encoding was `COALESCE(NULLIF($n, ''), column)`, which could
+/// only ever write a value — it could never clear a column. The assignee
+/// pair additionally never wrote `assignee_type` at all, so every
+/// agent-assigned issue came back with a null type and the client
+/// rendered it as unassigned.
+const issuePatchSetSql =
+    "title = CASE WHEN $3::text IS NULL THEN title ELSE $3::text END, " ++
+    "description = CASE WHEN $4::text IS NULL THEN description ELSE $4::text END, " ++
+    "status = CASE WHEN $5::text IS NULL THEN status ELSE $5::text END, " ++
+    "priority = CASE WHEN $6::text IS NULL THEN priority ELSE $6::text END, " ++
+    "position = CASE WHEN $7::float8 IS NULL THEN position ELSE $7::float8 END, " ++
+    "project_id = CASE WHEN $8::text IS NULL THEN project_id " ++
+    "WHEN $8::text = '' THEN NULL ELSE $8::text::uuid END, " ++
+    "parent_issue_id = CASE WHEN $9::text IS NULL THEN parent_issue_id " ++
+    "WHEN $9::text = '' THEN NULL ELSE $9::text::uuid END, " ++
+    "assignee_id = CASE WHEN $10::text IS NULL THEN assignee_id " ++
+    "WHEN $10::text = '' THEN NULL ELSE $10::text::uuid END, " ++
+    "assignee_type = CASE WHEN $11::text IS NULL THEN assignee_type " ++
+    "WHEN $11::text = '' THEN NULL ELSE $11::text END, " ++
+    "start_date = CASE WHEN $12::text IS NULL THEN start_date " ++
+    "WHEN $12::text = '' THEN NULL ELSE $12::text::date END, " ++
+    "due_date = CASE WHEN $13::text IS NULL THEN due_date " ++
+    "WHEN $13::text = '' THEN NULL ELSE $13::text::date END, " ++
+    "updated_at = now() ";
+
+/// Bind one patch column: `null` leaves the column alone, anything else
+/// is written as-is.
+fn issuePatchText(value: ?[]const u8) SqlParam {
+    return if (value) |v| SqlParam{ .text = v } else SqlParam{ .null = {} };
+}
+
+/// The eleven patch columns, in the order `issuePatchSetSql` expects them.
+fn issuePatchParams(patch: IssuePatch) [11]SqlParam {
+    return .{
+        issuePatchText(patch.title),
+        issuePatchText(patch.description),
+        issuePatchText(patch.status),
+        issuePatchText(patch.priority),
+        if (patch.position) |p| SqlParam{ .real = p } else SqlParam{ .null = {} },
+        issuePatchText(patch.project_id),
+        issuePatchText(patch.parent_issue_id),
+        issuePatchText(patch.assignee_id),
+        issuePatchText(patch.assignee_type),
+        issuePatchText(patch.start_date),
+        issuePatchText(patch.due_date),
+    };
+}
+
+/// `UPDATE issue SET <patch> WHERE id = $1::uuid AND workspace_id = $2::uuid
+/// RETURNING ...`. The patch carries one three-state value per column;
+/// see `issuePatchSetSql` for the encoding.
 pub fn updateIssue(
     issue_id: []const u8,
     workspace_id: []const u8,
-    title: []const u8,
-    description: []const u8,
-    state: []const u8,
-    project_id: []const u8,
-    parent_id: []const u8,
-    assignee_id: []const u8,
+    patch: IssuePatch,
 ) ?IssueResponse {
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
+    const patch_params = issuePatchParams(patch);
     var rs = db.queryParams(
-        "UPDATE issue SET " ++
-            "title = COALESCE(NULLIF($3, ''), title), " ++
-            "description = COALESCE(NULLIF($4, ''), description), " ++
-            "status = COALESCE(NULLIF($5, ''), status), " ++
-            "project_id = COALESCE(NULLIF($6, '')::uuid, project_id), " ++
-            "parent_issue_id = COALESCE(NULLIF($7, '')::uuid, parent_issue_id), " ++
-            "assignee_id = COALESCE(NULLIF($8, '')::uuid, assignee_id), " ++
-            "updated_at = now() " ++
+        "UPDATE issue SET " ++ issuePatchSetSql ++
             "WHERE id = $1::uuid AND workspace_id = $2::uuid " ++
             "RETURNING " ++ issueReturningColumns,
         &[_]SqlParam{
             .{ .text = issue_id },
             .{ .text = workspace_id },
-            .{ .text = title },
-            .{ .text = description },
-            .{ .text = state },
-            .{ .text = project_id },
-            .{ .text = parent_id },
-            .{ .text = assignee_id },
+            patch_params[0],
+            patch_params[1],
+            patch_params[2],
+            patch_params[3],
+            patch_params[4],
+            patch_params[5],
+            patch_params[6],
+            patch_params[7],
+            patch_params[8],
+            patch_params[9],
+            patch_params[10],
         },
     ) catch return null;
     defer rs.deinit();
@@ -1392,42 +1664,36 @@ pub fn updateIssue(
     return issueResponseFromRowDuped(db.allocator, &rs, 0);
 }
 
-/// `UPDATE issue SET title = COALESCE(NULLIF($3,''), title), ...,
-/// updated_at = now() WHERE id = $1::uuid AND workspace_id = $2::uuid
+/// `UPDATE issue SET <patch> WHERE id = $1::uuid AND workspace_id = $2::uuid
 /// RETURNING id`. Used by batchUpdate for the DB path. Returns `true`
-/// when a row was updated.
+/// when a row was updated. The patch encoding is identical to
+/// `updateIssue`'s — both share `issuePatchSetSql`.
 pub fn batchUpdateIssueDB(
     issue_id: []const u8,
     workspace_id: []const u8,
-    title: []const u8,
-    description: []const u8,
-    state: []const u8,
-    project_id: []const u8,
-    parent_id: []const u8,
-    assignee_id: []const u8,
+    patch: IssuePatch,
 ) bool {
     const db = borrowDb() orelse return false;
     defer deps.releaseBack(db);
+    const patch_params = issuePatchParams(patch);
     var rs = db.queryParams(
-        "UPDATE issue SET " ++
-            "title = COALESCE(NULLIF($3, ''), title), " ++
-            "description = COALESCE(NULLIF($4, ''), description), " ++
-            "status = COALESCE(NULLIF($5, ''), status), " ++
-            "project_id = COALESCE(NULLIF($6, '')::uuid, project_id), " ++
-            "parent_issue_id = COALESCE(NULLIF($7, '')::uuid, parent_issue_id), " ++
-            "assignee_id = COALESCE(NULLIF($8, '')::uuid, assignee_id), " ++
-            "updated_at = now() " ++
+        "UPDATE issue SET " ++ issuePatchSetSql ++
             "WHERE id = $1::uuid AND workspace_id = $2::uuid " ++
             "RETURNING id",
         &[_]SqlParam{
             .{ .text = issue_id },
             .{ .text = workspace_id },
-            .{ .text = title },
-            .{ .text = description },
-            .{ .text = state },
-            .{ .text = project_id },
-            .{ .text = parent_id },
-            .{ .text = assignee_id },
+            patch_params[0],
+            patch_params[1],
+            patch_params[2],
+            patch_params[3],
+            patch_params[4],
+            patch_params[5],
+            patch_params[6],
+            patch_params[7],
+            patch_params[8],
+            patch_params[9],
+            patch_params[10],
         },
     ) catch return false;
     defer rs.deinit();

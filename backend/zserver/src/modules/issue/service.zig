@@ -342,36 +342,72 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
         return;
     };
 
-    const state = req.state orelse model.DEFAULT_STATE;
-    if (!model.isValidState(state)) {
-        try response.err(ctx, .bad_request, "invalid state", 40043);
+    const status = req.status orelse model.DEFAULT_STATE;
+    if (!model.isValidState(status)) {
+        try response.err(ctx, .bad_request, "invalid status", 40043);
         return;
     }
     if (req.priority) |p| if (!model.isValidPriority(p)) {
         try response.err(ctx, .bad_request, "invalid priority", 40044);
         return;
     };
+    if (req.start_date) |d| if (!model.isValidCalendarDate(d)) {
+        try response.err(ctx, .bad_request, "invalid start_date format, expected YYYY-MM-DD", 40049);
+        return;
+    };
+    if (req.due_date) |d| if (!model.isValidCalendarDate(d)) {
+        try response.err(ctx, .bad_request, "invalid due_date format, expected YYYY-MM-DD", 40049);
+        return;
+    };
 
     const description = req.description orelse "";
     const project_id = req.project_id orelse "";
-    const parent_id = req.parent_id orelse "";
+    const parent_issue_id = req.parent_issue_id orelse "";
     const assignee_id = req.assignee_id orelse "";
+
+    // The assignee is a (type, id) tuple. A bare type is refused: it
+    // would write an assignment the client cannot render, because it
+    // renders an issue without a target as unassigned.
+    if (req.assignee_type != null and assignee_id.len == 0) {
+        try response.err(ctx, .bad_request, "assignee_type and assignee_id must be provided together", 40048);
+        return;
+    }
 
     if (deps.hasPool()) {
         const actor = resolveActor(ctx);
-        const assignee_type = model.resolveAssigneeType(workspace_id, assignee_id);
-        if (model.insertIssue(
-            workspace_id,
-            title,
-            description,
-            state,
-            project_id,
-            parent_id,
-            assignee_id,
-            assignee_type,
-            actor.actor_id,
-            actor.actor_type,
-        )) |resp| {
+        // The client may send both halves (the frontend always does); a
+        // bare id is resolved to its kind. An id that names nothing is
+        // refused too — same reason.
+        // Prefer the kind the client sent. Deriving it from the id only
+        // knows about agents and members, so a squad assignee came out
+        // with a null type — and the client renders an issue without a
+        // type as unassigned, no matter what the id points at.
+        const assignee_type = if (req.assignee_type) |t| t else model.resolveAssigneeType(workspace_id, assignee_id);
+        if (assignee_id.len > 0) {
+            const kind = assignee_type orelse {
+                try response.err(ctx, .bad_request, "assignee_id does not refer to an agent or member of this workspace", 40048);
+                return;
+            };
+            model.validateAssigneePair(workspace_id, kind, assignee_id) catch |err| {
+                try response.err(ctx, .bad_request, assigneePairMessage(err, kind), 40048);
+                return;
+            };
+        }
+        if (model.insertIssue(workspace_id, .{
+            .title = title,
+            .description = description,
+            .status = status,
+            .priority = req.priority orelse model.DEFAULT_PRIORITY,
+            .position = req.position orelse 0,
+            .project_id = project_id,
+            .parent_issue_id = parent_issue_id,
+            .assignee_id = assignee_id,
+            .assignee_type = assignee_type,
+            .creator_id = actor.actor_id,
+            .creator_type = actor.actor_type,
+            .start_date = req.start_date,
+            .due_date = req.due_date,
+        })) |resp| {
             ctx.res_status = .created;
             if (issueResponseJson(allocator, resp)) |issue_json| {
                 defer allocator.free(issue_json);
@@ -398,24 +434,25 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
         try model.memDup(assignee_type_raw)
     else
         null;
-    const creator_type_raw = req.creator_type orelse resolveActor(ctx).actor_type;
-    const creator_id_raw = req.creator_id orelse resolveActor(ctx).actor_id;
+    // The creator is the acting member or agent — never a client-supplied
+    // field, exactly like the DB path.
+    const creator = resolveActor(ctx);
     const entry = model.Issue{
         .id = try model.memDup(id),
         .workspace_id = try model.memDup(workspace_id),
         .title = try model.memDup(title),
         .description = try model.memDup(description),
         .project_id = try model.memDup(project_id),
-        .parent_id = try model.memDup(parent_id),
+        .parent_id = try model.memDup(parent_issue_id),
         .assignee_id = try model.memDup(assignee_id),
-        .state = try model.memDup(state),
+        .state = try model.memDup(status),
         .created_at = try model.memDup(now),
         .updated_at = try model.memDup(now),
         .squad_evaluated_at = null,
         .priority = try model.memDup(priority),
         .assignee_type = assignee_type_dup,
-        .creator_type = try model.memDup(creator_type_raw),
-        .creator_id = try model.memDup(creator_id_raw),
+        .creator_type = try model.memDup(creator.actor_type),
+        .creator_id = try model.memDup(creator.actor_id),
         .position = req.position orelse 0.0,
         .due_date = if (req.due_date) |d| try model.memDup(d) else null,
         .start_date = if (req.start_date) |d| try model.memDup(d) else null,
@@ -468,30 +505,66 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
     const workspace_id = try requireWorkspaceId(ctx);
     const issue_id = try response.parseStringId(ctx, "id");
 
-    const parsed = try validation.validateJson(model.UpdateIssueRequest, ctx);
+    // The raw JSON tree is parsed alongside the typed request because an
+    // assignee is a (type, id) tuple that the client must be able to set
+    // AND clear: "field absent", "explicitly null" and "a value" are
+    // three different instructions, and a typed `?T` only sees two.
+    var parsed: std.json.Parsed(model.UpdateIssueRequest) = undefined;
+    var raw: std.json.Parsed(std.json.Value) = undefined;
+    try validation.validateJsonWithRaw(model.UpdateIssueRequest, ctx, &parsed, &raw);
     defer parsed.deinit();
+    defer raw.deinit();
     const req = parsed.value;
 
-    if (req.state) |s| if (!model.isValidState(s)) {
-        try response.err(ctx, .bad_request, "invalid state", 40043);
+    if (req.status) |s| if (!model.isValidState(s)) {
+        try response.err(ctx, .bad_request, "invalid status", 40043);
         return;
     };
     if (req.priority) |p| if (!model.isValidPriority(p)) {
         try response.err(ctx, .bad_request, "invalid priority", 40044);
         return;
     };
+    if (req.start_date) |d| if (!model.isValidCalendarDate(d)) {
+        try response.err(ctx, .bad_request, "invalid start_date format, expected YYYY-MM-DD", 40049);
+        return;
+    };
+    if (req.due_date) |d| if (!model.isValidCalendarDate(d)) {
+        try response.err(ctx, .bad_request, "invalid due_date format, expected YYYY-MM-DD", 40049);
+        return;
+    };
+    if (req.title) |t| if (model.validateTitle(t) == null) {
+        try response.err(ctx, .bad_request, "title cannot be empty", 40045);
+        return;
+    };
+
+    const type_state = validation.fieldState(raw.value, "assignee_type");
+    const id_state = validation.fieldState(raw.value, "assignee_id");
+    const assignee_touched = type_state != .absent or id_state != .absent;
+
+    // Every column the client did not mention keeps its value; the ones
+    // it did mention are written (or cleared, for the nullable ones).
+    var patch = issuePatchFromRequest(raw.value, null, req);
 
     if (deps.hasPool()) {
-        if (model.updateIssue(
-            issue_id,
-            workspace_id,
-            req.title orelse "",
-            req.description orelse "",
-            req.state orelse "",
-            req.project_id orelse "",
-            req.parent_id orelse "",
-            req.assignee_id orelse "",
-        )) |resp| {
+        var resolved_owner: ?ResolvedAssignee = null;
+        // Freed when the handler returns. The strings are read by
+        // `model.updateIssue`, so they must outlive the block that
+        // produced them — freeing them when that block ends hands the
+        // UPDATE a dangling pointer.
+        defer if (resolved_owner) |r| r.deinit(ctx.allocator);
+        if (assignee_touched) {
+            const current = model.selectIssueAssignee(ctx.allocator, workspace_id, issue_id) orelse {
+                try response.err(ctx, .not_found, "issue not found", 40410);
+                return;
+            };
+            defer current.deinit(ctx.allocator);
+            const resolved = try resolveAssigneeUpdate(ctx, current, type_state, id_state, req.assignee_type, req.assignee_id);
+            resolved_owner = resolved;
+            patch.assignee_id = resolved.assignee_id;
+            patch.assignee_type = resolved.assignee_type;
+        }
+
+        if (model.updateIssue(issue_id, workspace_id, patch)) |resp| {
             // DB path must fan out the same WS event as the in-memory
             // path below; without this, realtime clients never see
             // issue updates in production (DB configured).
@@ -517,27 +590,37 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
         try response.err(ctx, .not_found, "issue not found", 40410);
         return;
     };
-    if (req.title) |t| {
-        const trimmed = model.validateTitle(t) orelse {
-            try response.err(ctx, .bad_request, "title cannot be empty", 40045);
-            return;
+    if (patch.title) |t| entry_ptr.title = try model.memDup(t);
+    if (patch.description) |d| entry_ptr.description = try model.memDup(d);
+    if (patch.status) |s| entry_ptr.state = try model.memDup(s);
+    if (patch.project_id) |p| entry_ptr.project_id = try model.memDup(p);
+    if (patch.parent_issue_id) |p| entry_ptr.parent_id = try model.memDup(p);
+    if (patch.priority) |p| entry_ptr.priority = try model.memDup(p);
+    if (patch.position) |p| entry_ptr.position = p;
+    if (patch.start_date) |d| entry_ptr.start_date = try model.memDup(d);
+    if (patch.due_date) |d| entry_ptr.due_date = try model.memDup(d);
+    if (assignee_touched) {
+        const current = model.IssueAssignee{
+            .assignee_type = entry_ptr.assignee_type,
+            .assignee_id = if (entry_ptr.assignee_id.len > 0) entry_ptr.assignee_id else null,
         };
-        entry_ptr.title = try model.memDup(trimmed);
+        const resolved = try resolveAssigneeUpdate(ctx, current, type_state, id_state, req.assignee_type, req.assignee_id);
+        defer resolved.deinit(ctx.allocator);
+        if (resolved.assignee_type) |t| {
+            if (t.len > 0) {
+                entry_ptr.assignee_type = try model.memDup(t);
+            } else {
+                entry_ptr.assignee_type = null;
+            }
+        }
+        if (resolved.assignee_id) |i| {
+            if (i.len > 0) {
+                entry_ptr.assignee_id = try model.memDup(i);
+            } else {
+                entry_ptr.assignee_id = "";
+            }
+        }
     }
-    if (req.description) |d| entry_ptr.description = try model.memDup(d);
-    if (req.state) |s| entry_ptr.state = try model.memDup(s);
-    if (req.project_id) |p| entry_ptr.project_id = try model.memDup(p);
-    if (req.parent_id) |p| entry_ptr.parent_id = try model.memDup(p);
-    if (req.assignee_id) |a| entry_ptr.assignee_id = try model.memDup(a);
-    if (req.priority) |p| entry_ptr.priority = try model.memDup(p);
-    if (req.assignee_type) |t| {
-        entry_ptr.assignee_type = if (t.len > 0) try model.memDup(t) else null;
-    }
-    if (req.creator_type) |t| entry_ptr.creator_type = try model.memDup(t);
-    if (req.creator_id) |i| entry_ptr.creator_id = try model.memDup(i);
-    if (req.position) |p| entry_ptr.position = p;
-    if (req.due_date) |d| entry_ptr.due_date = try model.memDup(d);
-    if (req.start_date) |d| entry_ptr.start_date = try model.memDup(d);
     // `squad_evaluated_at` is not set via PATCH; it is written by
     // the dedicated squad-evaluated endpoint.
     entry_ptr.updated_at = try model.memFmtNumber(std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds());
@@ -545,6 +628,156 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
     const update_actor = resolveActor(ctx);
     publishIssueEvent(ctx.allocator, workspace_id, "issue:updated", update_actor.actor_type, update_actor.actor_id, issue_id);
     try response.ok(ctx, model.issueResponseFromEntry(entry_ptr.*));
+}
+
+/// Read one field's state, either from the request root or from a nested
+/// object (the `updates` member of a batch payload).
+fn requestFieldState(raw: std.json.Value, parent: ?[]const u8, name: []const u8) validation.FieldState {
+    if (parent) |p| return validation.nestedFieldState(raw, p, name);
+    return validation.fieldState(raw, name);
+}
+
+/// A plain-string column: upstream's Go pointers make `null` mean
+/// "absent" for these, so only a real value changes the column.
+fn patchText(state: validation.FieldState, value: ?[]const u8) ?[]const u8 {
+    return switch (state) {
+        .absent, .explicit_null => null,
+        .value => value orelse "",
+    };
+}
+
+/// A nullable column: an explicit `null` clears it.
+fn patchNullable(state: validation.FieldState, value: ?[]const u8) ?[]const u8 {
+    return switch (state) {
+        .absent => null,
+        .explicit_null => "",
+        .value => value orelse "",
+    };
+}
+
+/// Build the patch for one issue write.
+///
+/// `parent` is the name of the object holding the fields (`null` for a
+/// single-issue write, `"updates"` for a batch write).
+fn issuePatchFromRequest(
+    raw: std.json.Value,
+    parent: ?[]const u8,
+    req: model.UpdateIssueRequest,
+) model.IssuePatch {
+    return .{
+        .title = patchText(requestFieldState(raw, parent, "title"), req.title),
+        .description = patchText(requestFieldState(raw, parent, "description"), req.description),
+        .status = patchText(requestFieldState(raw, parent, "status"), req.status),
+        .priority = patchText(requestFieldState(raw, parent, "priority"), req.priority),
+        .position = switch (requestFieldState(raw, parent, "position")) {
+            .absent, .explicit_null => null,
+            .value => req.position orelse 0,
+        },
+        .project_id = patchNullable(requestFieldState(raw, parent, "project_id"), req.project_id),
+        .parent_issue_id = patchNullable(requestFieldState(raw, parent, "parent_issue_id"), req.parent_issue_id),
+        .start_date = patchNullable(requestFieldState(raw, parent, "start_date"), req.start_date),
+        .due_date = patchNullable(requestFieldState(raw, parent, "due_date"), req.due_date),
+    };
+}
+
+/// The assignee pair an update should write, after merging the request
+/// with the issue's current pair and validating the result.
+///
+/// Upstream (`server/internal/handler/issue.go`) merges first and
+/// validates the merged pair: a PATCH that only mentions `assignee_id`
+/// keeps the existing `assignee_type`, and a half-pair — a type without
+/// a target or a target without a type — is rejected.
+///
+/// The returned strings are owned by `allocator`. An empty string means
+/// "clear the column" (the SQL layer maps it to NULL); `null` means
+/// "leave the column alone".
+const ResolvedAssignee = struct {
+    assignee_type: ?[]const u8,
+    assignee_id: ?[]const u8,
+
+    fn deinit(self: ResolvedAssignee, allocator: std.mem.Allocator) void {
+        if (self.assignee_type) |t| {
+            if (t.len > 0) allocator.free(t);
+        }
+        if (self.assignee_id) |i| {
+            if (i.len > 0) allocator.free(i);
+        }
+    }
+};
+
+fn resolveAssigneeUpdate(
+    ctx: *zfinal.Context,
+    current: model.IssueAssignee,
+    type_state: validation.FieldState,
+    id_state: validation.FieldState,
+    req_type: ?[]const u8,
+    req_id: ?[]const u8,
+) !ResolvedAssignee {
+    // The two halves are one value: the request starts from the pair the
+    // issue already has and overrides the halves the body mentions. A
+    // half the body mentions with `null` clears it; a half the body does
+    // not mention keeps the current value.
+    //
+    // An empty string is a real value, not "not provided": upstream
+    // validates it as an assignee type and rejects it. It used to be
+    // treated as "not provided" because the batch payload was a full
+    // issue skeleton whose untouched fields are empty strings — that
+    // payload is a partial patch now.
+    const requested_type: ?[]const u8 = req_type;
+    const requested_id: ?[]const u8 = req_id;
+
+    const new_type: ?[]const u8 = switch (type_state) {
+        .absent => current.assignee_type,
+        .explicit_null => null,
+        .value => requested_type orelse current.assignee_type,
+    };
+    const new_id: ?[]const u8 = switch (id_state) {
+        .absent => current.assignee_id,
+        .explicit_null => null,
+        .value => requested_id orelse current.assignee_id,
+    };
+
+    // Both halves unset = the issue becomes unassigned. Exactly one half
+    // set is ambiguous and upstream rejects it.
+    if ((new_type == null) != (new_id == null)) {
+        try response.err(ctx, .bad_request, "assignee_type and assignee_id must be provided together", 40048);
+        return error.AssigneePairInvalid;
+    }
+    if (new_type == null) {
+        return .{ .assignee_type = "", .assignee_id = "" };
+    }
+
+    model.validateAssigneePair(
+        try requireWorkspaceId(ctx),
+        new_type.?,
+        new_id.?,
+    ) catch |err| {
+        try response.err(ctx, .bad_request, assigneePairMessage(err, new_type.?), 40048);
+        return error.AssigneePairInvalid;
+    };
+
+    return .{
+        .assignee_type = try ctx.allocator.dupe(u8, new_type.?),
+        .assignee_id = try ctx.allocator.dupe(u8, new_id.?),
+    };
+}
+
+/// Upstream's wording for a rejected assignee pair.
+fn assigneePairMessage(err: model.AssigneePairError, assignee_type: []const u8) []const u8 {
+    return switch (err) {
+        error.IncompletePair => "assignee_type and assignee_id must be provided together",
+        error.UnknownType => "assignee_type must be 'member', 'agent', or 'squad'",
+        error.NotFound => if (std.mem.eql(u8, assignee_type, "member"))
+            "assignee_id does not refer to a member of this workspace"
+        else if (std.mem.eql(u8, assignee_type, "squad"))
+            "assignee_id does not refer to a squad of this workspace"
+        else
+            "assignee_id does not refer to an agent of this workspace",
+        error.Archived => if (std.mem.eql(u8, assignee_type, "squad"))
+            "squad leader is archived; cannot assign to this squad"
+        else
+            "cannot assign to archived agent",
+    };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -868,41 +1101,98 @@ pub fn listAttachments(ctx: *zfinal.Context) !void {
     try response.ok(ctx, out.items);
 }
 
+/// The body of `POST /api/issues/batch-update`.
+///
+/// `updates` is a partial patch, so it uses the same request type as the
+/// single-issue update. It used to be typed as a full `Issue` skeleton,
+/// which made every partial payload fail to parse: `Issue` has required
+/// fields, so `{"updates": {"status": "todo"}}` was rejected as an
+/// invalid body — the batch toolbar could not set a status at all.
 const BatchUpdateRequest = struct {
     issue_ids: []const []const u8 = &.{},
-    updates: model.Issue = .{
-        .id = "",
-        .title = "",
-        .description = "",
-        .project_id = "",
-        .parent_id = "",
-        .assignee_id = "",
-        .state = "",
-        .created_at = "",
-        .updated_at = "",
-        .squad_evaluated_at = null,
-    },
+    updates: model.UpdateIssueRequest = .{},
 };
+
+/// Does the payload name at least one field that changes an issue?
+///
+/// Mirrors upstream's `hasMutation` check (multica-ai/multica#1660): a
+/// payload whose `updates` object names no mutation field is a caller
+/// mistake, and answering `{"updated": N}` would claim N rows changed
+/// while every UPDATE was a no-op.
+fn batchHasMutation(raw: std.json.Value) bool {
+    const names = [_][]const u8{
+        "title",           "description",        "status",
+        "priority",        "position",           "project_id",
+        "parent_issue_id", "assignee_type",      "assignee_id",
+        "start_date",      "due_date",
+    };
+    for (names) |name| {
+        if (validation.nestedFieldState(raw, "updates", name) != .absent) return true;
+    }
+    return false;
+}
 
 pub fn batchUpdate(ctx: *zfinal.Context) !void {
     const workspace_id = try requireWorkspaceId(ctx);
-    const parsed = try validation.validateJson(BatchUpdateRequest, ctx);
+    // The raw tree is needed for the same reason as in `updateIssue`: the
+    // batch payload is a partial patch, and "absent", "null" (clear) and
+    // "a value" (set) are three different instructions for the assignee.
+    var parsed: std.json.Parsed(BatchUpdateRequest) = undefined;
+    var raw: std.json.Parsed(std.json.Value) = undefined;
+    try validation.validateJsonWithRaw(BatchUpdateRequest, ctx, &parsed, &raw);
     defer parsed.deinit();
+    defer raw.deinit();
     const req = parsed.value;
+
+    if (!batchHasMutation(raw.value)) {
+        try response.ok(ctx, .{ .updated = @as(u32, 0) });
+        return;
+    }
+
+    if (req.updates.status) |s| if (!model.isValidState(s)) {
+        try response.err(ctx, .bad_request, "invalid status", 40043);
+        return;
+    };
+    if (req.updates.priority) |p| if (!model.isValidPriority(p)) {
+        try response.err(ctx, .bad_request, "invalid priority", 40044);
+        return;
+    };
+    if (req.updates.start_date) |d| if (!model.isValidCalendarDate(d)) {
+        try response.err(ctx, .bad_request, "invalid start_date format, expected YYYY-MM-DD", 40049);
+        return;
+    };
+    if (req.updates.due_date) |d| if (!model.isValidCalendarDate(d)) {
+        try response.err(ctx, .bad_request, "invalid due_date format, expected YYYY-MM-DD", 40049);
+        return;
+    };
+    if (req.updates.title) |t| if (model.validateTitle(t) == null) {
+        try response.err(ctx, .bad_request, "title cannot be empty", 40045);
+        return;
+    };
+
     var updated: u32 = 0;
+
+    const type_state = validation.nestedFieldState(raw.value, "updates", "assignee_type");
+    const id_state = validation.nestedFieldState(raw.value, "updates", "assignee_id");
+    const assignee_touched = type_state != .absent or id_state != .absent;
+    const base_patch = issuePatchFromRequest(raw.value, "updates", req.updates);
 
     if (deps.hasPool()) {
         for (req.issue_ids) |id| {
-            if (model.batchUpdateIssueDB(
-                id,
-                workspace_id,
-                req.updates.title,
-                req.updates.description,
-                req.updates.state,
-                req.updates.project_id,
-                req.updates.parent_id,
-                req.updates.assignee_id,
-            )) {
+            var patch = base_patch;
+            var resolved_owner: ?ResolvedAssignee = null;
+            defer if (resolved_owner) |r| r.deinit(ctx.allocator);
+            if (assignee_touched) {
+                // Upstream merges the batch payload with each issue's
+                // current assignee before validating it.
+                const current = model.selectIssueAssignee(ctx.allocator, workspace_id, id) orelse continue;
+                defer current.deinit(ctx.allocator);
+                const resolved = resolveAssigneeUpdate(ctx, current, type_state, id_state, req.updates.assignee_type, req.updates.assignee_id) catch continue;
+                resolved_owner = resolved;
+                patch.assignee_id = resolved.assignee_id;
+                patch.assignee_type = resolved.assignee_type;
+            }
+            if (model.batchUpdateIssueDB(id, workspace_id, patch)) {
                 updated += 1;
             }
         }
@@ -916,10 +1206,37 @@ pub fn batchUpdate(ctx: *zfinal.Context) !void {
             // memDup all request-body slices: the body is freed when
             // the handler returns, but the Issue lives in the
             // in-memory store.
-            if (req.updates.title.len > 0) merged.title = try model.memDup(req.updates.title);
-            if (req.updates.description.len > 0) merged.description = try model.memDup(req.updates.description);
-            if (req.updates.state.len > 0) merged.state = try model.memDup(req.updates.state);
-            if (req.updates.assignee_id.len > 0) merged.assignee_id = try model.memDup(req.updates.assignee_id);
+            if (base_patch.title) |t| merged.title = try model.memDup(t);
+            if (base_patch.description) |d| merged.description = try model.memDup(d);
+            if (base_patch.status) |s| merged.state = try model.memDup(s);
+            if (base_patch.priority) |p| merged.priority = try model.memDup(p);
+            if (base_patch.position) |p| merged.position = p;
+            if (base_patch.project_id) |p| merged.project_id = try model.memDup(p);
+            if (base_patch.parent_issue_id) |p| merged.parent_id = try model.memDup(p);
+            if (base_patch.start_date) |d| merged.start_date = try model.memDup(d);
+            if (base_patch.due_date) |d| merged.due_date = try model.memDup(d);
+            if (assignee_touched) {
+                const current = model.IssueAssignee{
+                    .assignee_type = merged.assignee_type,
+                    .assignee_id = if (merged.assignee_id.len > 0) merged.assignee_id else null,
+                };
+                const resolved = resolveAssigneeUpdate(ctx, current, type_state, id_state, req.updates.assignee_type, req.updates.assignee_id) catch continue;
+                defer resolved.deinit(ctx.allocator);
+                if (resolved.assignee_type) |t| {
+                    if (t.len > 0) {
+                        merged.assignee_type = try model.memDup(t);
+                    } else {
+                        merged.assignee_type = null;
+                    }
+                }
+                if (resolved.assignee_id) |i| {
+                    if (i.len > 0) {
+                        merged.assignee_id = try model.memDup(i);
+                    } else {
+                        merged.assignee_id = "";
+                    }
+                }
+            }
             try model.memUpsertIssue(merged);
             updated += 1;
         }
@@ -1045,18 +1362,17 @@ pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
         },
     }
 
-    const created = model.insertIssue(
-        workspace_id,
-        model.deriveIssueTitle(prompt),
-        prompt,
-        model.DEFAULT_STATE,
-        req.project_id orelse "",
-        req.parent_issue_id orelse "",
-        target_agent_id,
-        "agent",
-        actor.actor_id,
-        actor.actor_type,
-    ) orelse {
+    const created = model.insertIssue(workspace_id, .{
+        .title = model.deriveIssueTitle(prompt),
+        .description = prompt,
+        .status = model.DEFAULT_STATE,
+        .project_id = req.project_id orelse "",
+        .parent_issue_id = req.parent_issue_id orelse "",
+        .assignee_id = target_agent_id,
+        .assignee_type = "agent",
+        .creator_id = actor.actor_id,
+        .creator_type = actor.actor_type,
+    }) orelse {
         try response.err(ctx, .internal_server_error, "failed to create issue", 50010);
         return;
     };
@@ -1097,18 +1413,16 @@ pub fn quickCreate(ctx: *zfinal.Context) !void {
     if (deps.hasPool()) {
         const actor = resolveActor(ctx);
         const assignee_type = model.resolveAssigneeType(workspace_id, req.assignee_id);
-        if (model.insertIssue(
-            workspace_id,
-            req.title,
-            req.description,
-            "todo",
-            "",
-            parent_id,
-            req.assignee_id,
-            assignee_type,
-            actor.actor_id,
-            actor.actor_type,
-        )) |resp| {
+        if (model.insertIssue(workspace_id, .{
+            .title = req.title,
+            .description = req.description,
+            .status = "todo",
+            .parent_issue_id = parent_id,
+            .assignee_id = req.assignee_id,
+            .assignee_type = assignee_type,
+            .creator_id = actor.actor_id,
+            .creator_type = actor.actor_type,
+        })) |resp| {
             // Record a timeline event so listTimeline can find it.
             const now_secs = std.Io.Timestamp.now(zfinal.io_instance.io, .real).toSeconds();
             const now_str = try model.rfc3339(model.memAlloc(), now_secs);

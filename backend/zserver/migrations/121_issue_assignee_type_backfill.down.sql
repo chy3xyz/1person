@@ -1,0 +1,6 @@
+-- The backfilled types are not reverted: they are the row's real kind,
+-- not a derived value. Dropping them would put every agent-assigned
+-- issue back into the half-pair state the client cannot render.
+--
+-- There is nothing to undo structurally — this migration only repairs
+-- data.

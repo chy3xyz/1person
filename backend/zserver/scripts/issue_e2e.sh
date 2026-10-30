@@ -31,8 +31,9 @@ YELLOW="\033[0;33m"
 RESET="\033[0m"
 
 failures=0
-pass() { echo -e "${GREEN}PASS${RESET}: $1"; }
-fail() { echo -e "${RED}FAIL${RESET}: $1"; ((failures++)) || true; }
+checks=0
+pass() { echo -e "${GREEN}PASS${RESET}: $1"; ((checks++)) || true; }
+fail() { echo -e "${RED}FAIL${RESET}: $1"; ((failures++)) || true; ((checks++)) || true; }
 warn() { echo -e "${YELLOW}WARN${RESET}: $1"; }
 
 http_status() { curl -s -o /dev/null -w "%{http_code}" "$@"; }
@@ -131,10 +132,10 @@ fi
 HWS="X-Workspace-ID: ${WS_ID}"
 
 # ─── 1. createIssue (POST /api/issues) ───────────────────────────────
-# Valid states per `model.isValidState`: backlog, todo, in_progress,
+# Valid statuses per `model.isValidState`: backlog, todo, in_progress,
 # in_review, done, blocked, cancelled. Default is "backlog".
 create_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
-    -d "{\"title\":\"first issue\",\"description\":\"hello\",\"state\":\"todo\"}" \
+    -d "{\"title\":\"first issue\",\"description\":\"hello\",\"status\":\"todo\"}" \
     "${BASE}/api/issues")
 # createIssue response shape: {"data":{"id":"...","title":"...",...}}
 ISSUE_ID=$(jget_path "${create_body}" data.id)
@@ -142,7 +143,7 @@ if [[ -n "${ISSUE_ID}" ]]; then pass "01 createIssue"; else fail "01 createIssue
 
 # Create a second issue for batch + children + reactions
 create2_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
-    -d "{\"title\":\"second issue\",\"description\":\"world\",\"state\":\"in_progress\"}" \
+    -d "{\"title\":\"second issue\",\"description\":\"world\",\"status\":\"in_progress\"}" \
     "${BASE}/api/issues")
 # createIssue response shape: {"data":{"id":"...","title":"...",...}}
 ISSUE2_ID=$(jget_path "${create2_body}" data.id)
@@ -157,12 +158,13 @@ search_status=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/search?
 if [[ "${search_status}" == "200" ]]; then pass "03 searchIssues (200)"; else fail "03 searchIssues (${search_status})"; fi
 
 # ─── 4. batchUpdate (POST /api/issues/batch-update) ──────────────────
-# `updates` is decoded as the full `model.Issue` struct (all fields
-# are non-optional `[]const u8`). The server only honours non-empty
-# fields, so we send an empty Issue skeleton and override the ones
-# we want.
+# `updates` is a partial patch — the same shape as a single-issue
+# update. It used to be typed as a full `model.Issue` skeleton, whose
+# fields are all required, so every partial payload was rejected as an
+# invalid body: the batch toolbar could not set a status, a priority or
+# an assignee at all.
 bu_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
-    -d "{\"issue_ids\":[\"${ISSUE_ID}\",\"${ISSUE2_ID}\"],\"updates\":{\"id\":\"\",\"title\":\"bulk renamed\",\"description\":\"\",\"project_id\":\"\",\"parent_id\":\"\",\"assignee_id\":\"\",\"state\":\"\",\"created_at\":\"\",\"updated_at\":\"\"}}" \
+    -d "{\"issue_ids\":[\"${ISSUE_ID}\",\"${ISSUE2_ID}\"],\"updates\":{\"title\":\"bulk renamed\"}}" \
     "${BASE}/api/issues/batch-update")
 BU_N=$(jget_path "${bu_body}" data.updated)
 if [[ "${BU_N}" == "2" ]]; then pass "04 batchUpdate (n=2)"; else fail "04 batchUpdate: ${bu_body}"; fi
@@ -479,7 +481,7 @@ print("SUB=" + ("HIT" if done_sub.is_set() else "MISS"))
 # Trigger 3: createIssue
 req = urllib.request.Request(
     "http://127.0.0.1:${PORT}/api/issues",
-    data=b'{"title":"ws-2nd","state":"todo"}', method="POST",
+    data=b'{"title":"ws-2nd","status":"todo"}', method="POST",
     headers={"Content-Type": "application/json", "Authorization": "Bearer ${TOKEN}", "X-Workspace-Id": "${WS_ID}"})
 try:
     resp_body = urllib.request.urlopen(req).read()
@@ -702,11 +704,232 @@ else
     fail "45 concurrent WebSockets keep the API responsive: ${ws45_upgraded} ${ws45_api_ok} ${ws45_seconds} ${ws45}"
 fi
 
+# ─── 46-51. the assignee is a (type, id) tuple ─────────────────────────
+# The client renders an agent differently from a member, so the wire
+# contract carries both halves. The update path used to write only the
+# id: every agent-assigned issue came back with `assignee_type = null`
+# and the client showed it as unassigned — assigning a todo to an agent
+# silently did nothing.
+#
+# The contract (upstream `server/internal/handler/issue.go`):
+#   - both halves set   → the issue is assigned to that entity
+#   - both halves null  → the assignment is cleared
+#   - one half only     → 400, the pair is ambiguous
+#   - an unknown target → 400, it is not an entity of this workspace
+assign_body() {
+    http_body -X PUT -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+        -d "$1" "${BASE}/api/issues/${ISSUE_ID}"
+}
+assign_status() {
+    http_status -X PUT -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+        -d "$1" "${BASE}/api/issues/${ISSUE_ID}"
+}
+# Read one field of the updated issue. A null field reads as the empty
+# string (the generic `jget_path` helper prints Python's "None" for it).
+assign_field() {
+    echo "$1" | python3 -c "
+import sys, json
+d = json.load(sys.stdin).get('data') or {}
+print(d.get('$2') or '')
+" 2>/dev/null || true
+}
+
+# An agent to assign to. The runtime id does not have to exist: an
+# unknown runtime registers a placeholder runtime in this workspace.
+agent_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+    -d "{\"name\":\"E2E assignee agent\",\"runtime_id\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\"}" \
+    "${BASE}/api/agents")
+E2E_AGENT_ID=$(jget "${agent_body}" id)
+if [[ -z "${E2E_AGENT_ID}" ]]; then
+    warn "could not create an agent to assign to; skipping assignee tests 46-51: ${agent_body}"
+else
+    # 46. assign to an agent
+    assign_resp=$(assign_body "{\"assignee_type\":\"agent\",\"assignee_id\":\"${E2E_AGENT_ID}\"}")
+    assign_type=$(assign_field "${assign_resp}" assignee_type)
+    assign_id=$(assign_field "${assign_resp}" assignee_id)
+    if [[ "${assign_type}" == "agent" && "${assign_id}" == "${E2E_AGENT_ID}" ]]; then
+        pass "46 issue assigned to an agent carries assignee_type=agent"
+    else
+        fail "46 issue assigned to an agent carries assignee_type=agent: type=${assign_type} id=${assign_id} ${assign_resp}"
+    fi
+
+    # 47. assign to a member
+    assign_resp=$(assign_body "{\"assignee_type\":\"member\",\"assignee_id\":\"${USER_ID}\"}")
+    assign_type=$(assign_field "${assign_resp}" assignee_type)
+    assign_id=$(assign_field "${assign_resp}" assignee_id)
+    if [[ "${assign_type}" == "member" && "${assign_id}" == "${USER_ID}" ]]; then
+        pass "47 issue assigned to a member carries assignee_type=member"
+    else
+        fail "47 issue assigned to a member carries assignee_type=member: type=${assign_type} id=${assign_id} ${assign_resp}"
+    fi
+
+    # 48. an unrelated PATCH must not drop the assignment
+    assign_resp=$(assign_body "{\"assignee_type\":\"agent\",\"assignee_id\":\"${E2E_AGENT_ID}\",\"title\":\"first issue\"}")
+    assign_type=$(assign_field "${assign_resp}" assignee_type)
+    if [[ "${assign_type}" == "agent" ]]; then
+        pass "48 a PATCH keeps the assignment it did not touch"
+    else
+        fail "48 a PATCH keeps the assignment it did not touch: type=${assign_type} ${assign_resp}"
+    fi
+
+    # 49. clearing the assignment (explicit null on both halves)
+    assign_resp=$(assign_body '{"assignee_type":null,"assignee_id":null}')
+    assign_type=$(assign_field "${assign_resp}" assignee_type)
+    assign_id=$(assign_field "${assign_resp}" assignee_id)
+    if [[ -z "${assign_type}" && -z "${assign_id}" ]]; then
+        pass "49 clearing the assignment empties both halves"
+    else
+        fail "49 clearing the assignment empties both halves: type=${assign_type} id=${assign_id} ${assign_resp}"
+    fi
+
+    # 50. a half-pair is ambiguous
+    half_status=$(assign_status '{"assignee_type":"agent"}')
+    half_body=$(http_body -X PUT -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+        -d '{"assignee_type":"agent"}' "${BASE}/api/issues/${ISSUE_ID}")
+    if [[ "${half_status}" == "400" ]] && echo "${half_body}" | grep -q "must be provided together"; then
+        pass "50 a half-pair assignee is refused"
+    else
+        fail "50 a half-pair assignee is refused: HTTP ${half_status} ${half_body}"
+    fi
+
+    # 51. an id that names nothing in this workspace. The existence
+    # check reads the agent / member / squad tables, so it only runs
+    # with a database — the no-DB suite has no entity tables at all.
+    if [[ -n "${DATABASE_URL}" ]]; then
+        unknown_status=$(assign_status '{"assignee_type":"agent","assignee_id":"11111111-1111-1111-1111-111111111111"}')
+        unknown_body=$(http_body -X PUT -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+            -d '{"assignee_type":"agent","assignee_id":"11111111-1111-1111-1111-111111111111"}' \
+            "${BASE}/api/issues/${ISSUE_ID}")
+        if [[ "${unknown_status}" == "400" ]] && echo "${unknown_body}" | grep -q "does not refer to an agent of this workspace"; then
+            pass "51 an assignee that is not an entity of this workspace is refused"
+        else
+            fail "51 an assignee that is not an entity of this workspace is refused: HTTP ${unknown_status} ${unknown_body}"
+        fi
+    else
+        warn "DATABASE_URL is empty; skipping assignee existence test 51"
+    fi
+
+    # 52. batch assign carries the type too. The batch payload is a
+    # partial patch, so the same three-state rule applies.
+    batch_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+        -d "{\"issue_ids\":[\"${ISSUE_ID}\",\"${ISSUE2_ID}\"],\"updates\":{\"assignee_type\":\"agent\",\"assignee_id\":\"${E2E_AGENT_ID}\"}}" \
+        "${BASE}/api/issues/batch-update")
+    batch_n=$(jget_path "${batch_body}" data.updated)
+    after_type=$(assign_field "$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}")" assignee_type)
+    after_id=$(assign_field "$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}")" assignee_id)
+    if [[ "${batch_n}" == "2" && "${after_type}" == "agent" && "${after_id}" == "${E2E_AGENT_ID}" ]]; then
+        pass "52 batch assign writes the assignee type"
+    else
+        fail "52 batch assign writes the assignee type: n=${batch_n} type=${after_type} id=${after_id} ${batch_body}"
+    fi
+fi
+
+echo
+# ─── 53-58. the write path speaks the wire contract ────────────────────
+# The request DTO used to name the fields `state` and `parent_id` while
+# the wire contract — and the client — say `status` and `parent_issue_id`.
+# The parser ignores unknown fields, so every status / priority / parent
+# write was dropped: the request answered 200 and changed nothing. The
+# client applies an optimistic update on top, so the change looked applied
+# until the next reload.
+#
+# `assign_field` (defined above) reads one field of an issue payload.
+
+# 53. a status change lands
+resp=$(assign_body '{"status":"in_progress"}')
+status_val=$(assign_field "${resp}" status)
+if [[ "${status_val}" == "in_progress" ]]; then
+    pass "53 a status change is written"
+else
+    fail "53 a status change is written: status=${status_val} ${resp}"
+fi
+
+# 54. and it is in the database, not just in the optimistic response
+status_val=$(assign_field "$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}")" status)
+if [[ "${status_val}" == "in_progress" ]]; then
+    pass "54 the status change is persisted"
+else
+    fail "54 the status change is persisted: status=${status_val}"
+fi
+
+# 55. a priority change lands
+resp=$(assign_body '{"priority":"high"}')
+prio_val=$(assign_field "${resp}" priority)
+if [[ "${prio_val}" == "high" ]]; then
+    pass "55 a priority change is written"
+else
+    fail "55 a priority change is written: priority=${prio_val} ${resp}"
+fi
+
+# 56. a parent change lands, and an explicit null takes it away again
+resp=$(assign_body "{\"parent_issue_id\":\"${ISSUE2_ID}\"}")
+parent_val=$(assign_field "${resp}" parent_issue_id)
+if [[ "${parent_val}" == "${ISSUE2_ID}" ]]; then
+    pass "56 a parent change is written"
+else
+    fail "56 a parent change is written: parent=${parent_val} ${resp}"
+fi
+resp=$(assign_body '{"parent_issue_id":null}')
+parent_val=$(assign_field "${resp}" parent_issue_id)
+if [[ -z "${parent_val}" ]]; then
+    pass "56b an explicit null removes the parent again"
+else
+    fail "56b an explicit null removes the parent again: parent=${parent_val} ${resp}"
+fi
+
+# 57. the batch toolbar's status pick lands
+batch_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+    -d "{\"issue_ids\":[\"${ISSUE_ID}\",\"${ISSUE2_ID}\"],\"updates\":{\"status\":\"done\"}}" \
+    "${BASE}/api/issues/batch-update")
+batch_n=$(jget_path "${batch_body}" data.updated)
+after_status=$(assign_field "$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/issues/${ISSUE_ID}")" status)
+if [[ "${batch_n}" == "2" && "${after_status}" == "done" ]]; then
+    pass "57 a batch status change is written"
+else
+    fail "57 a batch status change is written: n=${batch_n} status=${after_status} ${batch_body}"
+fi
+
+# 58. a batch payload that names no mutation field changes nothing — and
+# says so. Upstream answers `{"updated": 0}` instead of claiming N rows
+# were updated while every UPDATE was a no-op.
+batch_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+    -d "{\"issue_ids\":[\"${ISSUE_ID}\"],\"updates\":{}}" \
+    "${BASE}/api/issues/batch-update")
+batch_n=$(jget_path "${batch_body}" data.updated)
+if [[ "${batch_n}" == "0" ]]; then
+    pass "58 a batch payload without a mutation field reports updated=0"
+else
+    fail "58 a batch payload without a mutation field reports updated=0: n=${batch_n} ${batch_body}"
+fi
+
+# 59. creating an issue with a bare assignee type is refused — it would
+# write an assignment without a target.
+create_status=$(http_status -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+    -d '{"title":"half pair","assignee_type":"agent"}' "${BASE}/api/issues")
+if [[ "${create_status}" == "400" ]]; then
+    pass "59 creating an issue with a bare assignee type is refused"
+else
+    fail "59 creating an issue with a bare assignee type is refused: HTTP ${create_status}"
+fi
+
+# 60. and so is an assignee id that names nothing in this workspace
+if [[ -n "${DATABASE_URL}" ]]; then
+    create_status=$(http_status -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+        -d '{"title":"unknown assignee","assignee_id":"11111111-1111-1111-1111-111111111111"}' "${BASE}/api/issues")
+    if [[ "${create_status}" == "400" ]]; then
+        pass "60 creating an issue with an unknown assignee is refused"
+    else
+        fail "60 creating an issue with an unknown assignee is refused: HTTP ${create_status}"
+    fi
+else
+    warn "DATABASE_URL is empty; skipping unknown-assignee create test 60"
+fi
+
 echo
 if [[ ${failures} -eq 0 ]]; then
-    echo -e "${GREEN}All 45 issue endpoints responded correctly${RESET}"
+    echo -e "${GREEN}All ${checks} issue checks passed${RESET}"
     exit 0
 else
-    echo -e "${RED}${failures} check(s) failed${RESET}"
+    echo -e "${RED}${failures} of ${checks} check(s) failed${RESET}"
     exit 1
 fi

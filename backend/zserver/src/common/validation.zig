@@ -64,3 +64,83 @@ pub fn validateJson(comptime T: type, ctx: *zfinal.Context) !std.json.Parsed(T) 
     };
     return parsed;
 }
+
+/// Parse the request body ONCE and hand back both the typed request and
+/// the raw JSON tree.
+///
+/// Upstream keeps the raw JSON around for one reason: a PATCH field has
+/// three states — absent (leave the column alone), explicitly `null`
+/// (clear it), and a value (write it) — and a typed `?T` collapses the
+/// first two into one. Handlers that need to clear a nullable column
+/// (the issue assignee pair, for instance) can only tell the three apart
+/// by looking at the raw body.
+///
+/// Both parses read the same body text: the request body may only be
+/// consumed once per request.
+pub fn validateJsonWithRaw(
+    comptime T: type,
+    ctx: *zfinal.Context,
+    typed: *std.json.Parsed(T),
+    raw: *std.json.Parsed(std.json.Value),
+) !void {
+    const body = ctx.getBodyText() catch {
+        try response.err(ctx, .bad_request, "invalid request body", 40030);
+        return error.InvalidRequestBody;
+    };
+    defer ctx.allocator.free(body);
+
+    typed.* = std.json.parseFromSlice(T, ctx.allocator, body, .{
+        .ignore_unknown_fields = true,
+        .allocate = .alloc_always,
+    }) catch {
+        try response.err(ctx, .bad_request, "invalid request body", 40030);
+        return error.InvalidRequestBody;
+    };
+    raw.* = std.json.parseFromSlice(std.json.Value, ctx.allocator, body, .{
+        .allocate = .alloc_always,
+    }) catch {
+        typed.deinit();
+        try response.err(ctx, .bad_request, "invalid request body", 40030);
+        return error.InvalidRequestBody;
+    };
+}
+
+/// How a field appeared in the raw request body.
+///
+/// `absent` means "the client did not mention this field" — the column
+/// keeps its current value. `explicit_null` means "the client sent
+/// `null`" — the column is cleared. `value` means the client sent a
+/// value, which the typed request already carries.
+pub const FieldState = enum { absent, explicit_null, value };
+
+/// Read the state of one field from the raw JSON tree.
+pub fn fieldState(raw: std.json.Value, name: []const u8) FieldState {
+    const obj = switch (raw) {
+        .object => |o| o,
+        else => return .absent,
+    };
+    const value = obj.get(name) orelse return .absent;
+    return switch (value) {
+        .null => .explicit_null,
+        else => .value,
+    };
+}
+
+/// Read the state of one field of a nested object (e.g. `updates` inside
+/// a batch payload).
+pub fn nestedFieldState(raw: std.json.Value, parent: []const u8, name: []const u8) FieldState {
+    const obj = switch (raw) {
+        .object => |o| o,
+        else => return .absent,
+    };
+    const child = obj.get(parent) orelse return .absent;
+    const child_obj = switch (child) {
+        .object => |o| o,
+        else => return .absent,
+    };
+    const value = child_obj.get(name) orelse return .absent;
+    return switch (value) {
+        .null => .explicit_null,
+        else => .value,
+    };
+}
