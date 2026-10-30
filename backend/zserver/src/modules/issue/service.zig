@@ -415,6 +415,7 @@ pub fn createIssue(ctx: *zfinal.Context) !void {
             } else {
                 publishIssueEvent(allocator, workspace_id, "issue:created", actor.actor_type, actor.actor_id, resp.id);
             }
+            enqueueAgentTaskForAssignment(ctx, resp);
             try response.ok(ctx, resp);
             return;
         }
@@ -575,6 +576,7 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
             } else {
                 publishIssueEvent(ctx.allocator, workspace_id, "issue:updated", update_actor_db.actor_type, update_actor_db.actor_id, issue_id);
             }
+            enqueueAgentTaskForAssignment(ctx, resp);
             try response.ok(ctx, resp);
             return;
         }
@@ -704,6 +706,42 @@ const ResolvedAssignee = struct {
         }
     }
 };
+
+/// Queue an agent task when an issue is created for, or assigned to, an
+/// agent.
+///
+/// Upstream parity: `shouldEnqueueAgentTask` in
+/// `server/internal/handler/issue.go`. Two rules come from it:
+///   * backlog is a parking lot — an issue parked there can be
+///     pre-assigned without triggering a run, and moving it out of
+///     backlog is what starts the agent;
+///   * only an agent assignee triggers anything; a member assignee never
+///     does.
+///
+/// Best-effort: a failed enqueue must not fail the issue write — the
+/// issue is saved either way, and the user can re-trigger the agent.
+fn enqueueAgentTaskForAssignment(ctx: *zfinal.Context, issue: model.IssueResponse) void {
+    const assignee_type = issue.assignee_type orelse return;
+    if (!std.mem.eql(u8, assignee_type, "agent")) return;
+    const assignee_id = issue.assignee_id orelse return;
+    if (assignee_id.len == 0) return;
+    if (std.mem.eql(u8, issue.status, "backlog")) return;
+
+    const runtime_id = model.agentRuntimeId(ctx.allocator, assignee_id) orelse return;
+    defer ctx.allocator.free(runtime_id);
+    if (runtime_id.len == 0) return;
+
+    const actor = resolveActor(ctx);
+    const task_id = model.enqueueAgentTask(
+        ctx.allocator,
+        assignee_id,
+        runtime_id,
+        issue.id,
+        actor.actor_id,
+    ) orelse return;
+    defer ctx.allocator.free(task_id);
+    log.info("queued agent task for issue {s} (agent {s})", .{ issue.identifier, assignee_id });
+}
 
 fn resolveAssigneeUpdate(
     ctx: *zfinal.Context,
@@ -1378,6 +1416,7 @@ pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
     };
 
     const task_id = model.enqueueAgentTask(
+        ctx.allocator,
         target_agent_id,
         binding.runtime_id,
         created.id,
@@ -1386,6 +1425,7 @@ pub fn quickCreateFromPrompt(ctx: *zfinal.Context) !void {
         try response.err(ctx, .internal_server_error, "failed to enqueue agent task", 50011);
         return;
     };
+    defer ctx.allocator.free(task_id);
 
     if (issueResponseJson(ctx.allocator, created)) |issue_json| {
         defer ctx.allocator.free(issue_json);

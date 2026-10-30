@@ -19,6 +19,8 @@ const runtime = @import("../runtime/service.zig");
 const runtime_model = @import("../runtime/model.zig");
 const task_queue = @import("../../task_queue.zig");
 const model = @import("model.zig");
+const agent_task = @import("agent_task.zig");
+const prompt_mod = @import("prompt.zig");
 const response = @import("../../common/response.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
@@ -222,7 +224,13 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
             break :blk "";
         };
 
-        _ = model.upsertRuntimeForDaemon(req.runtime_id, token_workspace_id, owner_id, name);
+        _ = model.upsertRuntimeForDaemon(
+            req.runtime_id,
+            token_workspace_id,
+            owner_id,
+            name,
+            if (req.provider) |p| p else "",
+        );
     }
 
     // A registering daemon brings its runtime online (DB mode). Mirrors
@@ -239,6 +247,20 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
     if (req.cli_version) |version| {
         if (version.len > 0) {
             _ = runtime_model.setRuntimeCliVersion(req.runtime_id, version);
+        }
+    }
+
+    // The capability list is what makes the persistent agent-task queue
+    // reachable for this runtime: a daemon that says it can execute agent
+    // tasks is offered them, an older one keeps seeing only the
+    // maintenance tasks it understands.
+    if (req.capabilities) |caps| {
+        if (caps == .array and caps.array.items.len > 0) {
+            const caps_json = zfinal.JsonKit.stringify(allocator, caps) catch "";
+            defer if (caps_json.len > 0) allocator.free(caps_json);
+            if (caps_json.len > 0) {
+                _ = model.setRuntimeCapabilities(req.runtime_id, caps_json);
+            }
         }
     }
 
@@ -557,13 +579,172 @@ pub fn claimTaskByRuntime(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "runtime_id is required" });
         return;
     };
+    const allocator = ctx.allocator;
 
+    // Agent tasks (chat replies, issue work) live in the persistent
+    // `agent_task_queue` and are only offered to a daemon that advertised
+    // the `agent_tasks` capability — an older daemon must keep seeing only
+    // the maintenance tasks it understands.
+    if (model.runtimeSupportsAgentTasks(runtime_id)) {
+        const claimed = renderAgentTaskClaim(ctx, allocator, runtime_id) catch |err| blk: {
+            log.warn("agent task claim failed: {}", .{err});
+            break :blk false;
+        };
+        if (claimed) return;
+    }
+
+    // Maintenance tasks (update / models / local_skills / import) stay in
+    // the in-memory queue.
     const task = try task_queue.claim(runtime_id);
     if (task) |t| {
-        try ctx.renderJson(.{ .task = t });
+        try ctx.renderJson(.{ .task = .{
+            .kind = "maintenance",
+            .id = t.id,
+            .runtime_id = t.runtime_id,
+            .task_type = t.task_type,
+            .status = t.status,
+            .progress = t.progress,
+            .payload = t.payload,
+            .@"error" = t.@"error",
+            .session_id = t.session_id,
+            .work_dir = t.work_dir,
+        } });
     } else {
         try ctx.renderJson(.{ .task = null });
     }
+}
+
+/// The payload handed to a daemon for one agent task.
+///
+/// Self-contained on purpose: the daemon runs a local agent CLI, and
+/// everything that CLI needs — the rendered prompt, the model, the
+/// environment, the provider — travels with the task. The daemon never
+/// reads the database.
+const AgentTaskPayload = struct {
+    kind: []const u8 = "agent",
+    id: []const u8,
+    agent_id: []const u8,
+    runtime_id: []const u8,
+    issue_id: ?[]const u8 = null,
+    chat_session_id: ?[]const u8 = null,
+    provider: []const u8,
+    model: []const u8 = "",
+    prompt: []const u8,
+    custom_env: std.json.Value,
+    custom_args: std.json.Value,
+    mcp_config: std.json.Value,
+};
+
+/// Claim one agent task and render its payload.
+///
+/// The rendering happens inside this function on purpose: the payload
+/// borrows the claimed task's strings and the agent's configuration, and
+/// those are released when this function returns — handing the payload
+/// to a caller and rendering it there would serialize freed memory.
+fn renderAgentTaskClaim(ctx: *zfinal.Context, allocator: std.mem.Allocator, runtime_id: []const u8) !bool {
+    const task = (try agent_task.claimAgentTask(allocator, runtime_id)) orelse return false;
+    defer task.deinit(allocator);
+
+    const agent_cfg = (try agent_task.selectAgentConfig(allocator, task.agent_id)) orelse {
+        _ = agent_task.failAgentTask(task.id, "agent no longer exists", failure_reason_runtime);
+        return false;
+    };
+    defer agent_cfg.deinit(allocator);
+
+    const workspace = (try agent_task.selectWorkspaceInfo(allocator, agent_cfg.workspace_id)) orelse {
+        _ = agent_task.failAgentTask(task.id, "workspace no longer exists", failure_reason_runtime);
+        return false;
+    };
+    defer {
+        allocator.free(workspace.name);
+        allocator.free(workspace.issue_prefix);
+    }
+
+    const provider = (try agent_task.selectRuntimeProvider(allocator, task.runtime_id)) orelse "auto";
+    defer allocator.free(provider);
+
+    // The prompt is rendered here, on the side that can read the context.
+    var prompt_text: []const u8 = "";
+    if (task.chat_session_id) |session_id| {
+        const history = try agent_task.selectChatHistory(allocator, session_id);
+        defer {
+            for (history) |turn| {
+                allocator.free(turn.role);
+                allocator.free(turn.content);
+            }
+            allocator.free(history);
+        }
+        prompt_text = try prompt_mod.buildChatPrompt(allocator, .{
+            .agent_name = agent_cfg.name,
+            .workspace_name = workspace.name,
+            .instructions = agent_cfg.instructions,
+            .history = history,
+            .request = lastUserMessage(history),
+        });
+    } else if (task.issue_id) |issue_id| {
+        const issue_ctx = (try agent_task.selectIssueContext(allocator, issue_id, workspace.issue_prefix)) orelse {
+            _ = agent_task.failAgentTask(task.id, "issue no longer exists", failure_reason_runtime);
+            return false;
+        };
+        defer issue_ctx.deinit(allocator);
+
+        const comments = try agent_task.selectIssueComments(allocator, issue_id);
+        defer {
+            for (comments) |comment| {
+                allocator.free(comment.author);
+                allocator.free(comment.content);
+            }
+            allocator.free(comments);
+        }
+        prompt_text = try prompt_mod.buildIssuePrompt(allocator, .{
+            .agent_name = agent_cfg.name,
+            .workspace_name = workspace.name,
+            .instructions = agent_cfg.instructions,
+            .identifier = issue_ctx.identifier,
+            .title = issue_ctx.title,
+            .description = issue_ctx.description,
+            .status = issue_ctx.status,
+            .priority = issue_ctx.priority,
+            .comments = comments,
+        });
+    } else {
+        _ = agent_task.failAgentTask(task.id, "task has neither a chat session nor an issue", failure_reason_runtime);
+        return false;
+    }
+    defer allocator.free(prompt_text);
+
+    var env_parsed: ?std.json.Parsed(std.json.Value) = std.json.parseFromSlice(std.json.Value, allocator, agent_cfg.custom_env, .{}) catch null;
+    defer if (env_parsed) |*p| p.deinit();
+    var args_parsed: ?std.json.Parsed(std.json.Value) = std.json.parseFromSlice(std.json.Value, allocator, agent_cfg.custom_args, .{}) catch null;
+    defer if (args_parsed) |*p| p.deinit();
+    var mcp_parsed: ?std.json.Parsed(std.json.Value) = std.json.parseFromSlice(std.json.Value, allocator, agent_cfg.mcp_config, .{}) catch null;
+    defer if (mcp_parsed) |*p| p.deinit();
+
+    try ctx.renderJson(.{ .task = AgentTaskPayload{
+        .id = task.id,
+        .agent_id = task.agent_id,
+        .runtime_id = task.runtime_id,
+        .issue_id = task.issue_id,
+        .chat_session_id = task.chat_session_id,
+        .provider = provider,
+        .model = agent_cfg.model,
+        .prompt = prompt_text,
+        .custom_env = if (env_parsed) |p| p.value else std.json.Value{ .null = {} },
+        .custom_args = if (args_parsed) |p| p.value else std.json.Value{ .null = {} },
+        .mcp_config = if (mcp_parsed) |p| p.value else std.json.Value{ .null = {} },
+    } });
+    return true;
+}
+
+/// The newest user turn of a chat transcript — the request that triggered
+/// this run.
+fn lastUserMessage(history: []const prompt_mod.ChatTurn) []const u8 {
+    var i = history.len;
+    while (i > 0) {
+        i -= 1;
+        if (std.mem.eql(u8, history[i].role, "user")) return history[i].content;
+    }
+    return "";
 }
 
 pub fn listPendingTasksByRuntime(ctx: *zfinal.Context) !void {
@@ -586,6 +767,9 @@ pub fn startTask(ctx: *zfinal.Context) !void {
         return;
     };
     try task_queue.start(task_id);
+    // The persistent row is the one the frontend polls, so the transition
+    // has to land there too — not only in the in-memory queue.
+    _ = agent_task.setAgentTaskStatus(task_id, "running");
     try ctx.renderJson(.{ .success = true });
 }
 
@@ -596,6 +780,7 @@ pub fn markTaskWaitingLocalDirectory(ctx: *zfinal.Context) !void {
         return;
     };
     try task_queue.markWaitingLocalDirectory(task_id);
+    _ = agent_task.setAgentTaskStatus(task_id, "waiting_local_directory");
     try ctx.renderJson(.{ .success = true });
 }
 
@@ -619,8 +804,90 @@ pub fn completeTask(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "task_id is required" });
         return;
     };
+    const allocator = ctx.allocator;
+
+    // The daemon reports the agent's answer in the body. An empty body is
+    // legitimate — an older daemon sends none — so a body that does not
+    // parse is treated as "no answer" rather than a rejected request: the
+    // task really is done, and losing that would strand it as running.
+    var req = model.TaskCompleteRequest{};
+    var parsed: ?std.json.Parsed(model.TaskCompleteRequest) = null;
+    const body = ctx.getBodyText() catch "";
+    defer if (body.len > 0) allocator.free(body);
+    if (body.len > 0) {
+        parsed = std.json.parseFromSlice(model.TaskCompleteRequest, allocator, body, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        }) catch null;
+    }
+    defer if (parsed) |*p| p.deinit();
+    if (parsed) |p| req = p.value;
+
     try task_queue.complete(task_id);
+
+    const output = req.output orelse "";
+    const result_json = try buildTaskResultJson(allocator, req.result, output);
+    defer allocator.free(result_json);
+
+    _ = agent_task.completeAgentTask(task_id, result_json);
+
+    // Materialize the answer where the user will see it: a chat reply for
+    // a chat task, a comment on the issue for an issue task.
+    if (output.len > 0) {
+        try deliverTaskOutput(allocator, task_id, output);
+    }
+
     try ctx.renderJson(.{ .success = true });
+}
+
+/// Store the daemon's result payload on the task row.
+///
+/// The daemon's own `result` bag wins when it sent one (usage, session
+/// id, …); otherwise the visible output is what gets stored.
+fn buildTaskResultJson(allocator: std.mem.Allocator, result: ?std.json.Value, output: []const u8) ![]const u8 {
+    if (result) |value| {
+        if (value == .object) {
+            return zfinal.JsonKit.stringify(allocator, value);
+        }
+    }
+    var obj: std.json.ObjectMap = .empty;
+    defer obj.deinit(allocator);
+    try obj.put(allocator, "output", .{ .string = output });
+    return zfinal.JsonKit.stringify(allocator, std.json.Value{ .object = obj });
+}
+
+/// Deliver the agent's answer to the place the user is looking at.
+fn deliverTaskOutput(allocator: std.mem.Allocator, task_id: []const u8, output: []const u8) !void {
+    const target = (try agent_task.selectTaskTarget(allocator, task_id)) orelse return;
+    defer target.deinit(allocator);
+
+    if (target.chat_session_id) |session_id| {
+        const message_id = try agent_task.insertAssistantMessage(allocator, session_id, task_id, output);
+        if (message_id) |id| {
+            defer allocator.free(id);
+            try publishChatReply(allocator, target.workspace_id, session_id, id, output);
+        }
+        return;
+    }
+    if (target.issue_id) |issue_id| {
+        const comment_id = try agent_task.insertAgentComment(allocator, target.workspace_id, issue_id, target.agent_id, output);
+        if (comment_id) |id| allocator.free(id);
+    }
+}
+
+/// Tell the connected clients that the agent answered.
+///
+/// Best-effort: the row is already written, so a realtime hiccup must not
+/// turn a delivered answer into a failed task.
+fn publishChatReply(allocator: std.mem.Allocator, workspace_id: []const u8, session_id: []const u8, message_id: []const u8, content: []const u8) !void {
+    const payload = std.fmt.allocPrint(
+        allocator,
+        "{{\"id\":\"{s}\",\"chat_session_id\":\"{s}\",\"role\":\"assistant\",\"content\":{f}}}",
+        .{ message_id, session_id, std.json.fmt(content, .{}) },
+    ) catch return;
+    defer allocator.free(payload);
+    const realtime = @import("../realtime/service.zig");
+    realtime.publishChatMessage(workspace_id, session_id, payload);
 }
 
 pub fn failTask(ctx: *zfinal.Context) !void {
@@ -629,12 +896,52 @@ pub fn failTask(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "task_id is required" });
         return;
     };
+    const allocator = ctx.allocator;
     const parsed = try ctx.parseJsonBody(model.TaskFailRequest);
     defer parsed.deinit();
     const req = parsed.value;
 
-    try task_queue.fail(task_id, req.@"error" orelse "unknown error");
+    const err_msg = req.@"error" orelse "unknown error";
+    try task_queue.fail(task_id, err_msg);
+    _ = agent_task.failAgentTask(task_id, err_msg, agent_task.classifyFailure(err_msg));
+
+    // A failed chat task has to leave a visible trace: without it the
+    // user's message would simply never be answered, and the pending-task
+    // poll would stop reporting the task as running — a silent failure.
+    //
+    // An issue task gets no comment: upstream treats a failed issue run
+    // as something the user reads in the agent's activity view, not as
+    // something the agent "said" on the issue.
+    deliverTaskFailure(allocator, task_id, err_msg) catch |err| {
+        log.warn("deliverTaskFailure: {s}", .{@errorName(err)});
+    };
+
     try ctx.renderJson(.{ .success = true });
+}
+
+/// The failure class for a task the server itself could not hand out.
+const failure_reason_runtime = agent_task.failure_reason_runtime;
+
+/// Tell the user that a chat task failed.
+///
+/// The message is the reason the daemon reported — the user needs to
+/// know *why* the agent went quiet, not just that it did.
+fn deliverTaskFailure(allocator: std.mem.Allocator, task_id: []const u8, err_msg: []const u8) !void {
+    const target = (try agent_task.selectTaskTarget(allocator, task_id)) orelse return;
+    defer target.deinit(allocator);
+
+    const session_id = target.chat_session_id orelse return;
+    const message_id = try agent_task.insertAssistantMessageWithReason(
+        allocator,
+        session_id,
+        task_id,
+        err_msg,
+        agent_task.classifyFailure(err_msg),
+    );
+    if (message_id) |id| {
+        defer allocator.free(id);
+        try publishChatReply(allocator, target.workspace_id, session_id, id, err_msg);
+    }
 }
 
 pub fn reportTaskUsage(ctx: *zfinal.Context) !void {

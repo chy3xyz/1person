@@ -93,6 +93,7 @@ test {
     _ = @import("modules/daemon/service.zig");
     _ = @import("modules/daemon/model.zig");
     _ = @import("modules/daemon/routes.zig");
+    _ = @import("modules/daemon/agent_task.zig");
     _ = @import("modules/dashboard/handler.zig");
     _ = @import("modules/dashboard/service.zig");
     _ = @import("modules/dashboard/model.zig");
@@ -181,4 +182,6 @@ test {
     // pointed at IP literals.
     _ = @import("cli/ws.zig");
     _ = @import("cli/config_store.zig");
+    _ = @import("cli/agent_exec.zig");
+    _ = @import("modules/daemon/prompt.zig");
 }

@@ -50,6 +50,15 @@ pub const DaemonRegisterRequest = struct {
     /// at registration and stored on the runtime row's
     /// `metadata.cli_version`; the quick-create gate reads it from there.
     cli_version: ?[]const u8 = null,
+    /// The local agent CLI the daemon found on PATH and will actually run
+    /// (`opencode`, `claude`, `codex`, …). Stored as the runtime row's
+    /// `provider`, so the server never has to guess how a task would be
+    /// executed. Empty means "unknown" — the row keeps its previous value.
+    provider: ?[]const u8 = null,
+    /// Capabilities the daemon advertises. `agent_tasks` is the one that
+    /// matters: only a daemon that says it can execute agent tasks is
+    /// offered the persistent `agent_task_queue` rows.
+    capabilities: ?std.json.Value = null,
 };
 
 pub const MintDaemonTokenRequest = struct {
@@ -118,33 +127,79 @@ pub fn insertDaemonToken(workspace_id: []const u8, daemon_id: []const u8, token_
 /// for another workspace must not be able to re-point somebody else's
 /// row. The caller checks that case before calling this.
 ///
+/// `provider` is the local agent CLI the daemon will actually run. An
+/// empty value leaves the row's provider untouched — a daemon that
+/// reports none must not erase what an earlier registration recorded.
+///
 /// Returns false when the DB write fails.
 pub fn upsertRuntimeForDaemon(
     runtime_id: []const u8,
     workspace_id: []const u8,
     owner_id: []const u8,
     name: []const u8,
+    provider: []const u8,
 ) bool {
     const db = borrowDb() orelse return false;
     defer deps.releaseBack(db);
     const sql =
         "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, status, owner_id, visibility) " ++
-        "VALUES ($1::uuid, $2::uuid, $3, 'local', 'auto', 'online', $4::uuid, 'private') " ++
+        "VALUES ($1::uuid, $2::uuid, $3, 'local', $4, 'online', $5::uuid, 'private') " ++
         "ON CONFLICT (id) DO UPDATE SET " ++
         "status = 'online', " ++
         "name = COALESCE(NULLIF(EXCLUDED.name, ''), agent_runtime.name), " ++
+        "provider = COALESCE(NULLIF(EXCLUDED.provider, ''), agent_runtime.provider), " ++
         "owner_id = COALESCE(agent_runtime.owner_id, EXCLUDED.owner_id), " ++
         "updated_at = now()";
     db.execParams(sql, &[_]SqlParam{
         .{ .text = runtime_id },
         .{ .text = workspace_id },
         .{ .text = name },
+        .{ .text = provider },
         // An empty owner means "this token predates the owner column".
         // Pass SQL NULL for it — an empty string is not a uuid and the
         // cast would abort the whole insert.
         if (owner_id.len > 0) SqlParam{ .text = owner_id } else SqlParam.null,
     }) catch return false;
     return true;
+}
+
+/// Store the capability list a daemon advertised at registration.
+///
+/// The list lives on the runtime row's metadata bag next to
+/// `cli_version`, and it is what gates the persistent agent-task queue:
+/// only a daemon that advertised `agent_tasks` is offered those rows.
+pub fn setRuntimeCapabilities(runtime_id: []const u8, capabilities_json: []const u8) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    db.execParams(
+        "UPDATE agent_runtime " ++
+            "SET metadata = jsonb_set(metadata, '{capabilities}', $2::jsonb, true), " ++
+            "updated_at = now() " ++
+            "WHERE id = $1::uuid",
+        &[_]SqlParam{
+            .{ .text = runtime_id },
+            .{ .text = capabilities_json },
+        },
+    ) catch return false;
+    return true;
+}
+
+/// True when the runtime's daemon advertised the `agent_tasks` capability.
+///
+/// Fails closed: a runtime whose metadata carries no capability list (an
+/// older daemon, or a row that predates the column) is not offered the
+/// persistent queue — it keeps seeing only the maintenance tasks.
+pub fn runtimeSupportsAgentTasks(runtime_id: []const u8) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT metadata->'capabilities' FROM agent_runtime WHERE id = $1::uuid",
+        &[_]SqlParam{.{ .text = runtime_id }},
+    ) catch return false;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return false;
+    const raw = rs.rows.items[0].getText(0) orelse return false;
+    return std.mem.indexOf(u8, raw, "agent_tasks") != null;
 }
 
 /// Read the workspace a runtime row belongs to. Returns null when no
@@ -194,6 +249,17 @@ pub const TaskProgressRequest = struct {
 
 pub const TaskFailRequest = struct {
     @"error": ?[]const u8 = null,
+};
+
+/// The daemon's report that a task finished.
+///
+/// `output` is the agent's answer — the text the user ends up seeing
+/// (a chat reply, or a comment on the issue). `result` is an optional
+/// raw bag the daemon wants kept on the task row (usage numbers, the
+/// agent CLI's session id, …).
+pub const TaskCompleteRequest = struct {
+    output: ?[]const u8 = null,
+    result: ?std.json.Value = null,
 };
 
 pub const TaskUsageRequest = struct {

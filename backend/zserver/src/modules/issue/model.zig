@@ -1337,8 +1337,13 @@ pub fn agentRuntimeBinding(workspace_id: []const u8, agent_id: []const u8) ?Agen
 }
 
 /// Queue a task for an agent to work on an issue. Returns the new task
-/// id (copied into the DB allocator) or `null` when the insert failed.
+/// id (copied into the caller's allocator) or `null` when the insert
+/// failed.
+///
+/// The id is copied into `allocator` — not into the connection's — so it
+/// stays valid after the connection goes back to the pool.
 pub fn enqueueAgentTask(
+    allocator: std.mem.Allocator,
     agent_id: []const u8,
     runtime_id: []const u8,
     issue_id: []const u8,
@@ -1361,7 +1366,25 @@ pub fn enqueueAgentTask(
     defer rs.deinit();
     if (rs.rows.items.len == 0) return null;
     const raw = rs.rows.items[0].getText(0) orelse return null;
-    return db.allocator.dupe(u8, raw) catch null;
+    return allocator.dupe(u8, raw) catch null;
+}
+
+/// Read the runtime an agent is bound to.
+///
+/// The task queue is runtime-scoped: a task is claimed by the daemon that
+/// serves the agent's runtime, so the enqueue path needs the agent's
+/// runtime id.
+pub fn agentRuntimeId(allocator: std.mem.Allocator, agent_id: []const u8) ?[]const u8 {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT runtime_id FROM agent WHERE id = $1::uuid AND archived_at IS NULL",
+        &[_]SqlParam{.{ .text = agent_id }},
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    const raw = rs.rows.items[0].getText(0) orelse return null;
+    return allocator.dupe(u8, raw) catch null;
 }
 
 /// Derive an issue title from a free-form prompt: the first non-empty

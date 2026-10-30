@@ -195,6 +195,9 @@ pub fn main(init: std.process.Init) !void {
                 .path = path,
                 .heartbeat_interval_ms = cmd.heartbeat_ms orelse 30000,
                 .claim_interval_ms = cmd.claim_ms orelse 15000,
+                // The agent CLI runs as a child of the daemon, so it
+                // inherits the daemon's environment.
+                .environ_map = init.environ_map,
             });
         },
         .workspaces => {

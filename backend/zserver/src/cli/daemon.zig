@@ -11,6 +11,7 @@
 
 const std = @import("std");
 const api = @import("api.zig");
+const agent_exec = @import("agent_exec.zig");
 const config_store = @import("config_store.zig");
 const out = @import("out.zig");
 const ws = @import("ws.zig");
@@ -23,9 +24,19 @@ pub const DaemonOptions = struct {
     path: []const u8,
     claim_interval_ms: u64 = 15000,
     heartbeat_interval_ms: u64 = 30000,
+    /// The daemon's own environment — the base the agent CLI's overrides
+    /// are applied to.
+    environ_map: ?*const std.process.Environ.Map = null,
 };
 
 var g_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
+
+/// Where the daemon keeps the per-task working directories.
+///
+/// Set once at startup. The daemon is single-threaded, so a plain
+/// variable is enough — and it keeps the working-directory plumbing out
+/// of every call signature.
+var g_work_root: []const u8 = "";
 
 /// Cadence of the daemon's WebSocket keepalive frame. Must stay well
 /// below the server's socket read timeout (30s) so the push channel is
@@ -56,6 +67,15 @@ fn onSignal(_: std.posix.SIG) callconv(.c) void {
 pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void {
     var cfg = try config_store.load(allocator, io, opts.path);
     defer cfg.deinit();
+
+    // The agent runs in a directory of its own, per task. See
+    // `ensureTaskWorkDir`.
+    {
+        const base = std.fs.path.dirname(opts.path) orelse ".";
+        const root = try std.fs.path.join(allocator, &.{ base, "work" });
+        defer allocator.free(root);
+        g_work_root = root;
+    }
 
     if (cfg.server_url.len == 0) {
         out.printErr("no server_url configured — run \"1p login\" first (config: {s})\n", .{opts.path});
@@ -101,9 +121,23 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     // server stores it on the runtime row's `metadata.cli_version`, and
     // the quick-create gate reads it from there to decide whether this
     // daemon may serve an agent-create task.
+    //
+    // `provider` is the local agent CLI this machine can actually run.
+    // Reporting it is what lets the server hand real work to this daemon:
+    // without a provider there is nothing that could execute a task.
+    const provider = agent_exec.detectProvider(allocator, io);
+    // A daemon that found no agent CLI cannot execute anything, so it
+    // advertises no capabilities — and the server then never hands it a
+    // task it would only fail.
+    const capabilities: []const []const u8 = if (provider != null)
+        &[_][]const u8{"agent_tasks"}
+    else
+        &[_][]const u8{};
     const reg_body = try std.json.Stringify.valueAlloc(allocator, .{
         .runtime_id = opts.runtime_id,
         .cli_version = build_options.version,
+        .provider = if (provider) |p| p.name() else "auto",
+        .capabilities = capabilities,
     }, .{});
     defer allocator.free(reg_body);
     try registerDaemon(allocator, io, &client, token_buf, reg_body, opts.runtime_id);
@@ -197,7 +231,7 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
         // and retried on a short cadence, so the daemon resumes
         // claiming as soon as the server is back.
         if (now >= claim_at) {
-            const server_up = try claimPoll(allocator, io, &client, token_buf, opts.runtime_id);
+            const server_up = try claimPoll(allocator, io, &client, token_buf, opts.runtime_id, opts.environ_map);
             claim_at = nowMillis(io) + @as(i64, @intCast(if (server_up) opts.claim_interval_ms else daemon_server_retry_ms));
         }
 
@@ -275,7 +309,7 @@ fn registerDaemon(
 /// Returns false when the server could not be reached, so the caller can
 /// retry sooner than the normal claim interval instead of waiting out a
 /// full cycle for a server that is not there.
-fn claimPoll(allocator: std.mem.Allocator, io: std.Io, client: *api.Client, token: []const u8, runtime_id: []const u8) !bool {
+fn claimPoll(allocator: std.mem.Allocator, io: std.Io, client: *api.Client, token: []const u8, runtime_id: []const u8, base_env: ?*const std.process.Environ.Map) !bool {
     const path = try std.fmt.allocPrint(allocator, "/api/daemon/runtimes/{s}/tasks/claim", .{runtime_id});
     defer allocator.free(path);
     var resp = client.postJson(allocator, path, "", token) catch |err| {
@@ -288,9 +322,157 @@ fn claimPoll(allocator: std.mem.Allocator, io: std.Io, client: *api.Client, toke
         out.printErr("claim failed (HTTP {d}): {s}\n", .{ resp.status, resp.getString("error") orelse "unknown" });
         return true;
     }
+    if (resp.parsed.value != .object) return true;
     const task = resp.parsed.value.object.get("task") orelse return true;
+    if (task != .object) return true;
+
+    // Two kinds of work share this endpoint: agent tasks (a chat reply, an
+    // issue the agent was pointed at) and the runtime's own maintenance
+    // tasks. The `kind` field says which one this is.
+    const kind = jsonStr(task, "kind") orelse "maintenance";
+    if (std.mem.eql(u8, kind, "agent")) {
+        try executeAgentTask(allocator, io, client, token, task, base_env);
+        return true;
+    }
     try runClaimedTask(allocator, io, client, token, runtime_id, task);
     return true;
+}
+
+/// Execute one agent task with the local agent CLI and report it back.
+///
+/// The payload the server sends is self-contained: the prompt is already
+/// rendered, and the agent's configuration (model, environment, extra
+/// arguments) travels with it. The daemon never reads the database.
+fn executeAgentTask(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    client: *api.Client,
+    token: []const u8,
+    task: std.json.Value,
+    base_env: ?*const std.process.Environ.Map,
+) !void {
+    const id = jsonStr(task, "id") orelse return;
+    const prompt_text = jsonStr(task, "prompt") orelse "";
+    const provider_name = jsonStr(task, "provider") orelse "auto";
+    const model = jsonStr(task, "model") orelse "";
+
+    out.printOut("AGENT task id={s} provider={s}\n", .{ id, provider_name });
+
+    const provider = agent_exec.Provider.fromName(provider_name) orelse {
+        try failTask(allocator, client, token, id, "no local agent CLI is available");
+        return;
+    };
+
+    // Tell the server the task is running before the CLI starts: the
+    // frontend shows "the agent is working" from exactly that status.
+    try startTask(allocator, client, token, id);
+
+    const custom_args = try jsonStringArray(allocator, task, "custom_args");
+    defer {
+        for (custom_args) |a| allocator.free(a);
+        allocator.free(custom_args);
+    }
+
+    // The agent gets an empty directory of its own. This fork's agent
+    // execution is text-only — the server posts the answer — so the
+    // agent has no business in the repository, and an empty directory
+    // makes sure it cannot get there.
+    const work_dir = ensureTaskWorkDir(allocator, id) catch "";
+    defer if (work_dir.len > 0) allocator.free(work_dir);
+
+    const outcome = agent_exec.runAgent(allocator, io, provider, .{
+        .prompt = prompt_text,
+        .model = model,
+        .custom_args = custom_args,
+        .custom_env = jsonValue(task, "custom_env"),
+        .base_env = base_env,
+        .work_dir = work_dir,
+    }) catch |err| {
+        out.printErr("agent task failed ({s})\n", .{@errorName(err)});
+        try failTask(allocator, client, token, id, @errorName(err));
+        return;
+    };
+    // A failed run has no answer. Reporting it through /complete would
+    // mark the task successful and post the failure text to the user as
+    // if the agent had said it.
+    if (outcome.failure) |reason| {
+        defer allocator.free(reason);
+        try failTask(allocator, client, token, id, reason);
+        return;
+    }
+
+    try reportTaskOutput(allocator, client, token, id, outcome.output);
+}
+
+/// Create the working directory for one agent task.
+///
+/// The directory is empty on purpose: the agent only has to produce
+/// text, and an empty directory keeps it from wandering into the
+/// repository (or into unrelated files elsewhere on the machine).
+///
+/// Returns an empty string when the directory cannot be created — the
+/// run then happens in the daemon's own directory, which is worse but
+/// not fatal.
+fn ensureTaskWorkDir(allocator: std.mem.Allocator, task_id: []const u8) ![]const u8 {
+    if (g_work_root.len == 0) return error.NoWorkRoot;
+    makeDir(allocator, g_work_root);
+    const dir = try std.fs.path.join(allocator, &.{ g_work_root, task_id });
+    errdefer allocator.free(dir);
+    makeDir(allocator, dir);
+    return dir;
+}
+
+/// Create a directory, ignoring the fact that it may already exist.
+fn makeDir(allocator: std.mem.Allocator, path: []const u8) void {
+    const path_s = allocator.allocSentinel(u8, path.len, 0) catch return;
+    defer allocator.free(path_s);
+    @memcpy(path_s, path);
+    _ = std.c.mkdir(path_s.ptr, 0o700);
+}
+
+/// Read a nested JSON value from a task payload.
+fn jsonValue(task: std.json.Value, key: []const u8) ?std.json.Value {
+    if (task != .object) return null;
+    return task.object.get(key);
+}
+
+/// Read an array of strings from a task payload.
+///
+/// Always returns an owned slice (possibly empty) so the caller can free
+/// it unconditionally.
+fn jsonStringArray(allocator: std.mem.Allocator, task: std.json.Value, key: []const u8) ![]const []const u8 {
+    var list: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (list.items) |s| allocator.free(s);
+        list.deinit(allocator);
+    }
+    const value = jsonValue(task, key) orelse return list.toOwnedSlice(allocator);
+    if (value != .array) return list.toOwnedSlice(allocator);
+    for (value.array.items) |item| {
+        if (item != .string) continue;
+        try list.append(allocator, try allocator.dupe(u8, item.string));
+    }
+    return list.toOwnedSlice(allocator);
+}
+
+/// Tell the server the task started running.
+fn startTask(allocator: std.mem.Allocator, client: *api.Client, token: []const u8, task_id: []const u8) !void {
+    const path = try std.fmt.allocPrint(allocator, "/api/daemon/tasks/{s}/start", .{task_id});
+    defer allocator.free(path);
+    var resp = try client.postJson(allocator, path, "", token);
+    defer resp.deinit();
+    if (!resp.ok()) return error.StartFailed;
+}
+
+/// Report the agent's answer so the server can deliver it.
+fn reportTaskOutput(allocator: std.mem.Allocator, client: *api.Client, token: []const u8, task_id: []const u8, output: []const u8) !void {
+    const path = try std.fmt.allocPrint(allocator, "/api/daemon/tasks/{s}/complete", .{task_id});
+    defer allocator.free(path);
+    const body = try std.json.Stringify.valueAlloc(allocator, .{ .output = output }, .{});
+    defer allocator.free(body);
+    var resp = try client.postJson(allocator, path, body, token);
+    defer resp.deinit();
+    if (!resp.ok()) return error.CompleteFailed;
 }
 
 /// Execute the task carried by a claim response, if there is one.
@@ -410,7 +592,9 @@ fn scanSkillsDir(io: std.Io, dir_path: []const u8) usize {
 fn failTask(allocator: std.mem.Allocator, client: *api.Client, token: []const u8, task_id: []const u8, err: []const u8) !void {
     const path = try std.fmt.allocPrint(allocator, "/api/daemon/tasks/{s}/fail", .{task_id});
     defer allocator.free(path);
-    const body = try std.fmt.allocPrint(allocator, "{{\"error\":\"{s}\"}}", .{err});
+    // The reason comes from the agent CLI, so it can contain quotes and
+    // newlines. It has to be encoded as JSON, not pasted into a literal.
+    const body = try std.json.Stringify.valueAlloc(allocator, .{ .@"error" = err }, .{});
     defer allocator.free(body);
     var resp = try client.postJson(allocator, path, body, token);
     defer resp.deinit();
