@@ -597,8 +597,8 @@ pub fn updateIssue(ctx: *zfinal.Context) !void {
     if (patch.parent_issue_id) |p| entry_ptr.parent_id = try model.memDup(p);
     if (patch.priority) |p| entry_ptr.priority = try model.memDup(p);
     if (patch.position) |p| entry_ptr.position = p;
-    if (patch.start_date) |d| entry_ptr.start_date = try model.memDup(d);
-    if (patch.due_date) |d| entry_ptr.due_date = try model.memDup(d);
+    if (patch.start_date) |d| entry_ptr.start_date = if (d.len == 0) null else try model.memDup(d);
+    if (patch.due_date) |d| entry_ptr.due_date = if (d.len == 0) null else try model.memDup(d);
     if (assignee_touched) {
         const current = model.IssueAssignee{
             .assignee_type = entry_ptr.assignee_type,
