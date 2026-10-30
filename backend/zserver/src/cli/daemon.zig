@@ -32,6 +32,23 @@ var g_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 /// not torn down and re-established on every timeout.
 const daemon_ws_keepalive_ms: u64 = 10_000;
 
+/// Cadence for retrying a server call that failed because the server was
+/// unreachable. Short enough that the daemon picks its work back up
+/// promptly once the server is back, long enough not to hammer a dead
+/// socket.
+const daemon_server_retry_ms: u64 = 5_000;
+
+/// True for failures that mean "the server could not be reached, or did
+/// not answer with JSON" — transient conditions a long-running daemon
+/// has to survive by retrying instead of exiting. Everything else (an
+/// out-of-memory, for instance) stays fatal and propagates.
+fn isTransient(err: anyerror) bool {
+    return switch (err) {
+        error.RequestFailed, error.InvalidJson => true,
+        else => false,
+    };
+}
+
 fn onSignal(_: std.posix.SIG) callconv(.c) void {
     g_shutdown.store(true, .monotonic);
 }
@@ -65,7 +82,20 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     var client = try api.Client.init(allocator, cfg.server_url);
     defer client.deinit();
 
-    // 1. register
+    // 1. signal handling for clean shutdown.
+    //
+    // Installed before the registration: registration retries while the
+    // server is unreachable, and a daemon that is waiting for a server
+    // that never comes up still has to be stoppable.
+    var act = std.posix.Sigaction{
+        .handler = .{ .handler = onSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.INT, &act, null);
+    std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+
+    // 2. register
     //
     // `cli_version` is the version of the 1p CLI this daemon runs. The
     // server stores it on the runtime row's `metadata.cli_version`, and
@@ -76,23 +106,7 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
         .cli_version = build_options.version,
     }, .{});
     defer allocator.free(reg_body);
-    var reg_resp = try client.postJson(allocator, "/api/daemon/register", reg_body, token_buf);
-    defer reg_resp.deinit();
-    if (!reg_resp.ok()) {
-        out.printErr("register failed (HTTP {d}): {s}\n", .{ reg_resp.status, reg_resp.getString("error") orelse "unknown" });
-        return error.RegisterFailed;
-    }
-    const daemon_id = reg_resp.getString("daemon_id") orelse opts.runtime_id;
-    out.printOut("daemon registered: daemon_id={s} runtime_id={s}\n", .{ daemon_id, opts.runtime_id });
-
-    // 2. signal handling for clean shutdown
-    var act = std.posix.Sigaction{
-        .handler = .{ .handler = onSignal },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    };
-    std.posix.sigaction(std.posix.SIG.INT, &act, null);
-    std.posix.sigaction(std.posix.SIG.TERM, &act, null);
+    try registerDaemon(allocator, io, &client, token_buf, reg_body, opts.runtime_id);
 
     // 3. main loop: WS poll + heartbeat + claim
     const host_port = try parseHostPort(allocator, cfg.server_url);
@@ -178,10 +192,13 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
             }
         }
 
-        // Claim poll
+        // Claim poll. A server that went away must not take the daemon
+        // with it: the transport failure is reported as "unreachable"
+        // and retried on a short cadence, so the daemon resumes
+        // claiming as soon as the server is back.
         if (now >= claim_at) {
-            try claimPoll(allocator, io, &client, token_buf, opts.runtime_id);
-            claim_at = nowMillis(io) + @as(i64, @intCast(opts.claim_interval_ms));
+            const server_up = try claimPoll(allocator, io, &client, token_buf, opts.runtime_id);
+            claim_at = nowMillis(io) + @as(i64, @intCast(if (server_up) opts.claim_interval_ms else daemon_server_retry_ms));
         }
 
         // WS keepalive: a text frame well inside the server's read
@@ -213,19 +230,71 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     out.printOut("daemon stopped\n", .{});
 }
 
+/// Register with the server, retrying while it is unreachable.
+///
+/// A daemon is routinely started before the server is up — and it has to
+/// outlive a server restart — so a transport failure here must not take
+/// the process down: the daemon waits and tries again. A rejection (the
+/// server answered and refused the request) is fatal, because retrying
+/// a genuinely bad request would loop forever.
+fn registerDaemon(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    client: *api.Client,
+    token: []const u8,
+    body: []const u8,
+    runtime_id: []const u8,
+) !void {
+    var backoff_ms: u64 = 1000;
+    while (true) {
+        if (g_shutdown.load(.monotonic)) return error.ShutdownRequested;
+
+        var resp = client.postJson(allocator, "/api/daemon/register", body, token) catch |err| {
+            if (!isTransient(err)) return err;
+            out.printErr("register failed ({s}); retrying in {d}ms\n", .{ @errorName(err), backoff_ms });
+            io.sleep(std.Io.Duration.fromMilliseconds(@intCast(backoff_ms)), .awake) catch {};
+            backoff_ms = @min(backoff_ms * 2, 30_000);
+            continue;
+        };
+        defer resp.deinit();
+
+        if (!resp.ok()) {
+            out.printErr("register failed (HTTP {d}): {s}\n", .{ resp.status, resp.getString("error") orelse "unknown" });
+            return error.RegisterFailed;
+        }
+        const daemon_id = resp.getString("daemon_id") orelse runtime_id;
+        out.printOut("daemon registered: daemon_id={s} runtime_id={s}\n", .{ daemon_id, runtime_id });
+        return;
+    }
+}
+
 /// POST /api/daemon/runtimes/{rid}/tasks/claim; if a task is returned,
 /// run the M4 executor (start -> per-type execution -> result report ->
 /// complete/fail).
-fn claimPoll(allocator: std.mem.Allocator, io: std.Io, client: *api.Client, token: []const u8, runtime_id: []const u8) !void {
+///
+/// Returns false when the server could not be reached, so the caller can
+/// retry sooner than the normal claim interval instead of waiting out a
+/// full cycle for a server that is not there.
+fn claimPoll(allocator: std.mem.Allocator, io: std.Io, client: *api.Client, token: []const u8, runtime_id: []const u8) !bool {
     const path = try std.fmt.allocPrint(allocator, "/api/daemon/runtimes/{s}/tasks/claim", .{runtime_id});
     defer allocator.free(path);
-    var resp = try client.postJson(allocator, path, "", token);
+    var resp = client.postJson(allocator, path, "", token) catch |err| {
+        if (!isTransient(err)) return err;
+        out.printErr("claim skipped ({s}); server unreachable, retrying\n", .{@errorName(err)});
+        return false;
+    };
     defer resp.deinit();
     if (!resp.ok()) {
         out.printErr("claim failed (HTTP {d}): {s}\n", .{ resp.status, resp.getString("error") orelse "unknown" });
-        return;
+        return true;
     }
-    const task = resp.parsed.value.object.get("task") orelse return;
+    const task = resp.parsed.value.object.get("task") orelse return true;
+    try runClaimedTask(allocator, io, client, token, runtime_id, task);
+    return true;
+}
+
+/// Execute the task carried by a claim response, if there is one.
+fn runClaimedTask(allocator: std.mem.Allocator, io: std.Io, client: *api.Client, token: []const u8, runtime_id: []const u8, task: std.json.Value) !void {
     if (task != .object) return;
 
     const id = jsonStr(task, "id") orelse return;

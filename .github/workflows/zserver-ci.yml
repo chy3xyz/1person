@@ -106,3 +106,10 @@ jobs:
         run: |
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
             bash scripts/cli_m2_e2e.sh
+
+      - name: E2E — CLI daemon resilience (survives a server outage)
+        # The daemon used to die on the first claim attempt after the
+        # server went away, so every server restart silently killed it.
+        run: |
+          JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
+            bash scripts/daemon_resilience_e2e.sh
