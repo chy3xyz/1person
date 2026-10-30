@@ -44,6 +44,54 @@ pub const Provider = enum {
 /// to exhaust the daemon's memory.
 const max_output_bytes: usize = 4 * 1024 * 1024;
 
+/// The opencode agent a 1Person task runs under.
+pub const opencode_agent_id = "1p";
+
+/// The opencode profile a 1Person task runs under.
+///
+/// opencode's built-in `plan` agent is the wrong tool for this fork. Its
+/// own prompt tells the agent that it may not act until the user
+/// switches it to another mode, so a task that asks for a result comes
+/// back with "switch me to build mode" instead of the result — the
+/// answer depends on the mood of the model, not on the task. This
+/// fork's agents are text-only: the server posts the answer, and the
+/// agent has no business on the machine. So the task needs a profile
+/// that answers directly and has no tools at all.
+///
+/// The profile is written into the task's own working directory rather
+/// than into the user's opencode configuration: the daemon owns the
+/// machine, and a task must not inherit whatever profile the user
+/// happens to have set up.
+const openCodeConfigJson =
+    \\{
+    \\  "$schema": "https://opencode.ai/config.json",
+    \\  "agent": {
+    \\    "1p": {
+    \\      "description": "1Person task agent: answers the task in one reply, without tools.",
+    \\      "mode": "primary",
+    \\      "prompt": "You are an AI agent working on tasks handed to you by the 1Person platform.\n\nThe platform posts your reply for you: your whole reply is the deliverable. Answer the task directly and completely, in this reply. Do not ask questions, do not propose a plan, do not describe what you would do, and do not hand the work back to the user.\n\nYou have no tools: you cannot read or write files, run commands, or call APIs. Work only from the context you were given.",
+    \\      "permission": {
+    \\        "read": "deny",
+    \\        "edit": "deny",
+    \\        "glob": "deny",
+    \\        "grep": "deny",
+    \\        "list": "deny",
+    \\        "bash": "deny",
+    \\        "task": "deny",
+    \\        "external_directory": "deny",
+    \\        "todowrite": "deny",
+    \\        "question": "deny",
+    \\        "webfetch": "deny",
+    \\        "websearch": "deny",
+    \\        "lsp": "deny",
+    \\        "doom_loop": "deny",
+    \\        "skill": "deny"
+    \\      }
+    \\    }
+    \\  }
+    \\}
+;
+
 /// The inputs of one agent run.
 pub const RunRequest = struct {
     /// The rendered prompt, ready for the CLI.
@@ -54,6 +102,15 @@ pub const RunRequest = struct {
     custom_args: []const []const u8 = &.{},
     /// Environment overrides for the CLI process.
     custom_env: ?std.json.Value = null,
+    /// Whether the CLI may run against a private server instead of the
+    /// shared background service.
+    ///
+    /// This matters for opencode: the shared service keeps one project
+    /// per directory, and a run that lands in a directory the service
+    /// already knows about gets THAT project's configuration — not the
+    /// one next to the task. A private server per run keeps the run's
+    /// configuration the run's own.
+    use_standalone: bool = false,
     /// The daemon's own environment — the base the overrides apply to.
     base_env: ?*const std.process.Environ.Map = null,
     /// The directory the CLI runs in. Empty means "inherit the daemon's".
@@ -117,37 +174,79 @@ fn probe(allocator: std.mem.Allocator, io: std.Io, p: Provider) bool {
     return result.term.success();
 }
 
-/// Run one agent task with the local CLI.
+/// Whether the installed CLI can run against a private server.
 ///
-/// The caller owns `outcome.output`. On a non-zero exit the CLI's stderr
-/// is returned as the output — a failed run has to say why, and the CLI
-/// is the only one that knows.
-pub fn runAgent(
-    allocator: std.mem.Allocator,
-    io: std.Io,
-    provider: Provider,
-    req: RunRequest,
-) !RunOutcome {
+/// opencode's shared background service resolves a run's project from
+/// the directory the run happens in, but it remembers that project per
+/// directory — and a run that lands in a directory the service already
+/// knows about is served the remembered project's configuration. The
+/// profile 1Person writes next to the task is then ignored, and the run
+/// dies with "agent not found". A private server per run keeps the
+/// run's configuration the run's own.
+///
+/// The flag is optional in the CLI, so it is probed rather than assumed:
+/// an older opencode does not know it and would fail on the flag.
+pub fn supportsStandalone(allocator: std.mem.Allocator, io: std.Io, p: Provider) bool {
+    const argv = [_][]const u8{ p.name(), "run", "--help" };
+    const result = std.process.run(allocator, io, .{
+        .argv = &argv,
+        .stdout_limit = .limited(256 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    }) catch return false;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (!result.term.success()) return false;
+    return std.mem.indexOf(u8, result.stdout, "--standalone") != null;
+}
+
+/// Write the opencode profile into the task's working directory.
+///
+/// opencode reads the project's `opencode.json` from the directory the
+/// CLI runs in, so that is where the profile has to land. The directory
+/// belongs to one task, so the file cannot outlive the task it belongs
+/// to.
+fn prepareOpenCodeWorkspace(io: std.Io, allocator: std.mem.Allocator, work_dir: []const u8) !void {
+    const path = try std.fs.path.join(allocator, &.{ work_dir, "opencode.json" });
+    defer allocator.free(path);
+
+    var file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+    defer file.close(io);
+
+    var write_buf: [4096]u8 = undefined;
+    var wtr = file.writer(io, &write_buf);
+    try wtr.interface.writeAll(openCodeConfigJson);
+    try wtr.flush();
+}
+
+/// Build the command line for one agent run.
+///
+/// The caller owns the returned list.
+fn buildArgv(allocator: std.mem.Allocator, provider: Provider, req: RunRequest) !std.ArrayList([]const u8) {
     var argv: std.ArrayList([]const u8) = .empty;
-    defer argv.deinit(allocator);
+    errdefer argv.deinit(allocator);
 
     try argv.append(allocator, provider.name());
     switch (provider) {
         .opencode => {
             try argv.append(allocator, "run");
+            // A private server, not the shared background service: the
+            // service keeps one project per directory, and a run that
+            // lands in a directory it already knows about is served
+            // THAT project's configuration — so the profile written next
+            // to the task is ignored and the run fails with "agent not
+            // found". A private server resolves the run's own directory.
+            if (req.use_standalone) try argv.append(allocator, "--standalone");
             try argv.append(allocator, "--format");
             try argv.append(allocator, "json");
             // The agent has to be able to act on the task, not stop at
             // every permission prompt.
             try argv.append(allocator, "--auto");
-            // `plan` is opencode's tool-free mode. This fork's agent
-            // execution is text-only — the answer is posted by the
-            // server, not by the agent — so the agent must not go
-            // looking around the machine on its own. Without this the
-            // agent treats the issue as a coding task and starts
-            // exploring the file system instead of answering.
+            // The 1Person profile, not opencode's `plan` agent: `plan`
+            // refuses to produce a result until the user switches it to
+            // another mode, and this fork's agents are text-only — the
+            // answer is posted by the server, not by the agent.
             try argv.append(allocator, "--agent");
-            try argv.append(allocator, "plan");
+            try argv.append(allocator, opencode_agent_id);
             if (req.model.len > 0) {
                 try argv.append(allocator, "--model");
                 try argv.append(allocator, req.model);
@@ -180,12 +279,49 @@ pub fn runAgent(
             try argv.append(allocator, req.prompt);
         },
     }
+    return argv;
+}
+
+/// Run one agent task with the local CLI.
+///
+/// The caller owns `outcome.output` and `outcome.failure`. On a non-zero
+/// exit the CLI's stderr is returned as the output — a failed run has to
+/// say why, and the CLI is the only one that knows.
+pub fn runAgent(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    provider: Provider,
+    req: RunRequest,
+) !RunOutcome {
+    if (provider == .opencode) {
+        // The profile lives in the task's working directory, so the
+        // directory has to exist: an agent without one would run in the
+        // daemon's own directory, and would run with no profile at all.
+        if (req.work_dir.len == 0) {
+            return RunOutcome{
+                .output = "",
+                .exit_code = null,
+                .failure = try allocator.dupe(u8, "the daemon could not prepare a private working directory for the agent"),
+            };
+        }
+        _ = prepareOpenCodeWorkspace(io, allocator, req.work_dir) catch |err| {
+            return RunOutcome{
+                .output = "",
+                .exit_code = null,
+                .failure = try std.fmt.allocPrint(allocator, "the daemon could not write the agent's opencode profile ({s})", .{@errorName(err)}),
+            };
+        };
+    }
+
+    var argv = try buildArgv(allocator, provider, req);
+    defer argv.deinit(allocator);
 
     // The child gets the daemon's environment plus the agent's overrides.
     var env: ?std.process.Environ.Map = null;
     defer if (env) |*e| e.deinit();
     if (try buildEnv(allocator, req)) |e| env = e;
 
+    out.printOut("agent run: provider={s} cwd={s}\n", .{ provider.name(), req.work_dir });
     const result = std.process.run(allocator, io, .{
         .argv = argv.items,
         .stdout_limit = .limited(max_output_bytes),
@@ -296,20 +432,32 @@ fn claudeErrorMessage(allocator: std.mem.Allocator, stdout: []const u8) !?[]cons
 }
 
 /// Build the child environment: the daemon's own, plus the agent's
-/// overrides.
+/// overrides, plus a `PWD` that agrees with the child's directory.
+///
+/// The `PWD` matters more than it looks: opencode resolves the
+/// project — and with it the configuration it reads — from `PWD`, not
+/// from the process's actual directory. A daemon that changes the
+/// child's directory without fixing `PWD` leaves the two disagreeing,
+/// and the CLI then looks for its configuration in the daemon's
+/// directory and misses the profile written next to the task.
 fn buildEnv(allocator: std.mem.Allocator, req: RunRequest) !?std.process.Environ.Map {
-    const overrides = req.custom_env orelse return null;
-    if (overrides != .object) return null;
-    if (overrides.object.count() == 0) return null;
+    const overrides = req.custom_env;
+    const has_overrides = if (overrides) |o| o == .object and o.object.count() > 0 else false;
+    const needs_pwd = req.work_dir.len > 0 and req.base_env != null;
+    if (!has_overrides and !needs_pwd) return null;
 
     var map = std.process.Environ.Map.init(allocator);
     errdefer map.deinit();
     if (req.base_env) |base| try map.putAll(base);
 
-    var it = overrides.object.iterator();
-    while (it.next()) |entry| {
-        if (entry.value_ptr.* != .string) continue;
-        try map.put(entry.key_ptr.*, entry.value_ptr.*.string);
+    if (needs_pwd) try map.put("PWD", req.work_dir);
+
+    if (has_overrides) {
+        var it = overrides.?.object.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.* != .string) continue;
+            try map.put(entry.key_ptr.*, entry.value_ptr.*.string);
+        }
     }
     return map;
 }
@@ -437,6 +585,101 @@ test "claude output that is not JSON falls back to the raw text" {
     const answer = try extractClaudeResult(testing.allocator, "plain answer\n");
     defer testing.allocator.free(answer);
     try testing.expectEqualStrings("plain answer", answer);
+}
+
+test "opencode runs the 1Person profile, not opencode's plan agent" {
+    // opencode's `plan` agent refuses to produce a result until the
+    // user switches it to another mode, so a task that asks for an
+    // answer comes back with "switch me to build mode" instead.
+    var argv = try buildArgv(testing.allocator, .opencode, .{
+        .prompt = "做一件事",
+        .model = "opencode/some-model",
+    });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--agent 1p ") != null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "plan") == null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--model opencode/some-model ") != null);
+}
+
+test "opencode runs against a private server when the CLI can do that" {
+    // The shared background service remembers one project per directory
+    // and serves THAT project's configuration to a run that lands in a
+    // directory it already knows — so the profile written next to the
+    // task is ignored and the run dies with "agent not found".
+    var argv = try buildArgv(testing.allocator, .opencode, .{
+        .prompt = "做一件事",
+        .use_standalone = true,
+    });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--standalone ") != null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--agent 1p ") != null);
+}
+
+test "opencode without a private server still uses the 1Person profile" {
+    var argv = try buildArgv(testing.allocator, .opencode, .{ .prompt = "做一件事" });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--standalone") == null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--agent 1p ") != null);
+}
+
+test "the opencode profile answers directly and has no tools" {
+    var parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, openCodeConfigJson, .{});
+    defer parsed.deinit();
+    const root = parsed.value;
+    try testing.expect(root == .object);
+
+    const agent = root.object.get("agent") orelse return error.TestExpectedEqual;
+    try testing.expect(agent == .object);
+    const profile = agent.object.get(opencode_agent_id) orelse return error.TestExpectedEqual;
+    try testing.expect(profile == .object);
+
+    // The profile has to be a primary agent, or it cannot be selected
+    // with `--agent`.
+    const mode = profile.object.get("mode") orelse return error.TestExpectedEqual;
+    try testing.expectEqualStrings("primary", mode.string);
+
+    // The prompt has to ask for the answer, not for a plan.
+    const prompt = profile.object.get("prompt") orelse return error.TestExpectedEqual;
+    try testing.expect(std.mem.indexOf(u8, prompt.string, "your whole reply is the deliverable") != null);
+    try testing.expect(std.mem.indexOf(u8, prompt.string, "do not propose a plan") != null);
+
+    // Every tool has to be denied: the agent answers, it does not act on
+    // the machine.
+    const permission = profile.object.get("permission") orelse return error.TestExpectedEqual;
+    try testing.expect(permission == .object);
+    const denied = [_][]const u8{
+        "read",   "edit",     "glob",       "grep",        "list",
+        "bash",   "task",     "todowrite",  "question",    "webfetch",
+        "websearch", "lsp",   "skill",      "external_directory",
+    };
+    for (denied) |tool| {
+        const rule = permission.object.get(tool) orelse return error.TestExpectedEqual;
+        try testing.expectEqualStrings("deny", rule.string);
+    }
 }
 
 test "firstLine picks the first non-empty line" {

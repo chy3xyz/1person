@@ -38,6 +38,12 @@ var g_shutdown: std.atomic.Value(bool) = std.atomic.Value(bool).init(false);
 /// of every call signature.
 var g_work_root: []const u8 = "";
 
+/// Whether the local agent CLI can run against a private server.
+///
+/// Set once at startup. See `agent_exec.supportsStandalone` for why a
+/// private server matters.
+var g_use_standalone: bool = false;
+
 /// Cadence of the daemon's WebSocket keepalive frame. Must stay well
 /// below the server's socket read timeout (30s) so the push channel is
 /// not torn down and re-established on every timeout.
@@ -70,12 +76,15 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
 
     // The agent runs in a directory of its own, per task. See
     // `ensureTaskWorkDir`.
-    {
-        const base = std.fs.path.dirname(opts.path) orelse ".";
-        const root = try std.fs.path.join(allocator, &.{ base, "work" });
-        defer allocator.free(root);
-        g_work_root = root;
-    }
+    //
+    // The path has to stay alive for as long as the daemon runs: it is
+    // read again for every task the daemon claims. Freeing it here —
+    // which is what a scope-local `defer` would do — left the global
+    // pointing at freed memory, and the agent's working directory was
+    // a row of 0x55 bytes.
+    const base = std.fs.path.dirname(opts.path) orelse ".";
+    g_work_root = try std.fs.path.join(allocator, &.{ base, "work" });
+    defer allocator.free(g_work_root);
 
     if (cfg.server_url.len == 0) {
         out.printErr("no server_url configured — run \"1p login\" first (config: {s})\n", .{opts.path});
@@ -126,6 +135,12 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     // Reporting it is what lets the server hand real work to this daemon:
     // without a provider there is nothing that could execute a task.
     const provider = agent_exec.detectProvider(allocator, io);
+    // A private server per run keeps the run's configuration the run's
+    // own; the shared background service can serve a remembered
+    // project's configuration instead.
+    if (provider) |p| {
+        g_use_standalone = agent_exec.supportsStandalone(allocator, io, p);
+    }
     // A daemon that found no agent CLI cannot execute anything, so it
     // advertises no capabilities — and the server then never hands it a
     // task it would only fail.
@@ -377,8 +392,17 @@ fn executeAgentTask(
     // execution is text-only — the server posts the answer — so the
     // agent has no business in the repository, and an empty directory
     // makes sure it cannot get there.
-    const work_dir = ensureTaskWorkDir(allocator, id) catch "";
-    defer if (work_dir.len > 0) allocator.free(work_dir);
+    //
+    // The directory is not optional: the agent runs inside it, and
+    // opencode reads the profile it runs under from it. Without one the
+    // agent would run in the daemon's own directory, with a profile
+    // that was never written.
+    const work_dir = ensureTaskWorkDir(allocator, io, id) catch |err| {
+        out.printErr("agent task has no working directory ({s})\n", .{@errorName(err)});
+        try failTask(allocator, client, token, id, "the daemon could not prepare a private working directory for the agent");
+        return;
+    };
+    defer allocator.free(work_dir);
 
     const outcome = agent_exec.runAgent(allocator, io, provider, .{
         .prompt = prompt_text,
@@ -387,6 +411,7 @@ fn executeAgentTask(
         .custom_env = jsonValue(task, "custom_env"),
         .base_env = base_env,
         .work_dir = work_dir,
+        .use_standalone = g_use_standalone,
     }) catch |err| {
         out.printErr("agent task failed ({s})\n", .{@errorName(err)});
         try failTask(allocator, client, token, id, @errorName(err));
@@ -400,6 +425,7 @@ fn executeAgentTask(
         try failTask(allocator, client, token, id, reason);
         return;
     }
+    defer allocator.free(outcome.output);
 
     try reportTaskOutput(allocator, client, token, id, outcome.output);
 }
@@ -409,25 +435,12 @@ fn executeAgentTask(
 /// The directory is empty on purpose: the agent only has to produce
 /// text, and an empty directory keeps it from wandering into the
 /// repository (or into unrelated files elsewhere on the machine).
-///
-/// Returns an empty string when the directory cannot be created — the
-/// run then happens in the daemon's own directory, which is worse but
-/// not fatal.
-fn ensureTaskWorkDir(allocator: std.mem.Allocator, task_id: []const u8) ![]const u8 {
+fn ensureTaskWorkDir(allocator: std.mem.Allocator, io: std.Io, task_id: []const u8) ![]const u8 {
     if (g_work_root.len == 0) return error.NoWorkRoot;
-    makeDir(allocator, g_work_root);
     const dir = try std.fs.path.join(allocator, &.{ g_work_root, task_id });
     errdefer allocator.free(dir);
-    makeDir(allocator, dir);
+    try std.Io.Dir.cwd().createDirPath(io, dir);
     return dir;
-}
-
-/// Create a directory, ignoring the fact that it may already exist.
-fn makeDir(allocator: std.mem.Allocator, path: []const u8) void {
-    const path_s = allocator.allocSentinel(u8, path.len, 0) catch return;
-    defer allocator.free(path_s);
-    @memcpy(path_s, path);
-    _ = std.c.mkdir(path_s.ptr, 0o700);
 }
 
 /// Read a nested JSON value from a task payload.
