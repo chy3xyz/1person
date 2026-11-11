@@ -455,6 +455,17 @@ fn executeAgentTask(
     }
     defer allocator.free(outcome.output);
 
+    // The platform's opencode profile is put back before anything else:
+    // it is the platform's configuration, not the agent's work, and a
+    // delivery that carried it would change the user's repository.
+    //
+    // This happens whether or not the task had a repository — a task that
+    // only answers still got a profile written into its working
+    // directory, and that directory is reclaimed right after.
+    if (outcome.profile) |backup| {
+        agent_exec.cleanupOpenCodeWorkspace(io, allocator, backup);
+    }
+
     // The agent's work has to be delivered even when the run itself
     // succeeded: loose files in a directory that is about to be reclaimed
     // are not a deliverable. The commit is.
@@ -464,12 +475,6 @@ fn executeAgentTask(
     var delivery_note: []const u8 = "";
     defer if (delivery_note.len > 0) allocator.free(delivery_note);
     if (prepared) |w| {
-        // The platform's opencode profile is put back before the commit:
-        // it is the platform's configuration, not the agent's work, and a
-        // delivery that carried it would change the user's repository.
-        if (outcome.profile) |backup| {
-            agent_exec.cleanupOpenCodeWorkspace(io, allocator, backup);
-        }
         delivery_note = deliverTaskWork(allocator, io, w, id) catch |err| {
             out.printErr("agent task could not deliver its work ({s})\n", .{@errorName(err)});
             try failTask(allocator, client, token, id, "the agent's changes could not be committed for delivery");
@@ -477,7 +482,23 @@ fn executeAgentTask(
         };
     }
 
+    // The task's own directory is disposable and would otherwise pile up
+    // one empty directory per task for as long as the daemon runs.
+    removeTaskWorkDir(io, id);
+
     try reportTaskOutput(allocator, client, token, id, outcome.output, delivery_note);
+}
+
+/// Remove the directory a task worked in, once it is empty.
+///
+/// The directory is only removed when it is empty — `deleteDir` refuses
+/// to remove a directory that still holds something, so a leftover from a
+/// crashed run stays visible instead of being thrown away.
+fn removeTaskWorkDir(io: std.Io, task_id: []const u8) void {
+    if (g_work_root.len == 0) return;
+    var buf: [4096]u8 = undefined;
+    const path = std.fmt.bufPrint(&buf, "{s}{c}{s}", .{ g_work_root, std.fs.path.sep, task_id }) catch return;
+    std.Io.Dir.cwd().deleteDir(io, path) catch {};
 }
 
 /// Prepare the git worktree an agent task works in.
