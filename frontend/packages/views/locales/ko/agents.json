@@ -211,6 +211,7 @@
     "mcp_config": "MCP",
     "integrations": "연동",
     "runtime_config": "라우팅",
+    "local_path": "로컬 디렉터리",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -347,6 +348,17 @@
       "tls_hint": "http:// 대신 https://로 다이얼",
       "saved_toast": "라우팅 설정이 저장되었습니다",
       "save_failed_toast": "라우팅 설정 저장 실패"
+    },
+    "local_directory": {
+      "intro": "이 컴퓨터의 git 저장소에서 에이전트가 작업하도록 합니다. 데몬이 작업을 가져오면 에이전트 전용 worktree를 만들고, 에이전트는 그 worktree만 수정합니다. 변경 사항은 플랫폼이 `1p/<에이전트>/<작업>` 브랜치에 커밋하므로 diff를 확인한 뒤 직접 병합하세요. 작업 중인 파일은 변경되지 않습니다.",
+      "path_label": "로컬 코드 디렉터리",
+      "path_placeholder": "/Users/you/projects/repo",
+      "path_not_absolute": "디렉터리는 절대 경로여야 합니다.",
+      "path_hint": "절대 경로를 입력하세요. 데몬이 해당 디렉터리가 속한 git 저장소에서 worktree를 만들고 에이전트는 그 worktree만 수정합니다.",
+      "current_label": "현재 디렉터리",
+      "clear": "지우기",
+      "saved_toast": "로컬 디렉터리를 저장했습니다",
+      "save_failed_toast": "로컬 디렉터리 저장에 실패했습니다"
     },
     "skills": {
       "intro": "이 에이전트에 할당된 워크스페이스 스킬입니다. 로컬 런타임 스킬은 항상 자동으로 사용할 수 있습니다.",

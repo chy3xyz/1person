@@ -206,6 +206,7 @@
     "mcp_config": "MCP",
     "integrations": "集成",
     "runtime_config": "路由",
+    "local_path": "本地目录",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -340,6 +341,17 @@
       "tls_hint": "用 https:// 代替 http:// 连接",
       "saved_toast": "路由配置已保存",
       "save_failed_toast": "保存路由配置失败"
+    },
+    "local_directory": {
+      "intro": "让智能体在这台机器的 git 仓库里干活。守护进程领到任务后会为它单独开一个 worktree，智能体只改这个 worktree，改完由平台提交到 `1p/<智能体>/<任务>` 分支，你再自己看 diff 合并。你自己正在改的代码不会被碰。",
+      "path_label": "本地代码目录",
+      "path_placeholder": "/Users/you/projects/repo",
+      "path_not_absolute": "目录必须是绝对路径。",
+      "path_hint": "填绝对路径。守护进程会从这个目录所在的 git 仓库拉出一个独立的 worktree，智能体只改 worktree，你的文件不会被碰。",
+      "current_label": "当前目录",
+      "clear": "清除",
+      "saved_toast": "本地目录已保存",
+      "save_failed_toast": "保存本地目录失败"
     },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",

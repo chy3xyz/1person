@@ -198,6 +198,7 @@
     "mcp_config": "MCP",
     "integrations": "連携",
     "runtime_config": "ルーティング",
+    "local_path": "ローカルディレクトリ",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
     "discard_keep": "編集を続ける",
@@ -332,6 +333,17 @@
       "tls_hint": "http:// の代わりに https:// でダイヤル",
       "saved_toast": "ルーティング設定を保存しました",
       "save_failed_toast": "ルーティング設定の保存に失敗しました"
+    },
+    "local_directory": {
+      "intro": "このマシン上の git リポジトリでエージェントに作業させます。デーモンがタスクを取得するとエージェント専用の worktree を作成し、エージェントはその worktree を編集します。変更はプラットフォームが `1p/<エージェント>/<タスク>` ブランチにコミットするので、diff を確認して自分でマージしてください。作業中のファイルは変更されません。",
+      "path_label": "ローカルコードディレクトリ",
+      "path_placeholder": "/Users/you/projects/repo",
+      "path_not_absolute": "ディレクトリは絶対パスである必要があります。",
+      "path_hint": "絶対パスを指定してください。デーモンはそのディレクトリを含む git リポジトリから worktree を作成し、エージェントは worktree だけを編集します。",
+      "current_label": "現在のディレクトリ",
+      "clear": "クリア",
+      "saved_toast": "ローカルディレクトリを保存しました",
+      "save_failed_toast": "ローカルディレクトリの保存に失敗しました"
     },
     "skills": {
       "intro": "このエージェントに割り当てられたワークスペースのスキルです。ローカルランタイムのスキルは常に自動的に利用できます。",

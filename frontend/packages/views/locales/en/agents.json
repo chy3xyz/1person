@@ -211,6 +211,7 @@
     "mcp_config": "MCP",
     "integrations": "Integrations",
     "runtime_config": "Routing",
+    "local_path": "Local Directory",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -347,6 +348,17 @@
       "tls_hint": "Dial https:// instead of http://",
       "saved_toast": "Routing config saved",
       "save_failed_toast": "Failed to save routing config"
+    },
+    "local_directory": {
+      "intro": "Let the agent work in a git repository on this machine. When the daemon claims a task it opens a separate worktree for the agent; the agent edits that worktree and the platform commits the result to a `1p/<agent>/<task>` branch for you to review and merge. Your own working copy is never touched.",
+      "path_label": "Local code directory",
+      "path_placeholder": "/Users/you/projects/repo",
+      "path_not_absolute": "The directory must be an absolute path.",
+      "path_hint": "Give an absolute path. The daemon takes the git repository that contains it and opens a worktree for the agent — the agent only edits that worktree, your files are left alone.",
+      "current_label": "Current directory",
+      "clear": "Clear",
+      "saved_toast": "Local directory saved",
+      "save_failed_toast": "Failed to save the local directory"
     },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",

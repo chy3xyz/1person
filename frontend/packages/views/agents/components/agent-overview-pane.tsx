@@ -5,6 +5,7 @@ import {
   Activity,
   BookOpenText,
   FileText,
+  FolderGit2,
   KeyRound,
   ListTodo,
   Plug,
@@ -14,7 +15,10 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@1person/core/types";
-import { providerSupportsMcpConfig } from "@1person/core/agents";
+import {
+  providerSupportsLocalDirectory,
+  providerSupportsMcpConfig,
+} from "@1person/core/agents";
 import { useWorkspaceId } from "@1person/core/hooks";
 import { larkInstallationsOptions } from "@1person/core/lark";
 import {
@@ -35,6 +39,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
+import { LocalDirectoryTab } from "./tabs/local-directory-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
@@ -47,9 +52,10 @@ export type DetailTab =
   | "custom_args"
   | "mcp_config"
   | "integrations"
-  | "runtime_config";
+  | "runtime_config"
+  | "local_path";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config" | "local_path"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
@@ -59,6 +65,7 @@ const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "
   mcp_config: "mcp_config",
   integrations: "integrations",
   runtime_config: "runtime_config",
+  local_path: "local_path",
 };
 
 const detailTabs: {
@@ -74,6 +81,7 @@ const detailTabs: {
   { id: "mcp_config", icon: Plug },
   { id: "integrations", icon: Webhook },
   { id: "runtime_config", icon: Router },
+  { id: "local_path", icon: FolderGit2 },
 ];
 
 interface AgentOverviewPaneProps {
@@ -156,13 +164,22 @@ export function AgentOverviewPane({
   // issue #3260). Other providers' runtime_config is freeform JSONB that no
   // backend currently reads, so surfacing the tab would let users save values
   // their runtime ignores — same anti-footgun rationale as the MCP gate.
+  //
+  // The Local Directory tab is the opposite case: `runtime_config.local_path`
+  // is read by the daemon when it claims a task, so it only applies to
+  // runtimes a daemon on the user's machine can execute. On a hosted runtime
+  // the binding would be ignored, so the tab stays hidden there.
   const visibleTabs = useMemo(() => {
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
+    const showLocalPath = runtime
+      ? providerSupportsLocalDirectory(runtime.provider)
+      : false;
     return detailTabs.filter((tab) => {
       if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "integrations") return larkConfigured;
       if (tab.id === "runtime_config") return showRuntimeConfig;
+      if (tab.id === "local_path") return showLocalPath;
       return true;
     });
   }, [runtime, larkConfigured]);
@@ -286,6 +303,15 @@ export function AgentOverviewPane({
         {effectiveTab === "runtime_config" && (
           <TabContent>
             <RuntimeConfigTab
+              agent={agent}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {effectiveTab === "local_path" && (
+          <TabContent>
+            <LocalDirectoryTab
               agent={agent}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}

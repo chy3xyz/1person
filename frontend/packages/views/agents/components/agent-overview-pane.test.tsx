@@ -34,6 +34,9 @@ vi.mock("./tabs/mcp-config-tab", () => ({
 vi.mock("./tabs/integrations-tab", () => ({
   IntegrationsTab: () => <div>integrations-tab</div>,
 }));
+vi.mock("./tabs/local-directory-tab", () => ({
+  LocalDirectoryTab: () => <div>local-directory-tab</div>,
+}));
 vi.mock("../../common/actor-issues-panel", () => ({
   ActorIssuesPanel: () => <div>actor-issues-panel</div>,
 }));
@@ -169,6 +172,43 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     renderPane([makeRuntime("claude")]);
     expect(
       screen.queryByRole("button", { name: /^Integrations$/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Local Directory tab visibility", () => {
+  it.each([
+    ["Claude", "claude"],
+    ["Codex", "codex"],
+    ["OpenCode", "opencode"],
+  ])(
+    "shows the Local Directory tab when the agent runs on the %s runtime",
+    (_label, provider) => {
+      // The daemon reads `runtime_config.local_path` when it claims a task,
+      // so the binding is meaningful on any runtime a paired daemon runs.
+      renderPane([makeRuntime(provider)]);
+      expect(
+        screen.getByRole("button", { name: /^Local Directory$/i }),
+      ).toBeInTheDocument();
+    },
+  );
+
+  it("hides the Local Directory tab on a hosted runtime", () => {
+    // "auto" is what a runtime the daemon cannot run is registered as. A
+    // binding saved there would be silently ignored at task time.
+    renderPane([makeRuntime("auto")]);
+    expect(
+      screen.queryByRole("button", { name: /^Local Directory$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the Local Directory tab until the runtime row has loaded", () => {
+    // The tab depends on the runtime's provider. Showing it before the
+    // row arrives would let a user save a binding onto a runtime that
+    // turns out to ignore it.
+    renderPane([]);
+    expect(
+      screen.queryByRole("button", { name: /^Local Directory$/i }),
     ).not.toBeInTheDocument();
   });
 });
