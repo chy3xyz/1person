@@ -70,6 +70,37 @@ pub const Client = struct {
         return .{ .status = resp.status, .parsed = parsed };
     }
 
+    /// PUT a JSON body with a Bearer token and an X-Workspace-ID header.
+    ///
+    /// The agent endpoints answer PUT as well as PATCH (the frontend/Go
+    /// contract uses PUT), and the CLI needs one for a partial update.
+    pub fn putJson(self: *Client, allocator: std.mem.Allocator, path: []const u8, body: []const u8, token: []const u8, workspace_id: ?[]const u8) !Response {
+        var headers_buf: [3]std.http.Header = undefined;
+        headers_buf[0] = .{ .name = "content-type", .value = "application/json" };
+        var headers: []std.http.Header = headers_buf[0..1];
+        var index: usize = 1;
+        if (workspace_id) |ws| {
+            headers_buf[index] = .{ .name = "x-workspace-id", .value = ws };
+            index += 1;
+        }
+        const bearer = try std.fmt.allocPrint(allocator, "Bearer {s}", .{token});
+        defer allocator.free(bearer);
+        headers_buf[index] = .{ .name = "authorization", .value = bearer };
+        index += 1;
+        headers = headers_buf[0..index];
+
+        var resp = self.http.requestWith(.PUT, path, body, headers) catch |err| {
+            out.printErr("request failed: {s}\n", .{@errorName(err)});
+            return error.RequestFailed;
+        };
+        defer resp.deinit();
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, resp.body, .{}) catch |err| {
+            out.printErr("response is not JSON ({s}): {s}\n", .{ @errorName(err), resp.body });
+            return error.InvalidJson;
+        };
+        return .{ .status = resp.status, .parsed = parsed };
+    }
+
     /// GET with a Bearer token and an optional X-Workspace-ID header.
     pub fn getJson(self: *Client, allocator: std.mem.Allocator, path: []const u8, token: []const u8, workspace_id: ?[]const u8) !Response {
         var headers_buf: [2]std.http.Header = undefined;

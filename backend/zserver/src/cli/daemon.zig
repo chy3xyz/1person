@@ -15,6 +15,7 @@ const agent_exec = @import("agent_exec.zig");
 const config_store = @import("config_store.zig");
 const out = @import("out.zig");
 const ws = @import("ws.zig");
+const worktree = @import("worktree.zig");
 const build_options = @import("build_options");
 
 pub const DaemonOptions = struct {
@@ -370,6 +371,10 @@ fn executeAgentTask(
     const prompt_text = jsonStr(task, "prompt") orelse "";
     const provider_name = jsonStr(task, "provider") orelse "auto";
     const model = jsonStr(task, "model") orelse "";
+    const agent_name = jsonStr(task, "agent_name") orelse "agent";
+    // The repository the agent works in, when it has one. Empty means the
+    // agent only answers — it has no checkout and no tools.
+    const repo_path = jsonStr(task, "work_dir") orelse "";
 
     out.printOut("AGENT task id={s} provider={s}\n", .{ id, provider_name });
 
@@ -388,21 +393,43 @@ fn executeAgentTask(
         allocator.free(custom_args);
     }
 
-    // The agent gets an empty directory of its own. This fork's agent
-    // execution is text-only — the server posts the answer — so the
-    // agent has no business in the repository, and an empty directory
-    // makes sure it cannot get there.
+    // A task that changes code gets its own git worktree: a private
+    // checkout of the user's repository on its own branch. The agent edits
+    // that, the platform commits it, and the user's own working copy is
+    // never touched.
+    var prepared: ?worktree.Worktree = null;
+    defer if (prepared) |w| w.deinit(allocator);
+
+    var work_dir: []const u8 = "";
+    // A task without a repository gets an empty directory of its own. It
+    // only has to produce text, and an empty directory keeps it from
+    // wandering into the repository (or into unrelated files elsewhere on
+    // the machine).
     //
     // The directory is not optional: the agent runs inside it, and
     // opencode reads the profile it runs under from it. Without one the
-    // agent would run in the daemon's own directory, with a profile
-    // that was never written.
-    const work_dir = ensureTaskWorkDir(allocator, io, id) catch |err| {
-        out.printErr("agent task has no working directory ({s})\n", .{@errorName(err)});
-        try failTask(allocator, client, token, id, "the daemon could not prepare a private working directory for the agent");
-        return;
-    };
-    defer allocator.free(work_dir);
+    // agent would run in the daemon's own directory, with a profile that
+    // was never written.
+    var owned_work_dir: ?[]const u8 = null;
+    defer if (owned_work_dir) |d| allocator.free(d);
+
+    if (repo_path.len > 0) {
+        const wt = prepareTaskWorktree(allocator, io, id, agent_name, repo_path) catch |err| {
+            out.printErr("agent task could not prepare a working directory ({s})\n", .{@errorName(err)});
+            try failTask(allocator, client, token, id, "the daemon could not prepare a working directory for the agent");
+            return;
+        };
+        prepared = wt;
+        work_dir = wt.path;
+    } else {
+        const dir = ensureTaskWorkDir(allocator, io, id) catch |err| {
+            out.printErr("agent task has no working directory ({s})\n", .{@errorName(err)});
+            try failTask(allocator, client, token, id, "the daemon could not prepare a private working directory for the agent");
+            return;
+        };
+        owned_work_dir = dir;
+        work_dir = dir;
+    }
 
     const outcome = agent_exec.runAgent(allocator, io, provider, .{
         .prompt = prompt_text,
@@ -411,6 +438,7 @@ fn executeAgentTask(
         .custom_env = jsonValue(task, "custom_env"),
         .base_env = base_env,
         .work_dir = work_dir,
+        .can_edit = prepared != null,
         .use_standalone = g_use_standalone,
     }) catch |err| {
         out.printErr("agent task failed ({s})\n", .{@errorName(err)});
@@ -427,7 +455,99 @@ fn executeAgentTask(
     }
     defer allocator.free(outcome.output);
 
-    try reportTaskOutput(allocator, client, token, id, outcome.output);
+    // The agent's work has to be delivered even when the run itself
+    // succeeded: loose files in a directory that is about to be reclaimed
+    // are not a deliverable. The commit is.
+    //
+    // The note outlives the block that produces it: it is read again
+    // when the task is reported.
+    var delivery_note: []const u8 = "";
+    defer if (delivery_note.len > 0) allocator.free(delivery_note);
+    if (prepared) |w| {
+        // The platform's opencode profile is put back before the commit:
+        // it is the platform's configuration, not the agent's work, and a
+        // delivery that carried it would change the user's repository.
+        if (outcome.profile) |backup| {
+            agent_exec.cleanupOpenCodeWorkspace(io, allocator, backup);
+        }
+        delivery_note = deliverTaskWork(allocator, io, w, id) catch |err| {
+            out.printErr("agent task could not deliver its work ({s})\n", .{@errorName(err)});
+            try failTask(allocator, client, token, id, "the agent's changes could not be committed for delivery");
+            return;
+        };
+    }
+
+    try reportTaskOutput(allocator, client, token, id, outcome.output, delivery_note);
+}
+
+/// Prepare the git worktree an agent task works in.
+///
+/// The worktree lives under the daemon's own work root — never inside the
+/// user's repository — and the branch it delivers on lives in the user's
+/// repository, so the user finds it with `git branch` and reviews it like
+/// any other work.
+///
+/// The caller owns the returned worktree.
+fn prepareTaskWorktree(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    task_id: []const u8,
+    agent_name: []const u8,
+    repo_path: []const u8,
+) !worktree.Worktree {
+    if (g_work_root.len == 0) return error.NoWorkRoot;
+
+    const repo_root = try worktree.resolveRepoRoot(allocator, io, repo_path);
+    defer allocator.free(repo_root);
+
+    const branch = try worktree.branchName(allocator, agent_name, task_id);
+    defer allocator.free(branch);
+
+    const path = try std.fs.path.join(allocator, &.{ g_work_root, task_id, "wt" });
+    defer allocator.free(path);
+    try std.Io.Dir.cwd().createDirPath(io, path);
+
+    return worktree.createWorktree(allocator, io, repo_root, path, branch);
+}
+
+/// Commit what the agent changed and report what was delivered.
+///
+/// The reply the user reads says which branch carries the work and how
+/// many files changed, so the change is findable without hunting through
+/// the repository.
+///
+/// The caller owns the returned string.
+fn deliverTaskWork(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    wt: worktree.Worktree,
+    task_id: []const u8,
+) ![]const u8 {
+    const message = try std.fmt.allocPrint(allocator, "chore(1p): agent changes for task {s}", .{task_id});
+    defer allocator.free(message);
+
+    const delivery = try worktree.deliverWork(allocator, io, wt, message);
+    defer delivery.deinit(allocator);
+
+    // The worktree is disposable; the branch is the deliverable and stays
+    // in the user's repository.
+    worktree.removeWorktree(allocator, io, wt.repo_root, wt.path);
+
+    if (delivery.commit == null) {
+        return allocator.dupe(u8, "");
+    }
+    return std.fmt.allocPrint(
+        allocator,
+        "The change was committed on branch `{s}` as `{s}` ({d} file{s} changed). " ++
+            "Review it with `git show {s}`, and merge it when it looks right.",
+        .{
+            delivery.branch,
+            delivery.commit.?,
+            delivery.files_changed,
+            if (delivery.files_changed == 1) "" else "s",
+            delivery.commit.?,
+        },
+    );
 }
 
 /// Create the working directory for one agent task.
@@ -478,10 +598,29 @@ fn startTask(allocator: std.mem.Allocator, client: *api.Client, token: []const u
 }
 
 /// Report the agent's answer so the server can deliver it.
-fn reportTaskOutput(allocator: std.mem.Allocator, client: *api.Client, token: []const u8, task_id: []const u8, output: []const u8) !void {
+///
+/// `delivery_note` is what the platform has to add to the agent's own
+/// words: the branch its work landed on. It is appended to the reply the
+/// user reads, because the change itself is a commit and the reply is
+/// where the user looks for what happened.
+fn reportTaskOutput(
+    allocator: std.mem.Allocator,
+    client: *api.Client,
+    token: []const u8,
+    task_id: []const u8,
+    output: []const u8,
+    delivery_note: []const u8,
+) !void {
     const path = try std.fmt.allocPrint(allocator, "/api/daemon/tasks/{s}/complete", .{task_id});
     defer allocator.free(path);
-    const body = try std.json.Stringify.valueAlloc(allocator, .{ .output = output }, .{});
+
+    const body = if (delivery_note.len == 0)
+        try std.json.Stringify.valueAlloc(allocator, .{ .output = output }, .{})
+    else blk: {
+        const merged = try std.fmt.allocPrint(allocator, "{s}\n\n{s}", .{ output, delivery_note });
+        defer allocator.free(merged);
+        break :blk try std.json.Stringify.valueAlloc(allocator, .{ .output = merged }, .{});
+    };
     defer allocator.free(body);
     var resp = try client.postJson(allocator, path, body, token);
     defer resp.deinit();

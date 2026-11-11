@@ -633,6 +633,13 @@ const AgentTaskPayload = struct {
     custom_env: std.json.Value,
     custom_args: std.json.Value,
     mcp_config: std.json.Value,
+    /// The agent's name, so the daemon can name the branch its work lands on.
+    agent_name: []const u8 = "",
+    /// The local repository the agent works in, when it has one.
+    ///
+    /// Empty means "answer from the context, do not touch the machine" —
+    /// the mode every agent without a repository bound runs in.
+    work_dir: []const u8 = "",
 };
 
 /// Claim one agent task and render its payload.
@@ -680,6 +687,7 @@ fn renderAgentTaskClaim(ctx: *zfinal.Context, allocator: std.mem.Allocator, runt
             .instructions = agent_cfg.instructions,
             .history = history,
             .request = lastUserMessage(history),
+            .work_dir = agent_cfg.local_path,
         });
     } else if (task.issue_id) |issue_id| {
         const issue_ctx = (try agent_task.selectIssueContext(allocator, issue_id, workspace.issue_prefix)) orelse {
@@ -706,6 +714,7 @@ fn renderAgentTaskClaim(ctx: *zfinal.Context, allocator: std.mem.Allocator, runt
             .status = issue_ctx.status,
             .priority = issue_ctx.priority,
             .comments = comments,
+            .work_dir = agent_cfg.local_path,
         });
     } else {
         _ = agent_task.failAgentTask(task.id, "task has neither a chat session nor an issue", failure_reason_runtime);
@@ -732,6 +741,8 @@ fn renderAgentTaskClaim(ctx: *zfinal.Context, allocator: std.mem.Allocator, runt
         .custom_env = if (env_parsed) |p| p.value else std.json.Value{ .null = {} },
         .custom_args = if (args_parsed) |p| p.value else std.json.Value{ .null = {} },
         .mcp_config = if (mcp_parsed) |p| p.value else std.json.Value{ .null = {} },
+        .agent_name = agent_cfg.name,
+        .work_dir = agent_cfg.local_path,
     } });
     return true;
 }

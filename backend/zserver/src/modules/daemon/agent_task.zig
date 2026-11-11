@@ -53,6 +53,11 @@ pub const AgentConfig = struct {
     custom_args: []const u8,
     mcp_config: []const u8,
     workspace_id: []const u8,
+    /// The local repository this agent works in, when it has one.
+    ///
+    /// Empty means "this agent answers, it does not act on the machine" —
+    /// the mode every agent without a repository bound runs in.
+    local_path: []const u8,
 
     pub fn deinit(self: AgentConfig, allocator: std.mem.Allocator) void {
         allocator.free(self.name);
@@ -62,6 +67,7 @@ pub const AgentConfig = struct {
         allocator.free(self.custom_args);
         allocator.free(self.mcp_config);
         allocator.free(self.workspace_id);
+        allocator.free(self.local_path);
     }
 };
 
@@ -282,7 +288,7 @@ pub fn selectAgentConfig(allocator: std.mem.Allocator, agent_id: []const u8) !?A
     const db = borrowDb() orelse return null;
     defer deps.releaseBack(db);
     var rs = try db.queryParams(
-        "SELECT name, instructions, model, custom_env, custom_args, mcp_config, workspace_id " ++
+        "SELECT name, instructions, model, custom_env, custom_args, mcp_config, workspace_id, runtime_config " ++
             "FROM agent WHERE id = $1::uuid",
         &[_]SqlParam{.{ .text = agent_id }},
     );
@@ -297,7 +303,29 @@ pub fn selectAgentConfig(allocator: std.mem.Allocator, agent_id: []const u8) !?A
         .custom_args = try allocator.dupe(u8, row.getText(4) orelse "[]"),
         .mcp_config = try allocator.dupe(u8, row.getText(5) orelse "{}"),
         .workspace_id = try allocator.dupe(u8, row.getText(6) orelse ""),
+        .local_path = try readLocalPath(allocator, row.getText(7) orelse "{}"),
     };
+}
+
+/// The local repository an agent is bound to, out of its `runtime_config`.
+///
+/// `runtime_config` is the agent's free-form configuration bag. This fork
+/// reads one key out of it: `local_path`, the absolute path of a git
+/// repository on the machine that runs the agent's daemon. An agent with
+/// one works in that repository; an agent without one only answers.
+///
+/// The path is a machine-local fact, so it is read on the side that can
+/// check it — the daemon — and the server only passes it along.
+fn readLocalPath(allocator: std.mem.Allocator, runtime_config_text: []const u8) ![]const u8 {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, runtime_config_text, .{}) catch {
+        return allocator.dupe(u8, "");
+    };
+    defer parsed.deinit();
+    const root = parsed.value;
+    if (root != .object) return allocator.dupe(u8, "");
+    const value = root.object.get("local_path") orelse return allocator.dupe(u8, "");
+    if (value != .string) return allocator.dupe(u8, "");
+    return allocator.dupe(u8, std.mem.trim(u8, value.string, " \t\r\n"));
 }
 
 /// Read the provider the runtime's daemon registered with.

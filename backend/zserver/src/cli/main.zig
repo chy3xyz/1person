@@ -17,6 +17,7 @@ const login_mod = @import("login.zig");
 const pair_mod = @import("pair.zig");
 const daemon_mod = @import("daemon.zig");
 const query_mod = @import("query.zig");
+const agent_mod = @import("agent.zig");
 const update_mod = @import("update.zig");
 const out = @import("out.zig");
 
@@ -32,6 +33,7 @@ const Root = struct {
     daemon: DaemonCmd,
     workspaces: ListCmd,
     agents: ListCmd,
+    agent: AgentCmd,
     issues: ListCmd,
     update: UpdateCmd,
     version: VersionCmd,
@@ -43,9 +45,26 @@ const Root = struct {
         .daemon = .{ .help = "Run the local daemon worker loop (register/heartbeat/WS/claim)" },
         .workspaces = .{ .help = "List workspaces (read-only)" },
         .agents = .{ .help = "List agents in a workspace (read-only)" },
+        .agent = .{ .help = "Configure an agent (set the local repository it works in)" },
         .issues = .{ .help = "List issues in a workspace (read-only)" },
         .update = .{ .help = "Self-update: download and replace the 1p binary" },
         .version = .{ .help = "Print version information" },
+    };
+};
+
+const AgentCmd = struct {
+    agent_id: ?[]const u8 = null,
+    workspace_id: ?[]const u8 = null,
+    local_path: ?[]const u8 = null,
+    clear: bool = false,
+    path: ?[]const u8 = null,
+
+    pub const zcli_options = .{
+        .agent_id = .{ .help = "Agent UUID to configure (required)" },
+        .workspace_id = .{ .help = "Workspace UUID the agent belongs to (required)" },
+        .local_path = .{ .help = "Absolute path of the git repository the agent works in" },
+        .clear = .{ .help = "Remove the agent's working directory (it answers only again)" },
+        .path = .{ .help = "Config file path" },
     };
 };
 
@@ -211,6 +230,29 @@ pub fn main(init: std.process.Init) !void {
             const path = try config_store.resolvePath(allocator, init.environ_map, cmd.path);
             defer allocator.free(path);
             try query_mod.listAgents(allocator, io, .{ .path = path, .workspace_id = cmd.workspace_id });
+        },
+        .agent => {
+            const cmd = parsed.value.agent;
+            const agent_id = cmd.agent_id orelse {
+                out.printErr("error: --agent_id is required\n", .{});
+                std.process.exit(1);
+            };
+            const ws_id = cmd.workspace_id orelse {
+                out.printErr("error: --workspace_id is required\n", .{});
+                std.process.exit(1);
+            };
+            if (cmd.clear and cmd.local_path != null) {
+                out.printErr("error: --clear and --local_path cannot be used together\n", .{});
+                std.process.exit(1);
+            }
+            const path = try config_store.resolvePath(allocator, init.environ_map, cmd.path);
+            defer allocator.free(path);
+            try agent_mod.setLocalPath(allocator, io, .{
+                .path = path,
+                .workspace_id = ws_id,
+                .agent_id = agent_id,
+                .local_path = if (cmd.clear) null else cmd.local_path,
+            });
         },
         .issues => {
             const cmd = parsed.value.issues;

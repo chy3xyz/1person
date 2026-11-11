@@ -12,6 +12,7 @@
 
 const std = @import("std");
 const out = @import("out.zig");
+const zfinal = @import("zfinal");
 
 /// The local agent CLIs this daemon knows how to drive.
 ///
@@ -47,16 +48,18 @@ const max_output_bytes: usize = 4 * 1024 * 1024;
 /// The opencode agent a 1Person task runs under.
 pub const opencode_agent_id = "1p";
 
-/// The opencode profile a 1Person task runs under.
+/// The opencode profile a 1Person task runs under when it only answers.
 ///
 /// opencode's built-in `plan` agent is the wrong tool for this fork. Its
 /// own prompt tells the agent that it may not act until the user
 /// switches it to another mode, so a task that asks for a result comes
 /// back with "switch me to build mode" instead of the result — the
-/// answer depends on the mood of the model, not on the task. This
-/// fork's agents are text-only: the server posts the answer, and the
-/// agent has no business on the machine. So the task needs a profile
-/// that answers directly and has no tools at all.
+/// answer depends on the mood of the model, not on the task. So the
+/// task needs a profile that answers directly.
+///
+/// This profile has no tools: the task is answered from the context the
+/// server rendered, and the agent has no business on the machine. It is
+/// what a task without a working directory gets.
 ///
 /// The profile is written into the task's own working directory rather
 /// than into the user's opencode configuration: the daemon owns the
@@ -92,6 +95,51 @@ const openCodeConfigJson =
     \\}
 ;
 
+/// The opencode profile a 1Person task runs under when it edits code.
+///
+/// This is the profile for a task that has a working directory: the agent
+/// reads the repository, changes it, runs the project's own checks, and
+/// leaves the result in the working tree for the platform to deliver.
+///
+/// Two permissions are deliberately withheld even here:
+///
+/// - `external_directory`: the agent stays inside the working directory it
+///   was given. The worktree it works in is already outside the user's
+///   working copy — that is the whole point of the isolation — and this
+///   keeps it from wandering into the rest of the machine.
+/// - `question`: the agent cannot ask the user anything. A question with
+///   nobody to answer it is a task that hangs until it times out, and a
+///   timed-out task delivers nothing.
+const openCodeCodingConfigJson =
+    \\{
+    \\  "$schema": "https://opencode.ai/config.json",
+    \\  "agent": {
+    \\    "1p": {
+    \\      "description": "1Person coding agent: works in the task's own checkout and leaves the change there.",
+    \\      "mode": "primary",
+    \\      "prompt": "You are an AI coding agent working on a task handed to you by the 1Person platform.\n\nYou are working in a private git checkout that the platform prepared for this task. Read the code, make the change the task asks for, and verify it with the project's own tests or checks when they exist and are quick to run.\n\nDo not commit: the platform commits your work for you and delivers it on a branch. Do not switch branches, do not rebase, and do not touch anything outside this checkout.\n\nWhen you are done, reply with what you changed and how you verified it. That reply is posted for you, so state the result rather than narrating the steps.",
+    \\      "permission": {
+    \\        "read": "allow",
+    \\        "edit": "allow",
+    \\        "glob": "allow",
+    \\        "grep": "allow",
+    \\        "list": "allow",
+    \\        "bash": "allow",
+    \\        "todowrite": "allow",
+    \\        "task": "deny",
+    \\        "external_directory": "deny",
+    \\        "question": "deny",
+    \\        "webfetch": "deny",
+    \\        "websearch": "deny",
+    \\        "lsp": "deny",
+    \\        "doom_loop": "deny",
+    \\        "skill": "deny"
+    \\      }
+    \\    }
+    \\  }
+    \\}
+;
+
 /// The inputs of one agent run.
 pub const RunRequest = struct {
     /// The rendered prompt, ready for the CLI.
@@ -115,11 +163,18 @@ pub const RunRequest = struct {
     base_env: ?*const std.process.Environ.Map = null,
     /// The directory the CLI runs in. Empty means "inherit the daemon's".
     ///
-    /// The agent runs in a directory of its own: this fork's agent
-    /// execution is text-only, so the agent has no business in the
-    /// repository — and an empty directory is the cheapest way to make
-    /// sure it cannot touch anything.
+    /// The agent runs in a directory of its own. For a task that only
+    /// answers, that directory is empty — the agent has nothing to act on.
+    /// For a task that edits code, it is a private git worktree of the
+    /// user's repository.
     work_dir: []const u8 = "",
+    /// Whether the agent may change files in its working directory.
+    ///
+    /// A task without a working directory answers from the context the
+    /// server rendered, and the agent gets no tools at all — it has
+    /// nothing to act on, and a tool-enabled agent pointed at an empty
+    /// directory only wanders.
+    can_edit: bool = false,
     /// How long the CLI may run before the task fails.
     timeout_ms: u64 = default_timeout_ms,
 };
@@ -146,6 +201,11 @@ pub const RunOutcome = struct {
     /// A failed run is not an answer — reporting one as an answer would
     /// tell the user the agent produced that text, which it did not.
     failure: ?[]const u8 = null,
+    /// The platform's opencode profile, so the caller can put the user's
+    /// own file back and keep the profile out of the delivery.
+    ///
+    /// Null when the run never got as far as writing one.
+    profile: ?ProfileBackup = null,
 };
 
 /// Find the agent CLI this machine can actually run.
@@ -199,23 +259,117 @@ pub fn supportsStandalone(allocator: std.mem.Allocator, io: std.Io, p: Provider)
     return std.mem.indexOf(u8, result.stdout, "--standalone") != null;
 }
 
+/// The platform's own opencode profile, and the user's file it replaced.
+///
+/// The profile has to live inside the working directory — opencode reads
+/// its project configuration from the directory it runs in, and no
+/// environment variable reaches it — so it can land on top of a file the
+/// user's own repository carries. The original content is kept so it can
+/// be put back afterwards: the profile is the platform's configuration, not
+/// the user's work, and it must not end up in the commit the task
+/// delivers.
+pub const ProfileBackup = struct {
+    /// Where the profile was written.
+    path: []const u8,
+    /// The user's own file, when there was one. Null means the platform
+    /// created the file and may remove it again.
+    original: ?[]const u8,
+
+    pub fn deinit(self: ProfileBackup, allocator: std.mem.Allocator) void {
+        allocator.free(self.path);
+        if (self.original) |o| allocator.free(o);
+    }
+};
+
 /// Write the opencode profile into the task's working directory.
 ///
-/// opencode reads the project's `opencode.json` from the directory the
-/// CLI runs in, so that is where the profile has to land. The directory
-/// belongs to one task, so the file cannot outlive the task it belongs
-/// to.
-fn prepareOpenCodeWorkspace(io: std.Io, allocator: std.mem.Allocator, work_dir: []const u8) !void {
-    const path = try std.fs.path.join(allocator, &.{ work_dir, "opencode.json" });
-    defer allocator.free(path);
+/// For a task that only answers, the profile sits at the top of the
+/// directory. For a task that edits code, it goes into `.opencode/` — a
+/// directory the platform owns, so the user's own opencode configuration at
+/// the top of their repository is never overwritten.
+///
+/// The caller owns the returned backup.
+pub fn prepareOpenCodeWorkspace(
+    io: std.Io,
+    allocator: std.mem.Allocator,
+    work_dir: []const u8,
+    can_edit: bool,
+) !ProfileBackup {
+    const config = if (can_edit) openCodeCodingConfigJson else openCodeConfigJson;
+
+    // The directory that holds the profile is allocated only for a task
+    // that edits code, and it has to stay alive until the profile's path
+    // is built from it — so it is released by the function, not by the
+    // block that creates it.
+    var owned_dir: ?[]const u8 = null;
+    defer if (owned_dir) |d| allocator.free(d);
+
+    const dir_path = if (can_edit) blk: {
+        const joined = try std.fs.path.join(allocator, &.{ work_dir, ".opencode" });
+        owned_dir = joined;
+        try std.Io.Dir.cwd().createDirPath(io, joined);
+        break :blk joined;
+    } else work_dir;
+
+    const path = try std.fs.path.join(allocator, &.{ dir_path, "opencode.json" });
+    errdefer allocator.free(path);
+
+    // The user's own file, if the repository carries one, is kept: the
+    // platform's profile replaces it only for the length of the run.
+    const original = readFileIfPresent(io, allocator, path);
 
     var file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
     defer file.close(io);
 
     var write_buf: [4096]u8 = undefined;
     var wtr = file.writer(io, &write_buf);
-    try wtr.interface.writeAll(openCodeConfigJson);
+    try wtr.interface.writeAll(config);
     try wtr.flush();
+
+    return .{ .path = path, .original = original };
+}
+
+/// Read a file, or report that it is not there.
+fn readFileIfPresent(io: std.Io, allocator: std.mem.Allocator, path: []const u8) ?[]const u8 {
+    return std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(4 * 1024 * 1024)) catch null;
+}
+
+/// Put the user's own file back and remove the platform's profile.
+///
+/// The profile is the platform's configuration, not the agent's work: it
+/// must not end up in the commit the task delivers. A file the user's
+/// repository already carried is restored byte for byte, so the delivery
+/// cannot delete it.
+///
+/// The backup's memory is not released here — the caller owns it.
+pub fn restoreOpenCodeWorkspace(io: std.Io, backup: ProfileBackup) void {
+    if (backup.original) |original| {
+        var file = std.Io.Dir.cwd().createFile(io, backup.path, .{ .truncate = true }) catch return;
+        defer file.close(io);
+        var write_buf: [4096]u8 = undefined;
+        var wtr = file.writer(io, &write_buf);
+        wtr.interface.writeAll(original) catch {};
+        wtr.flush() catch {};
+    } else {
+        std.Io.Dir.cwd().deleteFile(io, backup.path) catch {};
+    }
+
+    // The directory that held the profile is removed only when nothing
+    // else is in it: the user's own `.opencode/` configuration must
+    // survive.
+    if (std.fs.path.dirname(backup.path)) |dir| {
+        if (std.mem.endsWith(u8, dir, ".opencode")) {
+            std.Io.Dir.cwd().deleteDir(io, dir) catch {};
+        }
+    }
+}
+
+/// Put the user's own file back, remove the platform's profile and
+/// release the backup's memory.
+pub fn cleanupOpenCodeWorkspace(io: std.Io, allocator: std.mem.Allocator, backup: ProfileBackup) void {
+    restoreOpenCodeWorkspace(io, backup);
+    allocator.free(backup.path);
+    if (backup.original) |o| allocator.free(o);
 }
 
 /// Build the command line for one agent run.
@@ -293,6 +447,16 @@ pub fn runAgent(
     provider: Provider,
     req: RunRequest,
 ) !RunOutcome {
+    // The profile backup travels out with the outcome so the caller can
+    // put the user's own file back.
+    var profile_backup: ?ProfileBackup = null;
+    defer if (profile_backup) |*b| b.deinit(allocator);
+    // A run that never gets as far as producing an outcome has to put the
+    // user's own file back by itself: the platform's profile would
+    // otherwise stay in the working directory and be carried into the
+    // commit the task delivers.
+    errdefer if (profile_backup) |b| restoreOpenCodeWorkspace(io, b);
+
     if (provider == .opencode) {
         // The profile lives in the task's working directory, so the
         // directory has to exist: an agent without one would run in the
@@ -304,13 +468,16 @@ pub fn runAgent(
                 .failure = try allocator.dupe(u8, "the daemon could not prepare a private working directory for the agent"),
             };
         }
-        _ = prepareOpenCodeWorkspace(io, allocator, req.work_dir) catch |err| {
+        const backup = prepareOpenCodeWorkspace(io, allocator, req.work_dir, req.can_edit) catch |err| {
             return RunOutcome{
                 .output = "",
                 .exit_code = null,
                 .failure = try std.fmt.allocPrint(allocator, "the daemon could not write the agent's opencode profile ({s})", .{@errorName(err)}),
             };
         };
+        // The backup travels with the outcome: the caller puts the user's
+        // own file back once the run is over.
+        profile_backup = backup;
     }
 
     var argv = try buildArgv(allocator, provider, req);
@@ -354,11 +521,26 @@ pub fn runAgent(
             .output = "",
             .exit_code = exit_code,
             .failure = reason,
+            .profile = if (profile_backup) |b| blk: {
+                // The backup moves to the caller; the local copy is
+                // released so it is not freed twice.
+                const moved = b;
+                profile_backup = null;
+                break :blk moved;
+            } else null,
         };
     }
 
     const answer = try extractAnswer(allocator, provider, result.stdout);
-    return RunOutcome{ .output = answer, .exit_code = exit_code };
+    return RunOutcome{
+        .output = answer,
+        .exit_code = exit_code,
+        .profile = if (profile_backup) |b| blk: {
+            const moved = b;
+            profile_backup = null;
+            break :blk moved;
+        } else null,
+    };
 }
 
 /// Explain why an agent run failed, in one line.
@@ -680,6 +862,99 @@ test "the opencode profile answers directly and has no tools" {
         const rule = permission.object.get(tool) orelse return error.TestExpectedEqual;
         try testing.expectEqualStrings("deny", rule.string);
     }
+}
+
+/// A temporary directory the profile tests can write into.
+fn tempDir() !struct { dir: std.testing.TmpDir, path: []const u8 } {
+    var tmp = testing.tmpDir(.{});
+    errdefer tmp.cleanup();
+    var buf: [4096]u8 = undefined;
+    const len = try tmp.dir.realPath(zfinal.io_instance.io, &buf);
+    return .{ .dir = tmp, .path = buf[0..len] };
+}
+
+test "the coding profile is written where the agent will find it" {
+    // Regression: the directory that holds the profile was released by a
+    // `defer` inside the block that created it, so the path built from
+    // it afterwards was built from freed memory and the file could not
+    // be created. Every coding task failed before the agent even ran.
+    const allocator = testing.allocator;
+    const io = zfinal.io_instance.io;
+
+    var tmp = try tempDir();
+    defer tmp.dir.cleanup();
+
+    const backup = try prepareOpenCodeWorkspace(io, allocator, tmp.path, true);
+    const profile_path = try allocator.dupe(u8, backup.path);
+    defer allocator.free(profile_path);
+
+    const written = try std.Io.Dir.cwd().readFileAlloc(io, profile_path, allocator, .limited(64 * 1024));
+    defer allocator.free(written);
+    try testing.expect(std.mem.indexOf(u8, written, "\"edit\"") != null);
+    try testing.expect(std.mem.indexOf(u8, written, "\"bash\"") != null);
+
+    cleanupOpenCodeWorkspace(io, allocator, backup);
+
+    // The platform's profile is gone again: it is the platform's
+    // configuration, not the agent's work, and it must not end up in the
+    // commit the task delivers.
+    try testing.expectError(
+        error.FileNotFound,
+        std.Io.Dir.cwd().readFileAlloc(io, profile_path, allocator, .limited(64 * 1024)),
+    );
+}
+
+test "the answering profile is written at the top of the working directory" {
+    const allocator = testing.allocator;
+    const io = zfinal.io_instance.io;
+
+    var tmp = try tempDir();
+    defer tmp.dir.cleanup();
+
+    const backup = try prepareOpenCodeWorkspace(io, allocator, tmp.path, false);
+    defer cleanupOpenCodeWorkspace(io, allocator, backup);
+
+    const written = try std.Io.Dir.cwd().readFileAlloc(io, backup.path, allocator, .limited(64 * 1024));
+    defer allocator.free(written);
+    try testing.expect(std.mem.indexOf(u8, written, "\"1p\"") != null);
+}
+
+test "the coding profile lets the agent change the code it was given" {
+    var parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, openCodeCodingConfigJson, .{});
+    defer parsed.deinit();
+    const root = parsed.value;
+    try testing.expect(root == .object);
+
+    const agent = root.object.get("agent") orelse return error.TestExpectedEqual;
+    try testing.expect(agent == .object);
+    const profile = agent.object.get(opencode_agent_id) orelse return error.TestExpectedEqual;
+    try testing.expect(profile == .object);
+
+    const mode = profile.object.get("mode") orelse return error.TestExpectedEqual;
+    try testing.expectEqualStrings("primary", mode.string);
+
+    const permission = profile.object.get("permission") orelse return error.TestExpectedEqual;
+    try testing.expect(permission == .object);
+
+    // The tools a coding task needs.
+    const allowed = [_][]const u8{ "read", "edit", "glob", "grep", "list", "bash" };
+    for (allowed) |tool| {
+        const rule = permission.object.get(tool) orelse return error.TestExpectedEqual;
+        try testing.expectEqualStrings("allow", rule.string);
+    }
+
+    // The two that must stay closed even here: the agent stays inside its
+    // checkout, and it cannot ask the user anything (nobody would answer,
+    // so the task would hang until it timed out).
+    const denied = [_][]const u8{ "external_directory", "question", "webfetch", "websearch" };
+    for (denied) |tool| {
+        const rule = permission.object.get(tool) orelse return error.TestExpectedEqual;
+        try testing.expectEqualStrings("deny", rule.string);
+    }
+
+    // The agent must not commit: the platform delivers the work.
+    const prompt = profile.object.get("prompt") orelse return error.TestExpectedEqual;
+    try testing.expect(std.mem.indexOf(u8, prompt.string, "Do not commit") != null);
 }
 
 test "firstLine picks the first non-empty line" {

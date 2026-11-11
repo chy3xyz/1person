@@ -183,5 +183,8 @@ test {
     _ = @import("cli/ws.zig");
     _ = @import("cli/config_store.zig");
     _ = @import("cli/agent_exec.zig");
+    // The worktree module is imported by the daemon, which is not part of
+    // the test binary — without this line its tests never run.
+    _ = @import("cli/worktree.zig");
     _ = @import("modules/daemon/prompt.zig");
 }
