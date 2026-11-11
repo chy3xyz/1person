@@ -18,6 +18,9 @@ const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
 const skill = @import("../skill/model.zig");
 const common_mem = @import("../../common/mem.zig");
+const common_json = @import("../../common/json.zig");
+
+const rawJsonValue = common_json.rawJsonValue;
 
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode or when the pool is uninitialised.
@@ -62,8 +65,14 @@ pub const AgentResponse = struct {
     instructions: []const u8,
     avatar_url: ?[]const u8,
     runtime_mode: []const u8,
+    /// `runtime_config` / `custom_args` / `mcp_config` carry raw JSON
+    /// TEXT spliced in verbatim (see `common.json.rawJsonValue`), so
+    /// they stay real JSON objects/arrays for the client and own no
+    /// arena — a parsed `std.json.Value` would have to outlive the
+    /// response render, and freeing it early is a use-after-free that
+    /// crashes the server.
     runtime_config: std.json.Value,
-    custom_args: []const []const u8,
+    custom_args: std.json.Value,
     mcp_config: ?std.json.Value,
     has_custom_env: bool,
     custom_env_key_count: i32,
@@ -349,27 +358,69 @@ pub fn agentColumns() []const u8 {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// jsonb column helpers
+// ──────────────────────────────────────────────────────────────────────
+
+/// True when `text` is a JSON document that can be spliced into a
+/// response verbatim.
+///
+/// The `jsonb` columns are written back to the client as raw text (see
+/// `common.json.rawJsonValue`), so a column that is not valid JSON
+/// would corrupt the whole response body instead of failing one field.
+fn isJsonDocument(allocator: std.mem.Allocator, text: []const u8) bool {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    _ = std.json.parseFromSlice(std.json.Value, arena.allocator(), text, .{}) catch return false;
+    return true;
+}
+
+/// True when `text` is a JSON array of strings.
+///
+/// `custom_args` is a list of CLI flags; the client schema types it as
+/// `string[]`. A column that is not an array of strings would
+/// serialise as something the schema rejects, which drops the whole
+/// agent record on the client.
+fn isJsonStringArray(allocator: std.mem.Allocator, text: []const u8) bool {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    _ = std.json.parseFromSlice([]const []const u8, arena.allocator(), text, .{}) catch return false;
+    return true;
+}
+
+/// Count the top-level keys of a JSON object column.
+///
+/// The parsed value never escapes this function — only the count does —
+/// so the scratch arena can be released right away.
+fn jsonKeyCount(allocator: std.mem.Allocator, text: []const u8) i32 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const parsed = std.json.parseFromSlice(std.json.Value, arena.allocator(), text, .{}) catch return 0;
+    return jsonObjectKeyCount(parsed.value);
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // row / entry → response shape
 // ──────────────────────────────────────────────────────────────────────
 
+/// Project an in-memory `AgentEntry` to the API response shape.
+///
+/// The `jsonb` columns are spliced in as raw text: the entry owns its
+/// text for the lifetime of the process, so the text outlives the
+/// render without any arena bookkeeping.
 pub fn agentResponseFromEntry(allocator: std.mem.Allocator, entry: AgentEntry, skills: []skill.SkillSummaryResponse) !AgentResponse {
-    var runtime_holder: ?std.json.Parsed(std.json.Value) = null;
-    defer if (runtime_holder) |p| p.deinit();
-    var mcp_holder: ?std.json.Parsed(std.json.Value) = null;
-    defer if (mcp_holder) |p| p.deinit();
-    var args_holder: ?std.json.Parsed([]const []const u8) = null;
-    defer if (args_holder) |p| p.deinit();
-    var env_holder: ?std.json.Parsed(std.json.Value) = null;
-    defer if (env_holder) |p| p.deinit();
-
-    const runtime_config = try parseJsonValue(allocator, entry.runtime_config, &runtime_holder);
-    const custom_args = blk: {
-        const parsed = std.json.parseFromSlice([]const []const u8, allocator, entry.custom_args, .{}) catch break :blk &[_][]const u8{};
-        args_holder = parsed;
-        break :blk parsed.value;
-    };
-    const custom_env = try parseJsonValue(allocator, entry.custom_env, &env_holder);
-    const mcp_config = if (entry.mcp_config.len > 0) try parseJsonValue(allocator, entry.mcp_config, &mcp_holder) else null;
+    const runtime_config = if (isJsonDocument(allocator, entry.runtime_config))
+        rawJsonValue(entry.runtime_config)
+    else
+        rawJsonValue("{}");
+    const custom_args = if (isJsonStringArray(allocator, entry.custom_args))
+        rawJsonValue(entry.custom_args)
+    else
+        rawJsonValue("[]");
+    const mcp_config: ?std.json.Value = if (entry.mcp_config.len > 0)
+        (if (isJsonDocument(allocator, entry.mcp_config)) rawJsonValue(entry.mcp_config) else rawJsonValue("{}"))
+    else
+        null;
+    const env_key_count = jsonKeyCount(allocator, entry.custom_env);
 
     return AgentResponse{
         .id = entry.id,
@@ -383,8 +434,8 @@ pub fn agentResponseFromEntry(allocator: std.mem.Allocator, entry: AgentEntry, s
         .runtime_config = runtime_config,
         .custom_args = custom_args,
         .mcp_config = mcp_config,
-        .has_custom_env = jsonObjectKeyCount(custom_env) > 0,
-        .custom_env_key_count = jsonObjectKeyCount(custom_env),
+        .has_custom_env = env_key_count > 0,
+        .custom_env_key_count = env_key_count,
         .mcp_config_redacted = mcp_config == null and entry.mcp_config.len > 0,
         .visibility = entry.visibility,
         .status = entry.status,
@@ -400,60 +451,63 @@ pub fn agentResponseFromEntry(allocator: std.mem.Allocator, entry: AgentEntry, s
     };
 }
 
+/// Project one `agent` row to the API response shape.
+///
+/// The `jsonb` columns are spliced in as raw text taken from the result
+/// set's cell text. That text is owned by the result set, which the
+/// handler deinits only after `renderJson` returned — so it outlives
+/// the render, and the response owns no arena.
 pub fn agentResponseFromRow(allocator: std.mem.Allocator, rs: *zfinal.ResultSet, row: usize, skills: []skill.SkillSummaryResponse) !AgentResponse {
-    const id = rs.rows.items[row].getText(0) orelse "";
-    const runtime_config_text = rs.rows.items[row].getText(8) orelse "{}";
-    const custom_args_text = rs.rows.items[row].getText(9) orelse "[]";
-    const custom_env_text = rs.rows.items[row].getText(10) orelse "{}";
-    const mcp_text = rs.rows.items[row].getText(11) orelse "";
+    const r = &rs.rows.items[row];
+    const id = r.getText(0) orelse "";
+    const runtime_config_text = r.getText(8) orelse "{}";
+    const custom_args_text = r.getText(9) orelse "[]";
+    const custom_env_text = r.getText(10) orelse "{}";
+    const mcp_text = r.getText(11) orelse "";
 
-    var runtime_holder: ?std.json.Parsed(std.json.Value) = null;
-    defer if (runtime_holder) |p| p.deinit();
-    var args_holder: ?std.json.Parsed([]const []const u8) = null;
-    defer if (args_holder) |p| p.deinit();
-    var env_holder: ?std.json.Parsed(std.json.Value) = null;
-    defer if (env_holder) |p| p.deinit();
-    var mcp_holder: ?std.json.Parsed(std.json.Value) = null;
-    defer if (mcp_holder) |p| p.deinit();
+    const runtime_config = if (isJsonDocument(allocator, runtime_config_text))
+        rawJsonValue(runtime_config_text)
+    else
+        rawJsonValue("{}");
+    const custom_args = if (isJsonStringArray(allocator, custom_args_text))
+        rawJsonValue(custom_args_text)
+    else
+        rawJsonValue("[]");
+    const mcp_config: ?std.json.Value = if (mcp_text.len > 0)
+        (if (isJsonDocument(allocator, mcp_text)) rawJsonValue(mcp_text) else rawJsonValue("{}"))
+    else
+        null;
+    const env_key_count = jsonKeyCount(allocator, custom_env_text);
 
-    const runtime_config = try parseJsonValue(allocator, runtime_config_text, &runtime_holder);
-    const custom_args = blk: {
-        const parsed = std.json.parseFromSlice([]const []const u8, allocator, custom_args_text, .{}) catch break :blk &[_][]const u8{};
-        args_holder = parsed;
-        break :blk parsed.value;
-    };
-    const custom_env = try parseJsonValue(allocator, custom_env_text, &env_holder);
-    const mcp_config = if (mcp_text.len > 0) try parseJsonValue(allocator, mcp_text, &mcp_holder) else null;
-
-    const max_tasks_text = rs.rows.items[row].getText(14) orelse "6";
+    const max_tasks_text = r.getText(14) orelse "6";
     const max_tasks: i32 = @intCast(std.fmt.parseInt(i64, max_tasks_text, 10) catch 6);
 
     return AgentResponse{
         .id = id,
-        .workspace_id = rs.rows.items[row].getText(1) orelse "",
-        .runtime_id = rs.rows.items[row].getText(2) orelse "",
-        .name = rs.rows.items[row].getText(3) orelse "",
-        .description = rs.rows.items[row].getText(4) orelse "",
-        .instructions = rs.rows.items[row].getText(5) orelse "",
-        .avatar_url = rs.rows.items[row].getText(6),
-        .runtime_mode = rs.rows.items[row].getText(7) orelse "",
+        .workspace_id = r.getText(1) orelse "",
+        .runtime_id = r.getText(2) orelse "",
+        .name = r.getText(3) orelse "",
+        .description = r.getText(4) orelse "",
+        .instructions = r.getText(5) orelse "",
+        .avatar_url = r.getText(6),
+        .runtime_mode = r.getText(7) orelse "",
         .runtime_config = runtime_config,
         .custom_args = custom_args,
         .mcp_config = mcp_config,
-        .has_custom_env = jsonObjectKeyCount(custom_env) > 0,
-        .custom_env_key_count = jsonObjectKeyCount(custom_env),
+        .has_custom_env = env_key_count > 0,
+        .custom_env_key_count = env_key_count,
         .mcp_config_redacted = false,
-        .visibility = rs.rows.items[row].getText(12) orelse "private",
-        .status = rs.rows.items[row].getText(13) orelse "offline",
+        .visibility = r.getText(12) orelse "private",
+        .status = r.getText(13) orelse "offline",
         .max_concurrent_tasks = max_tasks,
-        .model = rs.rows.items[row].getText(15) orelse "",
-        .thinking_level = rs.rows.items[row].getText(16) orelse "",
-        .owner_id = rs.rows.items[row].getText(17),
+        .model = r.getText(15) orelse "",
+        .thinking_level = r.getText(16) orelse "",
+        .owner_id = r.getText(17),
         .skills = skills,
-        .created_at = rs.rows.items[row].getText(19) orelse "",
-        .updated_at = rs.rows.items[row].getText(20) orelse "",
-        .archived_at = rs.rows.items[row].getText(18),
-        .archived_by = rs.rows.items[row].getText(21),
+        .created_at = r.getText(19) orelse "",
+        .updated_at = r.getText(20) orelse "",
+        .archived_at = r.getText(18),
+        .archived_by = r.getText(21),
     };
 }
 

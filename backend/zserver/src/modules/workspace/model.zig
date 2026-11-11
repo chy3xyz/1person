@@ -27,6 +27,7 @@ const zfinal = @import("zfinal");
 const SqlParam = zfinal.SqlParam;
 const deps = @import("../../deps.zig");
 const common_mem = @import("../../common/mem.zig");
+const common_json = @import("../../common/json.zig");
 
 /// Borrow a `*zfinal.DB` from the process-wide pool. Returns `null`
 /// in no-DB mode or when the pool is uninitialised. Caller owns the
@@ -292,9 +293,10 @@ pub const WorkspaceResponse = struct {
 /// `std.json.Value.number_string` is written with `jws.print("{s}", …)` —
 /// no quoting, no escaping — which is exactly the "raw passthrough" we
 /// need for `jsonb` columns.
-pub fn rawJsonValue(text: []const u8) std.json.Value {
-    return .{ .number_string = text };
-}
+///
+/// The implementation is shared with the other modules that carry a
+/// `jsonb` column into a response — see `common/json.zig`.
+pub const rawJsonValue = common_json.rawJsonValue;
 
 /// `member` row joined with the corresponding `user` row, projected
 /// for the API. The `id` column is the `member.id`; the human-readable
