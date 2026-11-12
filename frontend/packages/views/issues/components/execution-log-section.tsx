@@ -298,7 +298,9 @@ export function ActiveTaskRow({
 
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      <div className="flex min-w-0 flex-1 items-center">
+        <TriggerText text={trigger} />
+      </div>
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
@@ -355,7 +357,7 @@ export function ActiveTaskRow({
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+export function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
@@ -366,6 +368,11 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     task.status === "failed" && task.failure_reason
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
+  // The label says what kind of failure it was; the daemon's own message
+  // says what went wrong. A failed issue run leaves no comment on the
+  // issue, so this row is the only place the user learns why the agent
+  // went quiet.
+  const failureDetail = task.status === "failed" && task.error ? task.error : null;
 
   // Retry only makes sense for terminal-but-not-success rows. Passing
   // task.id targets this specific row's agent — without it, the rerun
@@ -391,7 +398,17 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
   return (
     <RowShell task={task}>
-      <TriggerText text={trigger} />
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
+        <TriggerText text={trigger} />
+        {failureDetail && (
+          <p
+            className="truncate text-xs text-destructive/90"
+            title={failureDetail}
+          >
+            {failureDetail}
+          </p>
+        )}
+      </div>
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">{failureLabel ?? label}</span>
@@ -453,7 +470,7 @@ function RowShell({
 }
 
 function TriggerText({ text }: { text: string }) {
-  return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+  return <span className="min-w-0 truncate text-xs text-muted-foreground">{text}</span>;
 }
 
 function RowStatus({

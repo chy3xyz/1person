@@ -27,7 +27,7 @@ vi.mock("./terminate-task-confirm-dialog", () => ({
   TerminateTaskConfirmDialog: () => null,
 }));
 
-import { ActiveTaskRow } from "./execution-log-section";
+import { ActiveTaskRow, PastRow } from "./execution-log-section";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -68,5 +68,69 @@ describe("ActiveTaskRow", () => {
     expect(screen.getByText("Started from comment")).toBeInTheDocument();
     expect(screen.getByText("View transcript")).toBeInTheDocument();
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+});
+
+describe("PastRow", () => {
+  it("shows what went wrong, not just that it failed", () => {
+    // A failed issue run leaves no comment on the issue — the server only
+    // reports the failure to a chat session. This row is therefore the only
+    // place the user learns that the bound directory does not exist, and
+    // the coarse "Agent execution error" label used to be all it said.
+    renderWithI18n(
+      <PastRow
+        task={makeTask({
+          status: "failed",
+          completed_at: "2026-06-08T08:05:00Z",
+          failure_reason: "agent_error",
+          error:
+            "the directory the agent is bound to does not exist on this machine",
+        })}
+        issueId="issue-1"
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "the directory the agent is bound to does not exist on this machine",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Agent execution error")).toBeInTheDocument();
+  });
+
+  it("keeps the whole message reachable when it is too long for the row", () => {
+    const long =
+      "the daemon could not create a worktree in the repository the agent is bound to";
+    renderWithI18n(
+      <PastRow
+        task={makeTask({
+          status: "failed",
+          completed_at: "2026-06-08T08:05:00Z",
+          failure_reason: "agent_error",
+          error: long,
+        })}
+        issueId="issue-1"
+      />,
+    );
+
+    expect(screen.getByTitle(long)).toBeInTheDocument();
+  });
+
+  it("shows nothing extra on a run that did not fail", () => {
+    renderWithI18n(
+      <PastRow
+        task={makeTask({
+          status: "completed",
+          completed_at: "2026-06-08T08:05:00Z",
+          failure_reason: undefined,
+          error: "some leftover error text",
+        })}
+        issueId="issue-1"
+      />,
+    );
+
+    expect(
+      screen.queryByText("some leftover error text"),
+    ).not.toBeInTheDocument();
   });
 });

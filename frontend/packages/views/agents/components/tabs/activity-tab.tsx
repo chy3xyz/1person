@@ -288,7 +288,10 @@ function RecentWorkSection({
         ? t(($) => $.tab_body.activity.subtitle_recent_progress, { shown: tasks.length, total: totalCount })
         : t(($) => $.tab_body.activity.subtitle_recent_latest, { count: tasks.length });
   return (
-    <Section title={t(($) => $.tab_body.activity.section_recent)} subtitle={subtitle}>
+    <Section
+      title={t(($) => $.tab_body.activity.section_recent)}
+      subtitle={subtitle}
+    >
       {tasks.length === 0 ? (
         <EmptyText>{t(($) => $.tab_body.activity.empty_recent)}</EmptyText>
       ) : (
@@ -340,7 +343,7 @@ function TaskList({
   );
 }
 
-function TaskRow({
+export function TaskRow({
   task,
   issueMap,
   timeMode,
@@ -431,6 +434,12 @@ function TaskRow({
       ? failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
+  // The label says what kind of failure it was. The daemon's own message
+  // says what went wrong — the bound directory is not there, the repository
+  // has no commits — and that is the part the user can act on. Without it
+  // the row reads as "Agent error" and says nothing about what to change.
+  const failureDetail = task.status === "failed" && task.error ? task.error : null;
+
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
   // second time bubble next to it just clutters the line.
@@ -514,6 +523,14 @@ function TaskRow({
             </>
           )}
         </div>
+        {failureDetail && (
+          <p
+            className="mt-0.5 truncate text-xs text-destructive/90"
+            title={failureDetail}
+          >
+            {failureDetail}
+          </p>
+        )}
       </div>
 
       {/* Hover-only actions. The row is intentionally non-clickable so
