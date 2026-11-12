@@ -122,6 +122,12 @@ pub fn freeGitResult(allocator: std.mem.Allocator, result: GitResult) void {
 ///
 /// The caller owns the returned string.
 pub fn resolveRepoRoot(allocator: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    // A path that is not there at all is a different mistake from a path that
+    // is there but is not a repository, and the user can only fix one of
+    // them. Git reports both as a failed `rev-parse`, so the directory is
+    // checked before git is asked.
+    if (!directoryExists(io, path)) return error.DirectoryNotFound;
+
     const result = try runGit(allocator, io, path, &.{"rev-parse", "--show-toplevel"});
     defer freeGitResult(allocator, result);
     if (!result.ok() or result.stdout.len == 0) {
@@ -187,6 +193,24 @@ fn appendSanitized(allocator: std.mem.Allocator, buf: *std.ArrayList(u8), text: 
         };
         try buf.append(allocator, if (safe) c else '-');
     }
+}
+
+/// Check that a bound directory path is one the daemon can act on.
+///
+/// The path must be absolute: a relative one is resolved against whatever
+/// directory the daemon happens to run in, so the agent would work in a
+/// repository the user never named. Both the CLI that writes the binding and
+/// the daemon that reads it enforce this rule, so the binding cannot be
+/// accepted on one side and rejected on the other.
+pub fn validateLocalPath(path: []const u8) !void {
+    if (!std.fs.path.isAbsolute(path)) return error.PathNotAbsolute;
+}
+
+/// Whether `path` is a directory that exists.
+fn directoryExists(io: std.Io, path: []const u8) bool {
+    var dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch return false;
+    dir.close(io);
+    return true;
 }
 
 /// Whether `path` is inside a git work tree.
@@ -255,6 +279,28 @@ pub fn createWorktree(
         .path = try allocator.dupe(u8, worktree_path),
         .branch = try allocator.dupe(u8, branch),
         .base_commit = try allocator.dupe(u8, base.stdout),
+    };
+}
+
+/// Why a task could not get a working directory, in words the user can act on.
+///
+/// The daemon reports the task failure with this text, and the user reads it
+/// where the failure is shown: it has to name the mistake that was made —
+/// the directory is not there, it is not a repository, it has no commits —
+/// because each of them is fixed in a different place (the agent's binding,
+/// the repository itself, the daemon's setup).
+///
+/// The generic fallback is only for errors that carry no meaning of their
+/// own; a specific cause must never be flattened into it.
+pub fn worktreeFailureReason(err: anyerror) []const u8 {
+    return switch (err) {
+        error.PathNotAbsolute => "the directory the agent is bound to must be an absolute path",
+        error.DirectoryNotFound => "the directory the agent is bound to does not exist on this machine",
+        error.NotAGitRepository => "the directory the agent is bound to is not a git repository",
+        error.NoCommit => "the repository the agent is bound to has no commits yet, so there is nothing to branch from",
+        error.NoWorkRoot => "the daemon has no working directory to put the agent's checkout in",
+        error.WorktreeCreateFailed => "the daemon could not create a worktree in the repository the agent is bound to",
+        else => "the daemon could not prepare a working directory for the agent",
     };
 }
 
@@ -477,6 +523,103 @@ test "resolveRepoRoot hands back a path the caller owns" {
 
     try testing.expect(root.len > 0);
     try testing.expect(std.fs.path.isAbsolute(root));
+}
+
+test "a directory that is not there is told apart from one that is not a repository" {
+    // Regression: both mistakes used to come back as `NotAGitRepository`,
+    // so the user was told to look for a repository where the path they
+    // bound simply does not exist. Git reports both the same way, so the
+    // directory has to be checked before git is asked.
+    const allocator = testing.allocator;
+    const io = zfinal.io_instance.io;
+
+    var repo = try testRepo(allocator);
+    defer repo.tmp.cleanup();
+    defer allocator.free(repo.path);
+
+    // A path under the repository that was never created.
+    const missing = try std.fs.path.join(allocator, &.{ repo.path, "not-here" });
+    defer allocator.free(missing);
+    try testing.expectError(error.DirectoryNotFound, resolveRepoRoot(allocator, io, missing));
+
+    // A directory that exists but is not a repository. The `.git` entry is
+    // deliberately broken: git stops at it instead of walking up to the
+    // repository the temporary directory itself lives in.
+    var plain = testing.tmpDir(.{});
+    defer plain.cleanup();
+    var plain_buf: [4096]u8 = undefined;
+    const plain_len = try plain.dir.realPath(io, &plain_buf);
+    const plain_path = try allocator.dupe(u8, plain_buf[0..plain_len]);
+    defer allocator.free(plain_path);
+    const broken_git = try std.fs.path.join(allocator, &.{ plain_path, ".git" });
+    defer allocator.free(broken_git);
+    try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = broken_git, .data = "gitdir: /nonexistent/nowhere\n" });
+    try testing.expect(!isGitWorkTree(allocator, io, plain_path));
+    try testing.expectError(error.NotAGitRepository, resolveRepoRoot(allocator, io, plain_path));
+}
+
+test "a repository without a commit has nothing to branch from" {
+    const allocator = testing.allocator;
+    const io = zfinal.io_instance.io;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [4096]u8 = undefined;
+    const path_len = try tmp.dir.realPath(io, &path_buf);
+    const path = try allocator.dupe(u8, path_buf[0..path_len]);
+    defer allocator.free(path);
+
+    const init = try runGit(allocator, io, path, &.{"init", "--quiet"});
+    defer freeGitResult(allocator, init);
+    try testing.expect(init.ok());
+
+    const worktree_path = try std.fs.path.join(allocator, &.{ path, "wt" });
+    defer allocator.free(worktree_path);
+    const branch = try branchName(allocator, "agent", "task");
+    defer allocator.free(branch);
+
+    try testing.expectError(error.NoCommit, createWorktree(allocator, io, path, worktree_path, branch));
+}
+
+test "each way of failing names the mistake the user has to fix" {
+    // The daemon reports the task failure with this text and the user reads
+    // it. One generic sentence for every cause leaves the user with nothing
+    // to act on — the whole point of the binding is that they can fix it.
+    const missing = worktreeFailureReason(error.DirectoryNotFound);
+    const not_repo = worktreeFailureReason(error.NotAGitRepository);
+    const no_commit = worktreeFailureReason(error.NoCommit);
+    const not_absolute = worktreeFailureReason(error.PathNotAbsolute);
+    const create_failed = worktreeFailureReason(error.WorktreeCreateFailed);
+    const unknown = worktreeFailureReason(error.SomethingElseEntirely);
+
+    // Each cause says something different.
+    try testing.expect(!std.mem.eql(u8, missing, not_repo));
+    try testing.expect(!std.mem.eql(u8, not_repo, no_commit));
+    try testing.expect(!std.mem.eql(u8, no_commit, not_absolute));
+    try testing.expect(!std.mem.eql(u8, not_absolute, create_failed));
+
+    // And each says what to do about it.
+    try testing.expect(std.mem.indexOf(u8, missing, "does not exist") != null);
+    try testing.expect(std.mem.indexOf(u8, not_repo, "not a git repository") != null);
+    try testing.expect(std.mem.indexOf(u8, no_commit, "no commits") != null);
+    try testing.expect(std.mem.indexOf(u8, not_absolute, "absolute path") != null);
+
+    // An unknown error keeps the generic sentence — but a known one must
+    // never fall back to it.
+    try testing.expect(std.mem.indexOf(u8, unknown, "could not prepare") != null);
+    for ([_][]const u8{ missing, not_repo, no_commit, not_absolute, create_failed }) |reason| {
+        try testing.expect(std.mem.indexOf(u8, reason, "could not prepare") == null);
+    }
+}
+
+test "a bound directory path has to be absolute" {
+    // A relative path is resolved against the daemon's own working
+    // directory: the agent would work in a repository the user never named,
+    // and nothing would say so.
+    try testing.expectError(error.PathNotAbsolute, validateLocalPath("relative/path"));
+    try testing.expectError(error.PathNotAbsolute, validateLocalPath("./repo"));
+    try testing.expectError(error.PathNotAbsolute, validateLocalPath("repo"));
+    try validateLocalPath("/Users/me/lab");
 }
 
 test "the delivery reports how many files the commit carries" {

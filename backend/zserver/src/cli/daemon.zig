@@ -416,7 +416,10 @@ fn executeAgentTask(
     if (repo_path.len > 0) {
         const wt = prepareTaskWorktree(allocator, io, id, agent_name, repo_path) catch |err| {
             out.printErr("agent task could not prepare a working directory ({s})\n", .{@errorName(err)});
-            try failTask(allocator, client, token, id, "the daemon could not prepare a working directory for the agent");
+            // The user reads the reason, not the daemon's log: "the daemon
+            // could not prepare a working directory" tells them nothing about
+            // which of the several ways this went wrong they have to fix.
+            try failTask(allocator, client, token, id, worktree.worktreeFailureReason(err));
             return;
         };
         prepared = wt;
@@ -517,6 +520,12 @@ fn prepareTaskWorktree(
     repo_path: []const u8,
 ) !worktree.Worktree {
     if (g_work_root.len == 0) return error.NoWorkRoot;
+
+    // A relative path would be resolved against the daemon's own working
+    // directory, which is nowhere the user meant: the agent would work in a
+    // different repository than the one they bound. The binding is rejected
+    // rather than guessed at.
+    try worktree.validateLocalPath(repo_path);
 
     const repo_root = try worktree.resolveRepoRoot(allocator, io, repo_path);
     defer allocator.free(repo_root);

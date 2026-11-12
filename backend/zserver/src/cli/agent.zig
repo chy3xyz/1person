@@ -9,6 +9,7 @@ const std = @import("std");
 const api = @import("api.zig");
 const config_store = @import("config_store.zig");
 const out = @import("out.zig");
+const worktree = @import("worktree.zig");
 
 pub const AgentOptions = struct {
     path: []const u8,
@@ -20,9 +21,11 @@ pub const AgentOptions = struct {
 
 /// Point an agent at a local repository (or clear the binding).
 ///
-/// The path is stored as given: it names a directory on the machine that
-/// runs the agent's daemon, and the platform cannot check a path it does
-/// not own. The daemon verifies it is a git repository before it uses it.
+/// The path must be absolute: it names a directory on the machine that runs
+/// the agent's daemon, and a relative one would be resolved against the
+/// daemon's own working directory. The platform cannot check a path it does
+/// not own — the daemon verifies the directory is a git repository before it
+/// uses it.
 pub fn setLocalPath(allocator: std.mem.Allocator, io: std.Io, opts: AgentOptions) !void {
     var cfg = try config_store.load(allocator, io, opts.path);
     defer cfg.deinit();
@@ -66,6 +69,14 @@ pub fn setLocalPath(allocator: std.mem.Allocator, io: std.Io, opts: AgentOptions
             out.printErr("--local_path must not be empty (pass an empty string to clear the binding)\n", .{});
             return error.InvalidPath;
         }
+        // A relative path is resolved against whatever directory the daemon
+        // happens to run in, so the agent would work in a repository the user
+        // never named. The binding is rejected here instead of quietly
+        // pointing somewhere else later.
+        worktree.validateLocalPath(trimmed) catch {
+            out.printErr("--local_path must be an absolute path (it names a directory on the machine that runs the daemon)\n", .{});
+            return error.InvalidPath;
+        };
         try config.put(allocator, "local_path", .{ .string = trimmed });
     } else {
         _ = config.orderedRemove("local_path");
