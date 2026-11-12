@@ -79,6 +79,27 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     // connection), so this is a ceiling, not a reservation.
     app.config.thread_count = 256;
 
+    // zfinal's built-in response compression cannot be used.
+    //
+    // It compresses into a fixed 16 KB stack buffer with
+    // `std.compress.flate.Compress.Raw`, and `Raw` does not compress at
+    // all: it emits deflate "stored" blocks, so the output is the body
+    // plus a gzip header and footer — the response grows instead of
+    // shrinking.
+    //
+    // Worse, when the body does not fit in that buffer, `finish` fails
+    // with `WriteFailed`, the failure is swallowed, and the server sends
+    // the truncated stream with `Content-Encoding: gzip`. A client
+    // cannot decode that, so every response over roughly 16 KB was
+    // unusable: the browser's `res.json()` threw, the agent's task list
+    // came back empty, and the frontend silently retried the request.
+    //
+    // Compression that stores bytes verbatim saves nothing and breaks
+    // large responses, so it stays off. Turn it back on once zfinal
+    // compresses with a buffer that grows with the body
+    // (`std.compress.flate.Compress`, not `.Raw`).
+    app.config.compress_responses = false;
+
     // The single zfinal.ConnectionPool that backs every handler. Lives
     // in `deps.pool`; handlers borrow from it via `deps.acquire()`.
     // An empty db_url (e.g. `DATABASE_URL=""` from the e2e scripts)

@@ -925,6 +925,52 @@ else
     warn "DATABASE_URL is empty; skipping unknown-assignee create test 60"
 fi
 
+# 61. a response bigger than 16 KB arrives whole.
+#
+# Regression: the server answered with zfinal's built-in gzip, which
+# compresses into a fixed 16 KB buffer and serves the truncated stream
+# when the body does not fit. Every response over roughly 16 KB reached
+# the client as an undecodable gzip body — the browser's `res.json()`
+# threw, the agent's task list came back empty, and the frontend just
+# retried the request.
+#
+# What a client depends on is not a particular encoding but this: the
+# bytes that arrive must decode into the complete response. So build a
+# body past the old limit and check that everything is there.
+LONG_DESC=$(python3 -c "print('padding-' * 150)")
+BULK_COUNT=30
+for i in $(seq 1 ${BULK_COUNT}); do
+    http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS}" \
+        -d "{\"title\":\"bulk ${i}\",\"description\":\"${LONG_DESC}\",\"status\":\"todo\"}" \
+        "${BASE}/api/issues" >/dev/null
+done
+
+bulk_raw="/tmp/zserver-issue-e2e-bulk.bin"
+bulk_json="/tmp/zserver-issue-e2e-bulk.json"
+bulk_headers=$(curl -s -D - -o "${bulk_raw}" -H "${AUTH}" -H "${HWS}" \
+    -H "Accept-Encoding: gzip" "${BASE}/api/issues?limit=200")
+bulk_size=$(wc -c < "${bulk_raw}" | tr -d ' ')
+if grep -qi "content-encoding: gzip" <<<"${bulk_headers}"; then
+    # The server encoded the body, so the bytes on the wire are a gzip
+    # stream. A truncated one cannot be decoded at all — that is the
+    # failure this check exists for.
+    if ! gunzip -c "${bulk_raw}" > "${bulk_json}" 2>/dev/null; then
+        : > "${bulk_json}"
+    fi
+else
+    cp "${bulk_raw}" "${bulk_json}"
+fi
+bulk_n=$(python3 -c "
+import json
+d = json.load(open('${bulk_json}'))
+print(len(d['data']['issues']))
+" 2>/dev/null || echo 0)
+if [[ "${bulk_n}" -ge "${BULK_COUNT}" ]]; then
+    pass "61 a response bigger than 16 KB arrives whole (${bulk_size} bytes, ${bulk_n} issues)"
+else
+    fail "61 a response bigger than 16 KB arrives whole: got ${bulk_n} of ${BULK_COUNT} issues (${bulk_size} bytes)"
+fi
+
 echo
 if [[ ${failures} -eq 0 ]]; then
     echo -e "${GREEN}All ${checks} issue checks passed${RESET}"
