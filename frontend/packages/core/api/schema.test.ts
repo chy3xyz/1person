@@ -558,6 +558,50 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listTasksByIssue", () => {
+    it("keeps the row when the endpoint sends the slim task shape", async () => {
+      // `GET /api/issues/:id/task-runs` mirrors the Go server and sends
+      // only id / issue_id / status / timestamps / error / failure_reason.
+      // The schema used to require agent_id, runtime_id, priority and
+      // result, so every response from it failed validation and the issue's
+      // execution log degraded to an empty list — every task row on every
+      // issue disappeared, and nothing said why.
+      stubFetchJson([
+        {
+          id: "task-1",
+          issue_id: "issue-1",
+          status: "failed",
+          created_at: "2026-01-01T00:00:00Z",
+          dispatched_at: "2026-01-01T00:00:01Z",
+          started_at: "2026-01-01T00:00:02Z",
+          completed_at: "2026-01-01T00:00:03Z",
+          error: "the directory the agent is bound to does not exist",
+          failure_reason: "agent_error",
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const tasks = await client.listTasksByIssue("issue-1");
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]?.status).toBe("failed");
+      expect(tasks[0]?.error).toBe(
+        "the directory the agent is bound to does not exist",
+      );
+      // The fields the slim shape does not carry fall back to empty values
+      // instead of failing the whole list.
+      expect(tasks[0]?.agent_id).toBe("");
+      expect(tasks[0]?.runtime_id).toBe("");
+      expect(tasks[0]?.priority).toBe(0);
+    });
+
+    it("still falls back to an empty list when the body is malformed", async () => {
+      stubFetchJson({ tasks: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const tasks = await client.listTasksByIssue("issue-1");
+      expect(tasks).toEqual([]);
+    });
+  });
+
   describe("listMembers", () => {
     it("accepts a new member role rather than over-dropping the row", async () => {
       stubFetchJson([

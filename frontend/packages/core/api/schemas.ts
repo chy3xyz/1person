@@ -791,16 +791,24 @@ export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const AgentTaskSchema = z.object({
   id: z.string(),
-  agent_id: z.string(),
-  runtime_id: z.string(),
+  // `agent_id`, `runtime_id`, `priority` and `result` are NOT part of every
+  // endpoint's task shape: `GET /api/issues/:id/task-runs` mirrors the Go
+  // server and sends only id / issue_id / status / timestamps / error /
+  // failure_reason. The schema used to require them, so that response
+  // failed validation and the issue's execution log silently degraded to
+  // an empty list — every task row on every issue disappeared. Defaults
+  // keep the parsed value's type intact while letting the slim shape
+  // through. See CLAUDE.md "API Response Compatibility".
+  agent_id: z.string().default(""),
+  runtime_id: z.string().default(""),
   issue_id: z.string(),
   status: z.string(),
-  priority: z.number(),
-  dispatched_at: z.string().nullable(),
-  started_at: z.string().nullable(),
-  completed_at: z.string().nullable(),
-  result: z.unknown(),
-  error: z.string().nullable(),
+  priority: z.number().default(0),
+  dispatched_at: z.string().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  result: z.unknown().default(null),
+  error: z.string().nullable().default(null),
   failure_reason: z.string().optional(),
   created_at: z.string(),
   chat_session_id: z.string().optional(),
