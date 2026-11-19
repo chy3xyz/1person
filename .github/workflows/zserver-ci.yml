@@ -70,7 +70,8 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libpq-dev
+          # postgresql-client: the e2e scripts seed fixtures with `psql`.
+          sudo apt-get install -y -qq libpq-dev postgresql-client
 
       - name: Build
         run: zig build
@@ -93,6 +94,27 @@ jobs:
         run: |
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
             bash scripts/issue_e2e.sh
+
+      - name: E2E — agent suite, no-DB mode
+        # The agent suite covers the read gate: an agent of another
+        # workspace must not be readable, and a private agent must not
+        # be readable by a plain member of the same workspace. The
+        # second half needs a second member, which the no-DB mode
+        # cannot hold — the script warns and skips it there.
+        # The cache paths point at the one the Build step warmed, so
+        # the build inside the script stays incremental.
+        run: |
+          ZIG_E2E_LOCAL_CACHE="${GITHUB_WORKSPACE}/backend/zserver/.zig-cache" \
+          ZIG_E2E_GLOBAL_CACHE="${HOME}/.cache/zig" \
+          JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 DATABASE_URL="" \
+            bash scripts/agent_e2e.sh
+
+      - name: E2E — agent suite, DB mode
+        run: |
+          ZIG_E2E_LOCAL_CACHE="${GITHUB_WORKSPACE}/backend/zserver/.zig-cache" \
+          ZIG_E2E_GLOBAL_CACHE="${HOME}/.cache/zig" \
+          JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
+            bash scripts/agent_e2e.sh
 
       - name: E2E — smoke (DB mode)
         run: |

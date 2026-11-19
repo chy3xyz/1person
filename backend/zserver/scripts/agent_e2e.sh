@@ -57,8 +57,13 @@ print(d if not isinstance(d, (dict, list)) else json.dumps(d))
 
 # Build
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# The build normally runs against an isolated cache so it cannot disturb a
+# developer's concurrent build. CI points these at the repo's own cache, so
+# the build stays incremental instead of recompiling zfinal + zent.
+ZIG_LOCAL_CACHE_DIR="${ZIG_E2E_LOCAL_CACHE:-/tmp/zig-local}"
+ZIG_GLOBAL_CACHE_DIR="${ZIG_E2E_GLOBAL_CACHE:-/tmp/zig-global}"
 echo "==> building zserver"
-( cd "${SCRIPT_DIR}/.." && ZIG_LOCAL_CACHE_DIR=/tmp/zig-local ZIG_GLOBAL_CACHE_DIR=/tmp/zig-global zig build ) || { echo "build failed"; exit 1; }
+( cd "${SCRIPT_DIR}/.." && ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR}" ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR}" zig build ) || { echo "build failed"; exit 1; }
 
 # Start server
 echo "==> starting zserver on port ${PORT}"
