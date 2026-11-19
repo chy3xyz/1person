@@ -352,6 +352,22 @@ Run with `cd backend/zserver && zig build test`. Tests live in `src/**/*_test.zi
 next to the code they exercise; DB-backed tests create their own fixture
 data in the target database.
 
+**Always run `zig build` as well — `zig build test` does not compile
+everything.** `src/tests.zig` is a hand-assembled list of `@import`s, and
+Zig analyses a function body only when something references it. The route
+registration (`routes.zig` → `handler.zig` → `service.zig`) is never
+referenced from the test root, so code reachable only through an HTTP
+handler is **not compiled** by `zig build test`. A typo in a handler-only
+function passes the unit test suite and only fails at `zig build`.
+`make check` and the zserver CI workflow run `zig build` before
+`zig build test`, so the full gate covers it — but local iteration must
+run both.
+
+Two more things about the test entry point: a new `*_test.zig` file must be
+imported from `src/tests.zig` or its tests never run (the suite still
+reports success), and `zig build test --summary all` prints the total test
+count — if the count did not go up, the new tests are not in the binary.
+
 ### E2E tests
 
 E2E tests should be self-contained. Use the `TestApiClient` fixture for data setup/teardown:
