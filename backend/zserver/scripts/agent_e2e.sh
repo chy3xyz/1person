@@ -90,6 +90,7 @@ code="${ONEPERSON_DEV_VERIFICATION_CODE:-000000}"
 auth_body=$(http_body -X POST -H "Content-Type: application/json" \
     -d "{\"email\":\"${EMAIL}\",\"code\":\"${code}\"}" "${BASE}/auth/verify-code")
 TOKEN=$(jget_path "${auth_body}" token)
+USER_ID=$(jget_path "${auth_body}" user.id)
 if [[ -z "${TOKEN}" ]]; then
     warn "auth failed: ${auth_body}"
     exit 1
@@ -105,7 +106,10 @@ HWS="X-Workspace-Id: ${WS_ID}"
 
 # ─── DB-mode: insert a runtime if DATABASE_URL is set ─────────────
 if [[ -n "${DATABASE_URL:-}" ]]; then
-    RUNTIME_ID=$(psql "${DATABASE_URL}" -tAc "INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider) VALUES ('${WS_ID}'::uuid, 'e2e-runtime', 'local', 'local') RETURNING id" 2>/dev/null | head -1 || echo "")
+    # The runtime needs an owner: `runtimeAllowsUser` admits the
+    # runtime's owner and public runtimes only, so an ownerless row
+    # would reject the agent creation with 403.
+    RUNTIME_ID=$(psql "${DATABASE_URL}" -tAc "INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, owner_id, visibility) VALUES ('${WS_ID}'::uuid, 'e2e-runtime', 'local', 'local', '${USER_ID}'::uuid, 'private') RETURNING id" 2>/dev/null | head -1 || echo "")
     if [[ -z "${RUNTIME_ID}" ]]; then
         warn "failed to create runtime, using fake id"
         RUNTIME_ID="00000000-0000-0000-0000-$(printf '%012d' $(date +%s))"
@@ -198,6 +202,127 @@ if [[ "${nf_status}" == "404" ]]; then pass "14 getAgent unknown (404)"; else fa
 la2_body=$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/agents")
 LA2_COUNT=$(echo "${la2_body}" | python3 -c 'import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d, list) else len(d.get("agents", d.get("data", d.get("items", [])))))' 2>/dev/null || echo 0)
 if [[ "${LA2_COUNT}" -ge 1 ]]; then pass "15 listAgents still includes agent"; else fail "15 listAgents: ${la2_body}"; fi
+
+# ─── 16. another workspace's agent is invisible ────────────────
+# An agent id is not a capability. A request scoped to one workspace
+# must not reach an agent of another workspace — and above all not its
+# run history: `GET /:id/tasks` used to look the agent up by id alone
+# and answered 200 with the foreign agent's task list, the results
+# the agent produced included.
+STAMP=$(date +%s)
+ws2_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" \
+    -d "{\"name\":\"Agent E2E Other\",\"slug\":\"agent-e2e-other-${STAMP}\"}" \
+    "${BASE}/api/workspaces")
+WS2_ID=$(jget "${ws2_body}" id)
+HWS2="X-Workspace-Id: ${WS2_ID}"
+
+if [[ -z "${WS2_ID}" ]]; then
+    fail "16 second workspace: ${ws2_body}"
+else
+    # The runtime has to live in the workspace of the agent:
+    # createAgent rejects a runtime borrowed from another workspace.
+    RUNTIME2_ID=""
+    if [[ -n "${DATABASE_URL:-}" ]]; then
+        RUNTIME2_ID=$(psql "${DATABASE_URL}" -tAc "INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, owner_id, visibility) VALUES ('${WS2_ID}'::uuid, 'e2e-runtime-2', 'local', 'local', '${USER_ID}'::uuid, 'private') RETURNING id" 2>/dev/null | head -1 || echo "")
+    fi
+    if [[ -z "${RUNTIME2_ID}" ]]; then
+        RUNTIME2_ID="00000000-0000-0000-0001-$(printf '%012d' ${STAMP})"
+    fi
+
+    ca2_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS2}" \
+        -d "{\"name\":\"Foreign Agent\",\"description\":\"other workspace\",\"instructions\":\"foreign instructions\",\"runtime_id\":\"${RUNTIME2_ID}\",\"visibility\":\"private\"}" \
+        "${BASE}/api/agents")
+    AGENT2_ID=$(jget "${ca2_body}" id)
+    if [[ -z "${AGENT2_ID}" ]]; then
+        fail "16 agent in the second workspace: ${ca2_body}"
+    else
+        pass "16 agent in a second workspace (id=${AGENT2_ID})"
+
+        # A finished task with an output worth stealing.
+        if [[ -n "${DATABASE_URL:-}" ]]; then
+            issue2_body=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" -H "${HWS2}" \
+                -d '{"title":"foreign issue","description":"cross workspace check"}' "${BASE}/api/issues")
+            ISSUE2_ID=$(jget_path "${issue2_body}" data.id)
+            if [[ -n "${ISSUE2_ID}" ]]; then
+                # `runtime_id` is NOT NULL on the task queue.
+                psql "${DATABASE_URL}" -tAc "INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, result) VALUES ('${AGENT2_ID}'::uuid, '${ISSUE2_ID}'::uuid, '${RUNTIME2_ID}'::uuid, 'completed', '\"FOREIGN-TASK-OUTPUT\"'::jsonb)" >/dev/null 2>&1 || true
+            fi
+        fi
+
+        # The control: the task list is readable in its own workspace.
+        own_tasks=$(http_body -H "${AUTH}" -H "${HWS2}" "${BASE}/api/agents/${AGENT2_ID}/tasks")
+        if [[ "${own_tasks}" == *"FOREIGN-TASK-OUTPUT"* ]]; then
+            pass "17 the task list is readable in its own workspace"
+        elif [[ -n "${DATABASE_URL:-}" ]]; then
+            fail "17 the task list is readable in its own workspace: ${own_tasks}"
+        else
+            pass "17 the task list is readable in its own workspace (no-DB mode)"
+        fi
+
+        # The leak: the same agent id, read through the other workspace.
+        cross_tasks_status=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/agents/${AGENT2_ID}/tasks")
+        cross_tasks_body=$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/agents/${AGENT2_ID}/tasks")
+        if [[ "${cross_tasks_status}" == "404" && "${cross_tasks_body}" != *"FOREIGN-TASK-OUTPUT"* ]]; then
+            pass "18 another workspace's task list is not readable (404)"
+        else
+            fail "18 another workspace's task list is not readable (${cross_tasks_status}): ${cross_tasks_body}"
+        fi
+
+        cross_agent_status=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/agents/${AGENT2_ID}")
+        if [[ "${cross_agent_status}" == "404" ]]; then
+            pass "19 another workspace's agent is not readable (404)"
+        else
+            fail "19 another workspace's agent is not readable (${cross_agent_status})"
+        fi
+    fi
+fi
+
+# ─── 20. a private agent stays private ─────────────────────────
+# The detail endpoint, the run history and the agent list all answer
+# to the same gate: a private agent belongs to its owner, and a plain
+# member of the same workspace may not read it. The list keeps the
+# agent's identity — the workspace renders issue assignees from it —
+# but not the owner's material.
+if [[ -n "${DATABASE_URL:-}" ]]; then
+    EMAIL2="agent-e2e-member-${STAMP}@example.com"
+    http_status -X POST -H "Content-Type: application/json" \
+        -d "{\"email\":\"${EMAIL2}\"}" "${BASE}/auth/send-code" >/dev/null
+    auth2_body=$(http_body -X POST -H "Content-Type: application/json" \
+        -d "{\"email\":\"${EMAIL2}\",\"code\":\"${code}\"}" "${BASE}/auth/verify-code")
+    TOKEN2=$(jget_path "${auth2_body}" token)
+    USER2_ID=$(jget_path "${auth2_body}" user.id)
+    AUTH2="Authorization: Bearer ${TOKEN2}"
+
+    if [[ -z "${TOKEN2}" || -z "${USER2_ID}" ]]; then
+        fail "20 second member signs in: ${auth2_body}"
+    else
+        psql "${DATABASE_URL}" -tAc "INSERT INTO member (workspace_id, user_id, role) VALUES ('${WS_ID}'::uuid, '${USER2_ID}'::uuid, 'member') ON CONFLICT (workspace_id, user_id) DO NOTHING" >/dev/null 2>&1 || true
+
+        member_detail=$(http_status -H "${AUTH2}" -H "${HWS}" "${BASE}/api/agents/${AGENT_ID}")
+        if [[ "${member_detail}" == "403" ]]; then
+            pass "20 a private agent's detail is closed to other members (403)"
+        else
+            fail "20 a private agent's detail is closed to other members (${member_detail})"
+        fi
+
+        member_tasks=$(http_status -H "${AUTH2}" -H "${HWS}" "${BASE}/api/agents/${AGENT_ID}/tasks")
+        if [[ "${member_tasks}" == "403" ]]; then
+            pass "21 a private agent's run history is closed to other members (403)"
+        else
+            fail "21 a private agent's run history is closed to other members (${member_tasks})"
+        fi
+
+        member_skills=$(http_status -H "${AUTH2}" -H "${HWS}" "${BASE}/api/agents/${AGENT_ID}/skills")
+        if [[ "${member_skills}" == "403" ]]; then
+            pass "22 a private agent's skills are closed to other members (403)"
+        else
+            fail "22 a private agent's skills are closed to other members (${member_skills})"
+        fi
+
+    fi
+else
+    warn "20-22 skipped: the private-agent gate needs a second member, which the no-DB mode cannot hold"
+fi
 
 echo
 if [[ ${failures} -eq 0 ]]; then

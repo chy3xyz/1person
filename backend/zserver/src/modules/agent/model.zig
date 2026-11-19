@@ -357,6 +357,14 @@ pub fn agentColumns() []const u8 {
         "model, thinking_level, owner_id, archived_at, created_at, updated_at, archived_by";
 }
 
+/// Offsets of the columns that decide who may read a private agent.
+///
+/// `visibility` and `owner_id` are named rather than written inline
+/// because the access gate reads them: a column that shifted would widen
+/// the gate silently instead of failing.
+pub const col_visibility = 12;
+pub const col_owner_id = 17;
+
 // ──────────────────────────────────────────────────────────────────────
 // jsonb column helpers
 // ──────────────────────────────────────────────────────────────────────
@@ -497,12 +505,12 @@ pub fn agentResponseFromRow(allocator: std.mem.Allocator, rs: *zfinal.ResultSet,
         .has_custom_env = env_key_count > 0,
         .custom_env_key_count = env_key_count,
         .mcp_config_redacted = false,
-        .visibility = r.getText(12) orelse "private",
+        .visibility = r.getText(col_visibility) orelse "private",
         .status = r.getText(13) orelse "offline",
         .max_concurrent_tasks = max_tasks,
         .model = r.getText(15) orelse "",
         .thinking_level = r.getText(16) orelse "",
-        .owner_id = r.getText(17),
+        .owner_id = r.getText(col_owner_id),
         .skills = skills,
         .created_at = r.getText(19) orelse "",
         .updated_at = r.getText(20) orelse "",
@@ -527,12 +535,12 @@ pub fn agentEntryFromRow(rs: *zfinal.ResultSet, row: usize) AgentEntry {
         .custom_args = rs.rows.items[row].getText(9) orelse "[]",
         .custom_env = rs.rows.items[row].getText(10) orelse "{}",
         .mcp_config = rs.rows.items[row].getText(11) orelse "",
-        .visibility = rs.rows.items[row].getText(12) orelse "private",
+        .visibility = rs.rows.items[row].getText(col_visibility) orelse "private",
         .status = rs.rows.items[row].getText(13) orelse "offline",
         .max_concurrent_tasks = max_tasks,
         .model = rs.rows.items[row].getText(15) orelse "",
         .thinking_level = rs.rows.items[row].getText(16) orelse "",
-        .owner_id = rs.rows.items[row].getText(17) orelse "",
+        .owner_id = rs.rows.items[row].getText(col_owner_id) orelse "",
         .archived_at = rs.rows.items[row].getText(18) orelse "",
         .archived_by = rs.rows.items[row].getText(21) orelse "",
         .created_at = rs.rows.items[row].getText(19) orelse "",
@@ -558,12 +566,12 @@ pub fn agentEntryFromRowDuped(allocator: std.mem.Allocator, rs: *zfinal.ResultSe
         .custom_args = try allocator.dupe(u8, rs.rows.items[row].getText(9) orelse "[]"),
         .custom_env = try allocator.dupe(u8, rs.rows.items[row].getText(10) orelse "{}"),
         .mcp_config = try allocator.dupe(u8, rs.rows.items[row].getText(11) orelse ""),
-        .visibility = try allocator.dupe(u8, rs.rows.items[row].getText(12) orelse "private"),
+        .visibility = try allocator.dupe(u8, rs.rows.items[row].getText(col_visibility) orelse "private"),
         .status = try allocator.dupe(u8, rs.rows.items[row].getText(13) orelse "offline"),
         .max_concurrent_tasks = max_tasks,
         .model = try allocator.dupe(u8, rs.rows.items[row].getText(15) orelse ""),
         .thinking_level = try allocator.dupe(u8, rs.rows.items[row].getText(16) orelse ""),
-        .owner_id = try allocator.dupe(u8, rs.rows.items[row].getText(17) orelse ""),
+        .owner_id = try allocator.dupe(u8, rs.rows.items[row].getText(col_owner_id) orelse ""),
         .archived_at = try allocator.dupe(u8, rs.rows.items[row].getText(18) orelse ""),
         .archived_by = try allocator.dupe(u8, rs.rows.items[row].getText(21) orelse ""),
         .created_at = try allocator.dupe(u8, rs.rows.items[row].getText(19) orelse ""),

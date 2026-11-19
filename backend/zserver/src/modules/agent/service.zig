@@ -49,6 +49,83 @@ fn requireManager(ctx: *zfinal.Context, owner_id: []const u8) !bool {
     return false;
 }
 
+/// Whether a member may read a private agent's detail.
+///
+/// A private agent belongs to its owner. The owner and workspace
+/// owners/admins keep governance and inventory visibility; other members
+/// may not. Upstream counts an agent's run history as part of the same
+/// gate ("查看历史会话"), so the rule is written down once and every read
+/// path that can expose an agent uses it.
+///
+/// Only an explicitly workspace-visible agent is open to every member.
+/// Everything else — a private agent, and equally an unset visibility —
+/// stays with its owner, so an unknown state fails closed instead of
+/// handing the agent out.
+///
+/// Public so the access rule can be tested on its own, away from HTTP.
+pub fn privateAgentReadable(visibility: []const u8, owner_id: []const u8, role: []const u8, user_id: []const u8) bool {
+    if (std.mem.eql(u8, visibility, "workspace")) return true;
+    if (std.mem.eql(u8, role, "owner") or std.mem.eql(u8, role, "admin")) return true;
+    // An empty user id must not match an empty owner id.
+    return user_id.len > 0 and std.mem.eql(u8, user_id, owner_id);
+}
+
+/// `privateAgentReadable` as a request gate: answers 403 and returns false
+/// when the caller may not read the agent.
+fn requirePrivateAgentReadable(ctx: *zfinal.Context, visibility: []const u8, owner_id: []const u8) !bool {
+    if (privateAgentReadable(visibility, owner_id, getWorkspaceRole(ctx) orelse "", getUserId(ctx) orelse "")) return true;
+    ctx.res_status = .forbidden;
+    try ctx.renderJson(.{ .@"error" = "you do not have access to this agent" });
+    return false;
+}
+
+/// The two columns that decide who may read a private agent.
+const AgentAccess = struct {
+    visibility: []const u8,
+    owner_id: []const u8,
+
+    fn deinit(self: AgentAccess, allocator: std.mem.Allocator) void {
+        allocator.free(self.visibility);
+        allocator.free(self.owner_id);
+    }
+};
+
+/// Read only what the private-agent gate needs.
+///
+/// `loadAgent` copies the whole agent row — twenty-two columns — while
+/// the gate reads two of them, and the caller has no way to release the
+/// other twenty. The gate gets its own narrow query instead, and the two
+/// strings it returns are owned by the caller.
+///
+/// Returns null when the agent does not exist in this workspace, which is
+/// also how the gate keeps agents of other workspaces unreadable.
+fn loadAgentAccess(allocator: std.mem.Allocator, workspace_id: []const u8, agent_id: []const u8) !?AgentAccess {
+    if (!model.looksLikeUuid(agent_id)) return null;
+    if (model.borrowDb()) |db| {
+        defer deps.releaseBack(db);
+        var rs = try db.queryParams(
+            "SELECT visibility, COALESCE(owner_id::text, '') FROM agent WHERE id = $1::uuid AND workspace_id = $2::uuid",
+            &[_]SqlParam{
+                .{ .text = agent_id },
+                .{ .text = workspace_id },
+            },
+        );
+        defer rs.deinit();
+        if (rs.rows.items.len == 0) return null;
+        return AgentAccess{
+            .visibility = try allocator.dupe(u8, rs.rows.items[0].getText(0) orelse "private"),
+            .owner_id = try allocator.dupe(u8, rs.rows.items[0].getText(1) orelse ""),
+        };
+    }
+    try model.memInit();
+    const entry = model.mem_agents.?.get(agent_id) orelse return null;
+    if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) return null;
+    return AgentAccess{
+        .visibility = try allocator.dupe(u8, entry.visibility),
+        .owner_id = try allocator.dupe(u8, entry.owner_id),
+    };
+}
+
 fn loadAgent(allocator: std.mem.Allocator, workspace_id: []const u8, agent_id: []const u8) !?model.AgentEntry {
     if (!model.looksLikeUuid(agent_id)) return null;
     if (model.borrowDb()) |db| {
@@ -190,6 +267,14 @@ pub fn getAgent(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "agent not found" });
             return;
         }
+        // A private agent's detail belongs to its owner. The frontend
+        // already asks for 403 here to tell "this agent is not yours to
+        // see" apart from "there is no such agent".
+        if (!(try requirePrivateAgentReadable(
+            ctx,
+            rs.rows.items[0].getText(model.col_visibility) orelse "private",
+            rs.rows.items[0].getText(model.col_owner_id) orelse "",
+        ))) return;
         const skills_list = try model.dbSkillsForAgent(allocator, db, agent_id);
         defer allocator.free(skills_list);
         const resp = try model.agentResponseFromRow(allocator, &rs, 0, skills_list);
@@ -209,6 +294,7 @@ pub fn getAgent(ctx: *zfinal.Context) !void {
             try ctx.renderJson(.{ .@"error" = "agent not found" });
             return;
         }
+        if (!(try requirePrivateAgentReadable(ctx, entry.visibility, entry.owner_id))) return;
         const skills_list = try model.memSkillsForAgent(allocator, agent_id);
         defer allocator.free(skills_list);
         const resp = try model.agentResponseFromEntry(allocator, entry, skills_list);
@@ -861,11 +947,29 @@ pub fn cancelTasks(ctx: *zfinal.Context) !void {
 
 pub fn listTasks(ctx: *zfinal.Context) !void {
     const allocator = ctx.allocator;
+    const workspace_id = getWorkspaceId(ctx) orelse {
+        ctx.res_status = .bad_request;
+        try ctx.renderJson(.{ .@"error" = "workspace_id is required" });
+        return;
+    };
     const agent_id = ctx.getPathParam("id") orelse {
         ctx.res_status = .bad_request;
         try ctx.renderJson(.{ .@"error" = "agent_id is required" });
         return;
     };
+
+    // An agent belongs to one workspace, and its run history belongs to
+    // that agent. Without this check any member could read another
+    // workspace's agent history by naming its id — the history holds what
+    // the agent produced (diffs, summaries), not just bookkeeping.
+    const access = (try loadAgentAccess(allocator, workspace_id, agent_id)) orelse {
+        ctx.res_status = .not_found;
+        try ctx.renderJson(.{ .@"error" = "agent not found" });
+        return;
+    };
+    defer access.deinit(allocator);
+    // Run history is part of the private-agent gate.
+    if (!(try requirePrivateAgentReadable(ctx, access.visibility, access.owner_id))) return;
 
     if (model.borrowDb()) |db| {
         defer deps.releaseBack(db);
@@ -1186,20 +1290,13 @@ pub fn listAgentSkills(ctx: *zfinal.Context) !void {
         return;
     };
 
-    const existing = (try loadAgent(allocator, workspace_id, agent_id)) orelse {
+    const access = (try loadAgentAccess(allocator, workspace_id, agent_id)) orelse {
         ctx.res_status = .not_found;
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
-    if (existing.visibility.len > 0 and std.mem.eql(u8, existing.visibility, "private")) {
-        const role = getWorkspaceRole(ctx) orelse "";
-        const user_id = getUserId(ctx) orelse "";
-        if (!std.mem.eql(u8, role, "owner") and !std.mem.eql(u8, role, "admin") and !std.mem.eql(u8, user_id, existing.owner_id)) {
-            ctx.res_status = .forbidden;
-            try ctx.renderJson(.{ .@"error" = "you do not have access to this agent" });
-            return;
-        }
-    }
+    defer access.deinit(allocator);
+    if (!(try requirePrivateAgentReadable(ctx, access.visibility, access.owner_id))) return;
 
     if (model.borrowDb()) |db| {
         defer deps.releaseBack(db);

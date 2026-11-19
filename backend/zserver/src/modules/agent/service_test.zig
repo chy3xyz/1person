@@ -74,3 +74,50 @@ test "agent task snapshot binds one value per placeholder" {
 
     // An empty result is fine — the point is that the query binds and runs.
 }
+
+test "a private agent is readable by its owner and by workspace admins only" {
+    // Regression: the read paths that can expose an agent did not all
+    // apply the private-agent gate, so a plain member could read another
+    // member's private agent — its instructions, and its run history.
+    // Upstream counts the run history as part of the same gate.
+    const OWNER = "11111111-1111-1111-1111-111111111111";
+    const OTHER = "22222222-2222-2222-2222-222222222222";
+
+    // The owner reads their own private agent.
+    try std.testing.expect(service.privateAgentReadable("private", OWNER, "member", OWNER));
+    // Workspace owners and admins keep governance visibility.
+    try std.testing.expect(service.privateAgentReadable("private", OWNER, "owner", OTHER));
+    try std.testing.expect(service.privateAgentReadable("private", OWNER, "admin", OTHER));
+    // A plain member does not.
+    try std.testing.expect(!service.privateAgentReadable("private", OWNER, "member", OTHER));
+}
+
+test "a workspace-visible agent is readable by every member" {
+    const OWNER = "11111111-1111-1111-1111-111111111111";
+    const OTHER = "22222222-2222-2222-2222-222222222222";
+
+    try std.testing.expect(service.privateAgentReadable("workspace", OWNER, "member", OTHER));
+    try std.testing.expect(service.privateAgentReadable("workspace", OWNER, "member", OWNER));
+}
+
+test "an unset visibility fails closed" {
+    // The response layer already reports an unset visibility as
+    // "private" (see `agentResponseFromRow`). The gate has to agree
+    // with it: an unknown state must not read as "not private, so
+    // open", or a row whose visibility never got written would hand
+    // the agent to every member.
+    const OWNER = "11111111-1111-1111-1111-111111111111";
+    const OTHER = "22222222-2222-2222-2222-222222222222";
+
+    try std.testing.expect(!service.privateAgentReadable("", OWNER, "member", OTHER));
+    // The owner and the workspace admins still get through.
+    try std.testing.expect(service.privateAgentReadable("", OWNER, "member", OWNER));
+    try std.testing.expect(service.privateAgentReadable("", OWNER, "admin", OTHER));
+}
+
+test "an anonymous caller never matches a private agent" {
+    // Both ids empty would otherwise compare equal and let an
+    // unauthenticated read through the gate.
+    try std.testing.expect(!service.privateAgentReadable("private", "", "member", ""));
+    try std.testing.expect(!service.privateAgentReadable("private", "", "", ""));
+}
