@@ -42,6 +42,15 @@ if [[ "${LEFTOVER_WORKSPACES}" == "0" && "${LEFTOVER_USERS}" == "0" ]]; then
     exit 0
 fi
 
+# A query that could not run says nothing about residue, but it also
+# cannot prove there is none — so the check still fails, with a message
+# that names the real problem instead of counting "?".
+if [[ "${LEFTOVER_WORKSPACES}" == "?" || "${LEFTOVER_USERS}" == "?" ]]; then
+    echo "check-e2e-residue: FAILED — could not query the database, so residue could not be ruled out" >&2
+    psql "${DATABASE_URL}" -c "SELECT 1" >&2 || true
+    exit 1
+fi
+
 echo "check-e2e-residue: FAILED — the e2e suites left ${LEFTOVER_WORKSPACES} workspace(s) and ${LEFTOVER_USERS} account(s) behind" >&2
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "
     SELECT w.slug || '  (' || u.email || ')'

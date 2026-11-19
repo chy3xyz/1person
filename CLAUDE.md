@@ -413,11 +413,12 @@ and the workspace list becomes unusable.
   accounts as separate arguments (instead of calling the helper once per
   account) is what keeps a two-member suite from leaving the second
   account behind.
-- The helper needs `DATABASE_URL` in the **shell**, not as a command
-  prefix: a prefix assignment (`DATABASE_URL=... ./zserver &`) scopes the
-  URL to that process, and the teardown silently cleans nothing.
-- The helper is a no-op without `DATABASE_URL` (no-DB mode persists nothing)
-  and never fails the calling script.
+- The helper reads `DATABASE_URL` from the **shell**, so a script that
+  talks to a database must `export DATABASE_URL=...` before starting the
+  server. A command prefix (`DATABASE_URL=... ./zserver &`) scopes the URL
+  to that process alone, and the teardown then silently cleans nothing.
+- The helper is a no-op without `DATABASE_URL` — in no-DB mode nothing was
+  persisted in the first place — and it never fails the calling script.
 - `scripts/check_e2e_residue.sh` fails the build when any account or
   workspace is left on a test-fixture domain. It runs as the last step of
   the `zserver CI` workflow, so a new script that forgets the teardown is
