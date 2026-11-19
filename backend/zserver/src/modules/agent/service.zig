@@ -92,10 +92,9 @@ const AgentAccess = struct {
 
 /// Read only what the private-agent gate needs.
 ///
-/// `loadAgent` copies the whole agent row — twenty-two columns — while
-/// the gate reads two of them, and the caller has no way to release the
-/// other twenty. The gate gets its own narrow query instead, and the two
-/// strings it returns are owned by the caller.
+/// The gate reads two columns; the agent row has twenty-two. A narrow
+/// query keeps the gate independent of the row shape and copies only
+/// what it hands out — and what it hands out, the caller owns.
 ///
 /// Returns null when the agent does not exist in this workspace, which is
 /// also how the gate keeps agents of other workspaces unreadable.
