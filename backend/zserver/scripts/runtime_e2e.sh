@@ -128,6 +128,63 @@ if [[ -n "${DATABASE_URL}" ]]; then
             fi
             psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${STALE_ID}'::uuid" >/dev/null 2>&1 || true
         fi
+
+        # 3e. the daemon lifecycle: register → heartbeat → deregister.
+        # The in-memory daemon registry is keyed by the identity the
+        # daemon's token carries, because that is the id the heartbeat
+        # and the deregister look the daemon up by. A registry keyed by
+        # anything else is a registry nobody finds: the heartbeat stamps
+        # nothing and a graceful shutdown leaves the runtime "online".
+        MINT=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" \
+            -d "{\"workspace_id\":\"${WS_ID}\",\"ttl_days\":1}" "${BASE}/api/daemon/tokens")
+        DTOKEN=$(jget "${MINT}" token)
+        if [[ -z "${DTOKEN}" ]]; then
+            warn "could not mint a daemon token; skipping the daemon lifecycle check"
+        else
+            DRT_ID="77777777-2222-3333-4444-555555555555"
+            REG=$(http_body -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${DTOKEN}" \
+                -d "{\"runtime_id\":\"${DRT_ID}\",\"name\":\"rt-e2e-daemon\",\"cli_version\":\"0.0.1\",\"capabilities\":[\"agent_tasks\"]}" \
+                "${BASE}/api/daemon/register")
+            if [[ -n "$(jget "${REG}" daemon_id)" ]]; then
+                pass "07 daemon register (200)"
+            else
+                fail "07 daemon register: ${REG}"
+            fi
+
+            # The heartbeat has to reach the row: liveness is decided by
+            # the age of agent_runtime.last_seen_at. The registration
+            # stamped it too, so clear it first — otherwise this check
+            # would pass even if the heartbeat stamped nothing.
+            psql "${DATABASE_URL}" -tAc "UPDATE agent_runtime SET last_seen_at = NULL WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
+            HB=$(http_status -X POST -H "Authorization: Bearer ${DTOKEN}" "${BASE}/api/daemon/heartbeat")
+            if [[ "${HB}" == "200" ]]; then
+                pass "08 daemon heartbeat (200)"
+            else
+                fail "08 daemon heartbeat (${HB})"
+            fi
+
+            SEEN=$(psql "${DATABASE_URL}" -tAc "SELECT (last_seen_at IS NOT NULL)::text FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" 2>/dev/null | head -1)
+            if [[ "${SEEN}" == "t" || "${SEEN}" == "true" ]]; then
+                pass "09 the heartbeat reached the runtime row"
+            else
+                fail "09 the heartbeat reached the runtime row (last_seen_at=${SEEN:-null})"
+            fi
+
+            DG=$(http_status -X POST -H "Authorization: Bearer ${DTOKEN}" "${BASE}/api/daemon/deregister")
+            if [[ "${DG}" == "200" || "${DG}" == "204" ]]; then
+                pass "10 daemon deregister (${DG})"
+            else
+                fail "10 daemon deregister (${DG})"
+            fi
+
+            RST=$(psql "${DATABASE_URL}" -tAc "SELECT status FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" 2>/dev/null | head -1)
+            if [[ "${RST}" == "offline" ]]; then
+                pass "11 a deregistered daemon leaves its runtime offline"
+            else
+                fail "11 a deregistered daemon leaves its runtime offline (status=${RST:-unknown})"
+            fi
+            psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
+        fi
     else
         warn "psql insert failed; skipping DB-mode checks"
     fi

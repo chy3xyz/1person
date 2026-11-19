@@ -202,6 +202,15 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
                 ws_client = client_ptr;
                 backoff_ms = 1000;
                 out.printOut("daemon websocket connected\n", .{});
+                // Register again on every (re)connect. The server keeps
+                // the daemon record in its own process memory, so a
+                // server restart leaves it without one: the heartbeat
+                // this daemon sends would find nothing to stamp, and the
+                // runtime row would look stale to the liveness sweeper
+                // even though this daemon is right here.
+                registerDaemon(allocator, io, &client, token_buf, reg_body, opts.runtime_id) catch |err| {
+                    out.printErr("re-register failed ({s}); continuing\n", .{@errorName(err)});
+                };
             }
         }
 

@@ -83,7 +83,14 @@ fn getWorkspaceId(ctx: *zfinal.Context) ?[]const u8 {
         return common_ctx.getWorkspaceId(ctx);
     }
 
-fn memInit() !void {
+/// Create the in-memory daemon registry if it does not exist yet.
+///
+/// The caller must hold `mem_mutex`. The registry is a global optional:
+/// assigning it writes several words, and a reader that sees it
+/// half-written gets a map with garbage inside — a crash, not a stale
+/// read. The WebSocket frame loop reads the registry on every frame, so
+/// the creation has to be under the same lock as the reads.
+fn memInitLocked() void {
     if (mem_daemons == null) {
         mem_daemons = std.StringHashMap(model.DaemonEntry).init(memAlloc());
     }
@@ -181,7 +188,22 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
         return;
     }
 
-    const daemon_id = try generateId(allocator, req.runtime_id);
+    // The daemon's identity is the one its token carries: the heartbeat
+    // and the deregister look the daemon up by exactly that id. A registry
+    // keyed by anything else is a registry nobody ever finds — the
+    // heartbeat would find no entry to stamp, and a graceful shutdown
+    // would leave the runtime marked "online" forever.
+    //
+    // The token is the only source of that id. The fallback is for a
+    // request that reached the handler without one (no token middleware),
+    // and it keeps the response shape intact.
+    const token_daemon_id = ctx.attributes.get("daemon_id");
+    var owned_daemon_id: ?[]const u8 = null;
+    defer if (owned_daemon_id) |owned| allocator.free(owned);
+    const daemon_id: []const u8 = if (token_daemon_id) |id| id else blk: {
+        owned_daemon_id = try generateId(allocator, req.runtime_id);
+        break :blk owned_daemon_id.?;
+    };
 
     const name = if (req.name) |n| try memDup(n) else try memDup("daemon");
 
@@ -264,12 +286,18 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
         }
     }
 
-    try memInit();
+    // The registry is created under the lock: the WebSocket frame loop
+    // reads it, and a reader that sees a half-created map crashes.
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
+    memInitLocked();
 
     const runtime_id_dup = try memDup(req.runtime_id);
-    try mem_daemons.?.put(daemon_id, model.DaemonEntry{
+    // The map keeps the key by value, so it has to own the bytes: the
+    // daemon id may come from the request context, and that memory dies
+    // with the request — a dangling key crashes the next lookup.
+    const daemon_key = try memDup(daemon_id);
+    try mem_daemons.?.put(daemon_key, model.DaemonEntry{
         .id = try memDup(daemon_id),
         .runtime_id = runtime_id_dup,
         .name = name,
@@ -291,9 +319,11 @@ pub fn daemonDeregister(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "daemon_token_required" });
         return;
     };
-    try memInit();
+    // The registry is created under the lock: the WebSocket frame loop
+    // reads it, and a reader that sees a half-created map crashes.
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
+    memInitLocked();
     // Flip the runtime offline when the last serving daemon deregisters.
     if (mem_daemons.?.getPtr(daemon_id)) |entry| {
         _ = model.setRuntimeStatus(entry.runtime_id, "offline");
@@ -308,9 +338,11 @@ pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "daemon_token_required" });
         return;
     };
-    try memInit();
+    // The registry is created under the lock: the WebSocket frame loop
+    // reads it, and a reader that sees a half-created map crashes.
     try mem_mutex.lock(zfinal.io_instance.io);
     defer mem_mutex.unlock(zfinal.io_instance.io);
+    memInitLocked();
     if (mem_daemons.?.getPtr(daemon_id)) |entry| {
         entry.last_seen_at = nowMillis();
         // The in-memory timestamp dies with the process, so the row the
