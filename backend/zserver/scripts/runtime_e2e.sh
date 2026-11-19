@@ -227,6 +227,49 @@ if [[ -n "${DATABASE_URL}" ]]; then
                 http_status -X DELETE -H "${AUTH}" "${BASE}/api/workspaces/${WS2_ID}" >/dev/null 2>&1 || true
             fi
             psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
+
+            # 14. The sweeper has to tell the clients. A status that
+            # changed in the database but never reaches the UI leaves the
+            # workspace showing a machine that is gone — the frontend
+            # invalidates the runtime queries on a `daemon:*` event, so
+            # the sweeper has to publish one.
+            ws14=$(python3 -c "import websocket" 2>/dev/null && echo "ok" || echo "missing")
+            if [[ "${ws14}" != "ok" ]]; then
+                warn "websocket-client not installed; skipping the sweeper event check"
+            else
+                WS_STALE_ID=$(psql "${DATABASE_URL}" -tAc "INSERT INTO agent_runtime (workspace_id, owner_id, name, runtime_mode, provider, status, last_seen_at) VALUES ('${WS_ID}'::uuid, '${USER_ID}'::uuid, 'rt-e2e-swept', 'local', 'local', 'online', now() - interval '1 hour') RETURNING id" 2>/dev/null | head -1 || echo "")
+                if [[ -z "${WS_STALE_ID}" ]]; then
+                    warn "could not insert the stale runtime; skipping the sweeper event check"
+                else
+                    ws_out=$(python3 - <<PYEOF 2>&1 || true
+import threading, time
+import websocket
+WS = "ws://127.0.0.1:${PORT}/ws?workspace_id=${WS_ID}&token=${TOKEN}"
+hit = threading.Event()
+def on_msg(ws, msg):
+    if '"type":"daemon:status_changed"' in msg:
+        hit.set()
+def on_err(ws, e):
+    pass
+def on_close(ws, *a):
+    pass
+wsa = websocket.WebSocketApp(WS, on_message=on_msg, on_error=on_err, on_close=on_close)
+t = threading.Thread(target=wsa.run_forever, daemon=True); t.start()
+time.sleep(0.8)
+# The sweeper runs every 30s; give it two rounds.
+hit.wait(timeout=70)
+print("SWEEP_EVENT=" + ("HIT" if hit.is_set() else "MISS"))
+wsa.close()
+PYEOF
+)
+                    if echo "${ws_out}" | grep -q "SWEEP_EVENT=HIT"; then
+                        pass "14 the sweeper tells the workspace that a runtime went offline"
+                    else
+                        fail "14 the sweeper tells the workspace that a runtime went offline: ${ws_out}"
+                    fi
+                    psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${WS_STALE_ID}'::uuid" >/dev/null 2>&1 || true
+                fi
+            fi
         fi
     else
         warn "psql insert failed; skipping DB-mode checks"

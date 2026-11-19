@@ -155,6 +155,26 @@ pub fn heartbeatRuntime(runtime_id: []const u8) bool {
     return true;
 }
 
+/// What one sweeper round changed.
+pub const SweepResult = struct {
+    /// The workspaces that had a runtime marked offline, each id owned by
+    /// the caller. `deinit` releases them.
+    ///
+    /// The caller needs them to tell the clients: a status that changed
+    /// in the database but never reaches the UI leaves the workspace
+    /// showing a machine that is gone.
+    workspace_ids: [][]const u8,
+    /// How many runtime rows were flipped.
+    count: i64,
+
+    pub fn deinit(self: SweepResult, allocator: std.mem.Allocator) void {
+        for (self.workspace_ids) |ws| allocator.free(ws);
+        // The empty case carries a comptime slice, which the allocator
+        // never handed out — freeing it would be a bogus free.
+        if (self.workspace_ids.len > 0) allocator.free(self.workspace_ids);
+    }
+};
+
 /// Flip runtimes that stopped heartbeating to offline.
 ///
 /// A runtime that is still marked online but whose heartbeat is older than
@@ -168,18 +188,53 @@ pub fn heartbeatRuntime(runtime_id: []const u8) bool {
 /// ships its own CLI, and the server is upgraded independently), and
 /// declaring it dead would strand a machine that is working fine.
 ///
-/// Returns the number of runtimes flipped. Returns 0 in no-DB mode.
-pub fn sweepStaleRuntimes() i64 {
-    const db = borrowDb() orelse return 0;
+/// The affected workspaces come back with the flip itself (RETURNING), so
+/// the caller can publish the change without a second query — and without
+/// a race against a heartbeat that lands between the two.
+pub fn sweepStaleRuntimes(allocator: std.mem.Allocator) SweepResult {
+    const db = borrowDb() orelse return .{ .workspace_ids = &[_][]const u8{}, .count = 0 };
     defer deps.releaseBack(db);
-    db.execParams(
+
+    var rs = db.queryParams(
         "UPDATE agent_runtime SET status = 'offline', updated_at = now() " ++
             "WHERE status = 'online' " ++
             "AND last_seen_at IS NOT NULL " ++
-            "AND last_seen_at < now() - make_interval(secs => $1::int)",
+            "AND last_seen_at < now() - make_interval(secs => $1::int) " ++
+            "RETURNING workspace_id::text",
         &[_]SqlParam{.{ .int = runtime_stale_seconds }},
-    ) catch return 0;
-    return db.affectedRows() catch 0;
+    ) catch return .{ .workspace_ids = &[_][]const u8{}, .count = 0 };
+    defer rs.deinit();
+
+    var ids: std.ArrayList([]const u8) = .empty;
+    for (rs.rows.items) |*row| {
+        const ws = row.getText(0) orelse continue;
+        // One workspace can hold several stale runtimes; the event goes
+        // out per workspace, not per runtime.
+        var seen = false;
+        for (ids.items) |existing| {
+            if (std.mem.eql(u8, existing, ws)) {
+                seen = true;
+                break;
+            }
+        }
+        if (seen) continue;
+        const owned = allocator.dupe(u8, ws) catch continue;
+        ids.append(allocator, owned) catch {
+            allocator.free(owned);
+            break;
+        };
+    }
+
+    const owned_ids = ids.toOwnedSlice(allocator) catch {
+        for (ids.items) |ws| allocator.free(ws);
+        ids.deinit(allocator);
+        return .{ .workspace_ids = &[_][]const u8{}, .count = 0 };
+    };
+
+    return .{
+        .workspace_ids = owned_ids,
+        .count = @intCast(rs.rows.items.len),
+    };
 }
 
 /// Insert a minted daemon token (SHA-256 hash of the full 1d_ token)

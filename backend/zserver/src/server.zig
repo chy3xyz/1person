@@ -25,6 +25,7 @@ const webhook_handler = @import("modules/webhook/handler.zig");
 const contact_handler = @import("modules/contact/handler.zig");
 const daemon_handler = @import("modules/daemon/handler.zig");
 const daemon_model = @import("modules/daemon/model.zig");
+const realtime = @import("modules/realtime/service.zig");
 const comment_handler = @import("modules/comment/handler.zig");
 
 
@@ -206,14 +207,41 @@ fn startRuntimeSweeper() void {
 }
 
 fn runtimeSweeperThread() void {
+    // The thread outlives `run` in principle (it exits on the next
+    // shutdown check), so it must not borrow the app's allocator.
+    const allocator = std.heap.page_allocator;
     while (!zfinal.shutdown.isShuttingDown()) {
         sleepMs(daemon_model.runtime_sweep_interval_seconds * 1000);
         if (zfinal.shutdown.isShuttingDown()) break;
-        const flipped = daemon_model.sweepStaleRuntimes();
-        if (flipped > 0) {
-            log.info("runtime sweeper: {} stale runtime(s) marked offline", .{flipped});
+        const swept = daemon_model.sweepStaleRuntimes(allocator);
+        defer swept.deinit(allocator);
+        if (swept.count > 0) {
+            log.info("runtime sweeper: {} stale runtime(s) marked offline", .{swept.count});
+            // The status changed in the database, but a client that is
+            // not told keeps showing the machine as online — and that is
+            // the whole point of the sweep. The frontend invalidates the
+            // runtime queries on a `daemon:*` event (upstream publishes
+            // the same way after its sweeper).
+            for (swept.workspace_ids) |workspace_id| {
+                publishRuntimeStatusChanged(allocator, workspace_id);
+            }
         }
     }
+}
+
+/// Tell a workspace that one of its runtimes went offline.
+///
+/// The event carries no actor: the sweeper is the server itself, not a
+/// member of the workspace.
+fn publishRuntimeStatusChanged(allocator: std.mem.Allocator, workspace_id: []const u8) void {
+    const text = std.fmt.allocPrint(
+        allocator,
+        "{{\"type\":\"daemon:status_changed\",\"payload\":{{\"workspace_id\":\"{s}\"}}," ++
+            "\"actor_type\":\"system\",\"actor_id\":\"\"}}",
+        .{workspace_id},
+    ) catch return;
+    defer allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
 }
 
 /// Leave the process on our own if the graceful path has not finished.

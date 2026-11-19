@@ -109,11 +109,22 @@ test "the sweeper marks a runtime whose heartbeat went stale as offline" {
     const runtime_id = try insertRuntime(db, allocator, workspace_id, "stale", .old);
     defer allocator.free(runtime_id);
 
-    _ = model.sweepStaleRuntimes();
+    const swept = model.sweepStaleRuntimes(allocator);
+    defer swept.deinit(allocator);
 
     const status = try runtimeStatus(db, allocator, runtime_id);
     defer allocator.free(status);
     try std.testing.expectEqualStrings("offline", status);
+
+    // The workspace has to hear about it: a status that changed in the
+    // database but never reaches the clients leaves the workspace
+    // showing a machine that is gone.
+    try std.testing.expect(swept.count >= 1);
+    var announced = false;
+    for (swept.workspace_ids) |ws| {
+        if (std.mem.eql(u8, ws, workspace_id)) announced = true;
+    }
+    try std.testing.expect(announced);
 }
 
 test "the sweeper leaves a runtime with a fresh heartbeat alone" {
@@ -127,7 +138,8 @@ test "the sweeper leaves a runtime with a fresh heartbeat alone" {
     const runtime_id = try insertRuntime(db, allocator, workspace_id, "fresh", .fresh);
     defer allocator.free(runtime_id);
 
-    _ = model.sweepStaleRuntimes();
+    const swept = model.sweepStaleRuntimes(allocator);
+    defer swept.deinit(allocator);
 
     const status = try runtimeStatus(db, allocator, runtime_id);
     defer allocator.free(status);
@@ -149,7 +161,8 @@ test "the sweeper leaves a runtime that never reported a heartbeat alone" {
     const runtime_id = try insertRuntime(db, allocator, workspace_id, "legacy", .never);
     defer allocator.free(runtime_id);
 
-    _ = model.sweepStaleRuntimes();
+    const swept = model.sweepStaleRuntimes(allocator);
+    defer swept.deinit(allocator);
 
     const status = try runtimeStatus(db, allocator, runtime_id);
     defer allocator.free(status);
@@ -173,10 +186,11 @@ test "a heartbeat brings a runtime the sweeper marked offline back online" {
     const runtime_id = try insertRuntime(db, allocator, workspace_id, "slept", .old);
     defer allocator.free(runtime_id);
 
-    _ = model.sweepStaleRuntimes();
-    const swept = try runtimeStatus(db, allocator, runtime_id);
-    defer allocator.free(swept);
-    try std.testing.expectEqualStrings("offline", swept);
+    const swept = model.sweepStaleRuntimes(allocator);
+    defer swept.deinit(allocator);
+    const status_after_sweep = try runtimeStatus(db, allocator, runtime_id);
+    defer allocator.free(status_after_sweep);
+    try std.testing.expectEqualStrings("offline", status_after_sweep);
 
     _ = model.heartbeatRuntime(runtime_id);
 
