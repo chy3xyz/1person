@@ -19,14 +19,19 @@
         // The server now interrupts the connections it serves and lets the
         // handlers unwind.
         //
+        // v0.28.5 is the same library plus the upstream test fix that had
+        // been blocking the release pipeline (a half-initialised Context in
+        // zfinal's own tests crashed the Linux quality gate); it is the
+        // first zfinal tag that goes through the release gate.
+        //
         // v0.28.3 carried the response-compression fix: v0.28.2
         // compressed into a fixed 16 KB buffer with `Compress.Raw` (which
         // does not compress at all) and served the truncated stream when a
         // body did not fit, so every response over roughly 16 KB reached
         // the client undecodable.
         .zfinal = .{
-            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.4#ecbe1838a3e9a758bfcecd156085b98e20478c25",
-            .hash = "zfinal-0.28.4-6AOMdUffcAAB0iH-vzLI8rHqshDfYoqKfhw591dUk11m",
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.5#55a93a46361f17c2f7fac571ae49dec2c088d6f9",
+            .hash = "zfinal-0.28.5-6AOMdSPpcABh3EbtcHFKIbG67QhG87gemMSq0s6K7o62",
         },
         // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
         .zcli = .{
