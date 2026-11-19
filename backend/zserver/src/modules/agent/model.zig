@@ -52,6 +52,35 @@ pub const AgentEntry = struct {
     archived_by: []const u8,
     created_at: []const u8,
     updated_at: []const u8,
+
+    /// Release the text this entry owns.
+    ///
+    /// Only entries built by `agentEntryDuped` own their text; an entry
+    /// that still points into a result set or into the in-memory table
+    /// must not be released.
+    pub fn deinit(self: AgentEntry, allocator: std.mem.Allocator) void {
+        allocator.free(self.id);
+        allocator.free(self.workspace_id);
+        allocator.free(self.runtime_id);
+        allocator.free(self.name);
+        allocator.free(self.description);
+        allocator.free(self.instructions);
+        allocator.free(self.avatar_url);
+        allocator.free(self.runtime_mode);
+        allocator.free(self.runtime_config);
+        allocator.free(self.custom_args);
+        allocator.free(self.custom_env);
+        allocator.free(self.mcp_config);
+        allocator.free(self.visibility);
+        allocator.free(self.status);
+        allocator.free(self.model);
+        allocator.free(self.thinking_level);
+        allocator.free(self.owner_id);
+        allocator.free(self.archived_at);
+        allocator.free(self.archived_by);
+        allocator.free(self.created_at);
+        allocator.free(self.updated_at);
+    }
 };
 
 /// Agent response — wraps a single agent with the embedded skill
@@ -567,32 +596,45 @@ pub fn agentEntryFromRow(rs: *zfinal.ResultSet, row: usize) AgentEntry {
 
 /// Same as agentEntryFromRow but duplicates all string fields with the
 /// supplied allocator so the entry outlives the ResultSet.
+///
+/// The copy belongs to the caller: release it with `deinit`. A row
+/// copy that nobody can release is a leak — the request allocator is
+/// the process allocator here, so it is not swept up with the request.
 pub fn agentEntryFromRowDuped(allocator: std.mem.Allocator, rs: *zfinal.ResultSet, row: usize) !AgentEntry {
-    const max_tasks_text = rs.rows.items[row].getText(14) orelse "6";
-    const max_tasks: i32 = @intCast(std.fmt.parseInt(i64, max_tasks_text, 10) catch 6);
+    return agentEntryDuped(allocator, agentEntryFromRow(rs, row));
+}
+
+/// Copy an agent row into the caller's allocator.
+///
+/// Both sources of an `AgentEntry` — a database row and the in-memory
+/// table — hand out text that belongs to somebody else: the row's text
+/// dies with its result set, the table's text belongs to the process.
+/// Copying is what makes the entry safe to hold for the request; the
+/// copy has to be given back with `deinit`.
+pub fn agentEntryDuped(allocator: std.mem.Allocator, entry: AgentEntry) !AgentEntry {
     return AgentEntry{
-        .id = try allocator.dupe(u8, rs.rows.items[row].getText(0) orelse ""),
-        .workspace_id = try allocator.dupe(u8, rs.rows.items[row].getText(1) orelse ""),
-        .runtime_id = try allocator.dupe(u8, rs.rows.items[row].getText(2) orelse ""),
-        .name = try allocator.dupe(u8, rs.rows.items[row].getText(3) orelse ""),
-        .description = try allocator.dupe(u8, rs.rows.items[row].getText(4) orelse ""),
-        .instructions = try allocator.dupe(u8, rs.rows.items[row].getText(5) orelse ""),
-        .avatar_url = try allocator.dupe(u8, rs.rows.items[row].getText(6) orelse ""),
-        .runtime_mode = try allocator.dupe(u8, rs.rows.items[row].getText(7) orelse ""),
-        .runtime_config = try allocator.dupe(u8, rs.rows.items[row].getText(8) orelse "{}"),
-        .custom_args = try allocator.dupe(u8, rs.rows.items[row].getText(9) orelse "[]"),
-        .custom_env = try allocator.dupe(u8, rs.rows.items[row].getText(10) orelse "{}"),
-        .mcp_config = try allocator.dupe(u8, rs.rows.items[row].getText(11) orelse ""),
-        .visibility = try allocator.dupe(u8, rs.rows.items[row].getText(col_visibility) orelse "private"),
-        .status = try allocator.dupe(u8, rs.rows.items[row].getText(13) orelse "offline"),
-        .max_concurrent_tasks = max_tasks,
-        .model = try allocator.dupe(u8, rs.rows.items[row].getText(15) orelse ""),
-        .thinking_level = try allocator.dupe(u8, rs.rows.items[row].getText(16) orelse ""),
-        .owner_id = try allocator.dupe(u8, rs.rows.items[row].getText(col_owner_id) orelse ""),
-        .archived_at = try allocator.dupe(u8, rs.rows.items[row].getText(18) orelse ""),
-        .archived_by = try allocator.dupe(u8, rs.rows.items[row].getText(21) orelse ""),
-        .created_at = try allocator.dupe(u8, rs.rows.items[row].getText(19) orelse ""),
-        .updated_at = try allocator.dupe(u8, rs.rows.items[row].getText(20) orelse ""),
+        .id = try allocator.dupe(u8, entry.id),
+        .workspace_id = try allocator.dupe(u8, entry.workspace_id),
+        .runtime_id = try allocator.dupe(u8, entry.runtime_id),
+        .name = try allocator.dupe(u8, entry.name),
+        .description = try allocator.dupe(u8, entry.description),
+        .instructions = try allocator.dupe(u8, entry.instructions),
+        .avatar_url = try allocator.dupe(u8, entry.avatar_url),
+        .runtime_mode = try allocator.dupe(u8, entry.runtime_mode),
+        .runtime_config = try allocator.dupe(u8, entry.runtime_config),
+        .custom_args = try allocator.dupe(u8, entry.custom_args),
+        .custom_env = try allocator.dupe(u8, entry.custom_env),
+        .mcp_config = try allocator.dupe(u8, entry.mcp_config),
+        .visibility = try allocator.dupe(u8, entry.visibility),
+        .status = try allocator.dupe(u8, entry.status),
+        .max_concurrent_tasks = entry.max_concurrent_tasks,
+        .model = try allocator.dupe(u8, entry.model),
+        .thinking_level = try allocator.dupe(u8, entry.thinking_level),
+        .owner_id = try allocator.dupe(u8, entry.owner_id),
+        .archived_at = try allocator.dupe(u8, entry.archived_at),
+        .archived_by = try allocator.dupe(u8, entry.archived_by),
+        .created_at = try allocator.dupe(u8, entry.created_at),
+        .updated_at = try allocator.dupe(u8, entry.updated_at),
     };
 }
 

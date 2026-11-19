@@ -141,6 +141,30 @@ test "agent response: the custom env key count survives the render" {
     try testing.expect(std.mem.indexOf(u8, json, "\"custom_env_key_count\":2") != null);
 }
 
+test "the agent entry copy owns every string it hands out" {
+    // Regression: `loadAgent` copied the whole agent row — 22 columns —
+    // into the request allocator, which is the process allocator here,
+    // not a per-request arena. Nothing could release that copy, so
+    // every load leaked the row. The copy now has a `deinit`; this test
+    // fails if a single field is left behind, because
+    // `std.testing.allocator` reports the leak when the test ends.
+    //
+    // Every field carries text: duplicating an empty string allocates
+    // nothing, so a missing free on an empty field would go unnoticed.
+    const allocator = std.testing.allocator;
+    var e = entry();
+    e.description = "a description";
+    e.instructions = "some instructions";
+    e.avatar_url = "https://example.com/avatar.png";
+    e.mcp_config = "{\"servers\":{}}";
+    e.thinking_level = "high";
+    e.archived_at = "2026-01-01T00:00:00Z";
+    e.archived_by = OTHER;
+
+    const owned = try model.agentEntryDuped(allocator, e);
+    owned.deinit(allocator);
+}
+
 test "agent response: a redacted agent keeps its identity but loses its private material" {
     // The agent list has to carry the agent's name — the workspace
     // renders issue assignees from it, and an issue assigned to

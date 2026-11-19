@@ -126,6 +126,12 @@ fn loadAgentAccess(allocator: std.mem.Allocator, workspace_id: []const u8, agent
     };
 }
 
+/// Load one agent of a workspace.
+///
+/// The returned entry is owned by the caller — release it with
+/// `deinit`. Both sources hand out text that belongs to somebody else
+/// (the result set frees its cell text, the in-memory table keeps its
+/// own for the life of the process), so the entry is copied either way.
 fn loadAgent(allocator: std.mem.Allocator, workspace_id: []const u8, agent_id: []const u8) !?model.AgentEntry {
     if (!model.looksLikeUuid(agent_id)) return null;
     if (model.borrowDb()) |db| {
@@ -143,7 +149,7 @@ fn loadAgent(allocator: std.mem.Allocator, workspace_id: []const u8, agent_id: [
         try model.memInit();
         const entry = model.mem_agents.?.get(agent_id) orelse return null;
         if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) return null;
-        return entry;
+        return try model.agentEntryDuped(allocator, entry);
     }
 }
 
@@ -632,6 +638,7 @@ pub fn updateAgent(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     const caller_id = getUserId(ctx) orelse {
@@ -818,6 +825,7 @@ pub fn archiveAgent(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     if (model.borrowDb()) |db| {
@@ -883,6 +891,7 @@ pub fn restoreAgent(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     if (model.borrowDb()) |db| {
@@ -942,6 +951,7 @@ pub fn cancelTasks(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     if (model.borrowDb()) |db| {
@@ -1196,6 +1206,7 @@ pub fn getEnv(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     if (model.borrowDb()) |db| {
@@ -1244,6 +1255,7 @@ pub fn setEnv(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     const parsed = try ctx.parseJsonBody(model.UpdateAgentEnvRequest);
@@ -1347,6 +1359,7 @@ pub fn setAgentSkills(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     const parsed = try ctx.parseJsonBody(model.SetAgentSkillsRequest);
@@ -1423,6 +1436,7 @@ pub fn addAgentSkills(ctx: *zfinal.Context) !void {
         try ctx.renderJson(.{ .@"error" = "agent not found" });
         return;
     };
+    defer existing.deinit(allocator);
     if (!(try requireManager(ctx, existing.owner_id))) return;
 
     const parsed = try ctx.parseJsonBody(model.SetAgentSkillsRequest);
