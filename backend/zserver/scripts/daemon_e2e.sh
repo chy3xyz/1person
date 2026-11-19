@@ -20,7 +20,13 @@ PORT="${PORT:-18094}"
 BASE="http://127.0.0.1:${PORT}"
 JWT_SECRET="${JWT_SECRET:-test-secret}"
 export JWT_SECRET
-export DATABASE_URL="${DATABASE_URL:-}"
+# Forced no-DB mode. This suite registers a daemon with a synthetic
+# `1d_<id>` token that only the in-memory registry accepts; with a
+# database attached, the middleware hashes the token and looks it up in
+# `daemon_token`, finds nothing, and answers every daemon call with
+# `invalid_token`. An ambient DATABASE_URL used to flip the mode silently
+# and turn all five checks red with an error that points at the server.
+export DATABASE_URL=""
 
 RED="\033[0;31m"
 GREEN="\033[0;32m"
