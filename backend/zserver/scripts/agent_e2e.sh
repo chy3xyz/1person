@@ -319,9 +319,43 @@ if [[ -n "${DATABASE_URL:-}" ]]; then
             fail "22 a private agent's skills are closed to other members (${member_skills})"
         fi
 
+        member_list=$(http_body -H "${AUTH2}" -H "${HWS}" "${BASE}/api/agents")
+        member_instructions=$(echo "${member_list}" | python3 -c "
+import sys, json
+try:
+    agents = json.load(sys.stdin)
+except Exception:
+    print('__BROKEN__'); sys.exit(0)
+for a in agents:
+    if a.get('id') == '${AGENT_ID}':
+        print(a.get('instructions', '')); sys.exit(0)
+print('__MISSING__')
+" 2>/dev/null || echo "__BROKEN__")
+        if [[ "${member_instructions}" == "" ]]; then
+            pass "23 the list keeps the agent but not its instructions"
+        else
+            fail "23 the list keeps the agent but not its instructions: ${member_instructions}"
+        fi
+
+        owner_instructions=$(echo "$(http_body -H "${AUTH}" -H "${HWS}" "${BASE}/api/agents")" | python3 -c "
+import sys, json
+try:
+    agents = json.load(sys.stdin)
+except Exception:
+    print('__BROKEN__'); sys.exit(0)
+for a in agents:
+    if a.get('id') == '${AGENT_ID}':
+        print(a.get('instructions', '')); sys.exit(0)
+print('__MISSING__')
+" 2>/dev/null || echo "__BROKEN__")
+        if [[ "${owner_instructions}" == "be helpful" ]]; then
+            pass "24 the owner still reads its own instructions"
+        else
+            fail "24 the owner still reads its own instructions: ${owner_instructions}"
+        fi
     fi
 else
-    warn "20-22 skipped: the private-agent gate needs a second member, which the no-DB mode cannot hold"
+    warn "20-24 skipped: the private-agent gate needs a second member, which the no-DB mode cannot hold"
 fi
 
 echo

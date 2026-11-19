@@ -410,6 +410,23 @@ fn jsonKeyCount(allocator: std.mem.Allocator, text: []const u8) i32 {
 // row / entry → response shape
 // ──────────────────────────────────────────────────────────────────────
 
+/// Blank the private material of an agent the caller may not read.
+///
+/// The agent list has to keep the agent's identity: the workspace
+/// renders issue assignees from it, and an issue assigned to somebody
+/// else's private agent must still show a name. What stays behind is
+/// the owner's own material — the instructions (the agent's system
+/// prompt), the runtime configuration and the MCP server setup, which
+/// can carry credentials — so those do not travel to a member who may
+/// not open the agent.
+pub fn redactAgentPayload(resp: *AgentResponse) void {
+    resp.instructions = "";
+    resp.runtime_config = rawJsonValue("{}");
+    resp.custom_args = rawJsonValue("[]");
+    resp.mcp_config = null;
+    resp.mcp_config_redacted = true;
+}
+
 /// Project an in-memory `AgentEntry` to the API response shape.
 ///
 /// The `jsonb` columns are spliced in as raw text: the entry owns its

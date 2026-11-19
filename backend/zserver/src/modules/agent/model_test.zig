@@ -140,3 +140,37 @@ test "agent response: the custom env key count survives the render" {
     try testing.expect(std.mem.indexOf(u8, json, "\"has_custom_env\":true") != null);
     try testing.expect(std.mem.indexOf(u8, json, "\"custom_env_key_count\":2") != null);
 }
+
+test "agent response: a redacted agent keeps its identity but loses its private material" {
+    // The agent list has to carry the agent's name — the workspace
+    // renders issue assignees from it, and an issue assigned to
+    // somebody else's private agent must still show a name. What must
+    // not travel to a member who may not open the agent is the owner's
+    // own material: the instructions (the agent's system prompt), the
+    // runtime configuration and the MCP setup, which can carry
+    // credentials.
+    const allocator = std.testing.allocator;
+    var e = entry();
+    e.instructions = "you are a private assistant";
+    e.runtime_config = "{\"api_key\":\"sk-secret\"}";
+    e.custom_args = "[\"--token\",\"secret\"]";
+    e.mcp_config = "{\"servers\":{\"a\":{\"url\":\"https://mcp.example\"}}}";
+
+    var resp = try model.agentResponseFromEntry(allocator, e, &[_]@import("../skill/model.zig").SkillSummaryResponse{});
+    model.redactAgentPayload(&resp);
+
+    const json = try zfinal.JsonKit.stringify(allocator, resp);
+    defer allocator.free(json);
+
+    // Identity survives.
+    try testing.expect(std.mem.indexOf(u8, json, "\"name\":\"三源智能体\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"visibility\":\"private\"") != null);
+    // Private material does not.
+    try testing.expect(std.mem.indexOf(u8, json, "you are a private assistant") == null);
+    try testing.expect(std.mem.indexOf(u8, json, "sk-secret") == null);
+    try testing.expect(std.mem.indexOf(u8, json, "mcp.example") == null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"instructions\":\"\"") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"runtime_config\":{}") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"custom_args\":[]") != null);
+    try testing.expect(std.mem.indexOf(u8, json, "\"mcp_config\":null") != null);
+}

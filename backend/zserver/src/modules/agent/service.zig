@@ -191,6 +191,13 @@ pub fn listAgents(ctx: *zfinal.Context) !void {
     const include_archived = ctx.getPara("include_archived") catch null;
     const archived_clause = if (include_archived != null and std.mem.eql(u8, include_archived.?, "true")) "" else " AND archived_at IS NULL";
 
+    // A private agent's payload is the owner's own material. The list
+    // still carries the agent's identity — the workspace renders issue
+    // assignees from it — but a member who may not open the agent does
+    // not get its instructions or its runtime configuration.
+    const role = getWorkspaceRole(ctx) orelse "";
+    const user_id = getUserId(ctx) orelse "";
+
     if (model.borrowDb()) |db| {
         defer deps.releaseBack(db);
 
@@ -208,7 +215,14 @@ pub fn listAgents(ctx: *zfinal.Context) !void {
         for (0..rs.rows.items.len) |i| {
             const id = rs.rows.items[i].getText(0) orelse "";
             const skills_list = try model.dbSkillsForAgent(allocator, db, id);
-            try list.append(allocator, try model.agentResponseFromRow(allocator, &rs, i, skills_list));
+            var resp = try model.agentResponseFromRow(allocator, &rs, i, skills_list);
+            if (!privateAgentReadable(
+                rs.rows.items[i].getText(model.col_visibility) orelse "private",
+                rs.rows.items[i].getText(model.col_owner_id) orelse "",
+                role,
+                user_id,
+            )) model.redactAgentPayload(&resp);
+            try list.append(allocator, resp);
         }
         try ctx.renderJson(list.items);
     } else {
@@ -227,7 +241,9 @@ pub fn listAgents(ctx: *zfinal.Context) !void {
             if (!std.mem.eql(u8, entry.workspace_id, workspace_id)) continue;
             if (entry.archived_at.len > 0 and !(include_archived != null and std.mem.eql(u8, include_archived.?, "true"))) continue;
             const skills_list = try model.memSkillsForAgent(allocator, entry.id);
-            try list.append(allocator, try model.agentResponseFromEntry(allocator, entry, skills_list));
+            var resp = try model.agentResponseFromEntry(allocator, entry, skills_list);
+            if (!privateAgentReadable(entry.visibility, entry.owner_id, role, user_id)) model.redactAgentPayload(&resp);
+            try list.append(allocator, resp);
         }
         try ctx.renderJson(list.items);
     }
