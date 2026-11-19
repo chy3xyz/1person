@@ -15,14 +15,8 @@
         // does not compress at all) and served the truncated stream when a
         // body did not fit, so every response over roughly 16 KB reached
         // the client undecodable.
-        //
-        // It is fetched from a fork of chy3xyz/zfinal because the account
-        // on the machine that cut this release cannot push to
-        // chy3xyz/zfinal. Once the v0.28.3 tag is pushed upstream, change
-        // the URL back to chy3xyz/zfinal — the commit and the hash stay
-        // the same.
         .zfinal = .{
-            .url = "git+https://github.com/knot3bot/zfinal?ref=v0.28.3#bcd040251566093a0782a26a79e5799a41b10a38",
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.3#bcd040251566093a0782a26a79e5799a41b10a38",
             .hash = "zfinal-0.28.3-6AOMdVercAA4YtdNGFj418ShPD8DhTPvyrRitGXjDh9F",
         },
         // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
