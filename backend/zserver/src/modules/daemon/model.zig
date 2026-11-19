@@ -81,6 +81,20 @@ pub const MintDaemonTokenRequest = struct {
     ttl_days: ?i64 = null,
 };
 
+/// The body of a daemon heartbeat.
+///
+/// The daemon names the runtime it is heartbeating for, the way upstream's
+/// `DaemonHeartbeatRequest` does. The server then does not have to guess
+/// which row the beat belongs to from its own memory: a daemon that
+/// outlived a server restart still finds its runtime, and the row keeps
+/// its liveness instead of looking dead to the sweeper.
+///
+/// A daemon that sends no body at all (an older CLI) falls back to the
+/// registry entry, so the field stays optional.
+pub const DaemonHeartbeatRequest = struct {
+    runtime_id: ?[]const u8 = null,
+};
+
 /// True when user_id is a member of workspace_id (any role). Used by
 /// the daemon-token minting endpoint so only workspace members can mint
 /// daemon credentials bound to that workspace.

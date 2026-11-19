@@ -333,23 +333,91 @@ pub fn daemonDeregister(ctx: *zfinal.Context) !void {
 }
 
 pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
+    const allocator = ctx.allocator;
     const daemon_id = ctx.attributes.get("daemon_id") orelse {
         ctx.res_status = .unauthorized;
         try ctx.renderJson(.{ .@"error" = "daemon_token_required" });
         return;
     };
-    // The registry is created under the lock: the WebSocket frame loop
-    // reads it, and a reader that sees a half-created map crashes.
-    try mem_mutex.lock(zfinal.io_instance.io);
-    defer mem_mutex.unlock(zfinal.io_instance.io);
-    memInitLocked();
-    if (mem_daemons.?.getPtr(daemon_id)) |entry| {
-        entry.last_seen_at = nowMillis();
+
+    // Which runtime the beat is about. The daemon names it in the body
+    // (upstream's `DaemonHeartbeatRequest.RuntimeID`), so the stamp does
+    // not depend on this process's memory: a daemon that outlived a
+    // server restart has no registry entry to fall back on, and its
+    // runtime would look dead to the sweeper while the daemon is right
+    // there working.
+    //
+    // A daemon that sends no body (an older CLI) falls back to the
+    // registry entry. A body that does not parse must not cost the
+    // daemon its liveness stamp either — the fallback covers it.
+    //
+    // The body is only read when the request actually carries one: the
+    // reader waits for a body that never comes, and a client that sends
+    // neither Content-Length nor a body (a bare `curl -X POST`) would
+    // hit the read timeout instead of getting its heartbeat answered.
+    const head = &ctx.req.head;
+    const has_body = (head.content_length orelse 0) > 0 or head.transfer_encoding == .chunked;
+    var body_runtime_id: ?[]const u8 = null;
+    if (has_body) {
+        const body = try ctx.getBodyText();
+        defer allocator.free(body);
+        if (std.json.parseFromSlice(model.DaemonHeartbeatRequest, allocator, body, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        })) |parsed| {
+            defer parsed.deinit();
+            if (parsed.value.runtime_id) |rid| {
+                if (rid.len > 0) body_runtime_id = try allocator.dupe(u8, rid);
+            }
+        } else |_| {
+            log.warn("daemon heartbeat: unreadable body, falling back to the registry entry", .{});
+        }
+    }
+    defer if (body_runtime_id) |rid| allocator.free(rid);
+
+    // The registry is only a fallback now. Its entry is copied out under
+    // the lock: the map may rehash under a concurrent registration, and a
+    // pointer into it would dangle the moment the lock is released.
+    var registry_runtime_id: ?[]const u8 = null;
+    {
+        // The registry is created under the lock: the WebSocket frame loop
+        // reads it, and a reader that sees a half-created map crashes.
+        try mem_mutex.lock(zfinal.io_instance.io);
+        defer mem_mutex.unlock(zfinal.io_instance.io);
+        memInitLocked();
+        if (mem_daemons.?.getPtr(daemon_id)) |entry| {
+            entry.last_seen_at = nowMillis();
+            registry_runtime_id = try allocator.dupe(u8, entry.runtime_id);
+        }
+    }
+    defer if (registry_runtime_id) |rid| allocator.free(rid);
+
+    const runtime_id = body_runtime_id orelse registry_runtime_id;
+    if (runtime_id) |rid| {
+        // A daemon token is bound to one workspace, and it must not be
+        // able to keep another workspace's runtime alive.
+        const token_workspace_id = ctx.attributes.get("daemon_workspace_id") orelse "";
+        if (token_workspace_id.len > 0) {
+            const row_workspace_id = try model.runtimeWorkspaceId(allocator, rid);
+            if (row_workspace_id) |row_ws| {
+                defer allocator.free(row_ws);
+                if (!std.mem.eql(u8, row_ws, token_workspace_id)) {
+                    ctx.res_status = .bad_request;
+                    try ctx.renderJson(.{ .@"error" = "runtime_id belongs to another workspace" });
+                    return;
+                }
+            }
+        }
         // The in-memory timestamp dies with the process, so the row the
         // workspace reads has to be stamped too: liveness is decided by
         // the age of `agent_runtime.last_seen_at`, not by the status
         // column (a daemon that dies never flips that column).
-        _ = model.heartbeatRuntime(entry.runtime_id);
+        _ = model.heartbeatRuntime(rid);
+    } else {
+        // Nothing to stamp: the daemon sent no runtime id and this
+        // process never saw it register. Answering with an error would
+        // only make an old daemon print a failure every round.
+        log.warn("daemon heartbeat: no runtime to stamp (no runtime id in the body, no registry entry)", .{});
     }
     try ctx.renderJson(.{ .ok = true });
 }

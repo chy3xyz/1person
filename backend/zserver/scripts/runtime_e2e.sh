@@ -183,6 +183,49 @@ if [[ -n "${DATABASE_URL}" ]]; then
             else
                 fail "11 a deregistered daemon leaves its runtime offline (status=${RST:-unknown})"
             fi
+
+            # 12. The heartbeat has to bring a dead-looking runtime back.
+            # The sweeper marks a runtime whose heartbeat went stale as
+            # offline, and the daemon that outlives that window — a
+            # laptop that was asleep, a network that was partitioned — has
+            # to be able to report in again. The body names the runtime
+            # (upstream's `DaemonHeartbeatRequest.RuntimeID`), so the beat
+            # still lands after the deregister dropped the registry
+            # entry: the server must not depend on its own memory to find
+            # the row.
+            psql "${DATABASE_URL}" -tAc "UPDATE agent_runtime SET status = 'offline', last_seen_at = now() - interval '1 hour' WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
+            HB2=$(http_status -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${DTOKEN}" \
+                -d "{\"runtime_id\":\"${DRT_ID}\"}" "${BASE}/api/daemon/heartbeat")
+            RST2=$(psql "${DATABASE_URL}" -tAc "SELECT status FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" 2>/dev/null | head -1)
+            if [[ "${HB2}" == "200" && "${RST2}" == "online" ]]; then
+                pass "12 a heartbeat brings a stale runtime back online (${HB2})"
+            else
+                fail "12 a heartbeat brings a stale runtime back online (http=${HB2}, status=${RST2:-unknown})"
+            fi
+
+            # 13. A daemon token is bound to one workspace and must not be
+            # able to keep another workspace's runtime alive.
+            WS2_BODY=$(http_body -X POST -H "Content-Type: application/json" -H "${AUTH}" \
+                -d "{\"name\":\"E2E2\",\"slug\":\"rt2-$(date +%s)\"}" "${BASE}/api/workspaces")
+            WS2_ID=$(jget "${WS2_BODY}" id)
+            if [[ -z "${WS2_ID}" ]]; then
+                warn "could not create the second workspace; skipping the cross-workspace check"
+            else
+                RID2=$(psql "${DATABASE_URL}" -tAc "INSERT INTO agent_runtime (workspace_id, owner_id, name, runtime_mode, provider, status, last_seen_at) VALUES ('${WS2_ID}'::uuid, '${USER_ID}'::uuid, 'rt-e2e-other', 'local', 'local', 'online', now() - interval '1 hour') RETURNING id" 2>/dev/null | head -1 || echo "")
+                if [[ -z "${RID2}" ]]; then
+                    warn "could not insert the foreign runtime; skipping the cross-workspace check"
+                else
+                    HBX=$(http_status -X POST -H "Content-Type: application/json" -H "Authorization: Bearer ${DTOKEN}" \
+                        -d "{\"runtime_id\":\"${RID2}\"}" "${BASE}/api/daemon/heartbeat")
+                    if [[ "${HBX}" == "400" ]]; then
+                        pass "13 a heartbeat for another workspace's runtime is refused (${HBX})"
+                    else
+                        fail "13 a heartbeat for another workspace's runtime is refused (expected 400, got ${HBX})"
+                    fi
+                    psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${RID2}'::uuid" >/dev/null 2>&1 || true
+                fi
+                http_status -X DELETE -H "${AUTH}" "${BASE}/api/workspaces/${WS2_ID}" >/dev/null 2>&1 || true
+            fi
             psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
         fi
     else

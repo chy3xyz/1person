@@ -273,7 +273,16 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
         // Heartbeat (HTTP)
         if (now >= heartbeat_at) {
             heartbeat_at = nowMillis(io) + @as(i64, @intCast(opts.heartbeat_interval_ms));
-            var hb = client.postJson(allocator, "/api/daemon/heartbeat", "", token_buf) catch |err| {
+            // The body names the runtime this beat is about, the way
+            // upstream's heartbeat request does. The server then finds the
+            // row without relying on its own memory: a daemon that
+            // outlived a server restart still keeps its runtime alive,
+            // instead of looking dead to the liveness sweeper.
+            const hb_body = std.json.Stringify.valueAlloc(allocator, .{
+                .runtime_id = opts.runtime_id,
+            }, .{}) catch "";
+            defer if (hb_body.len > 0) allocator.free(hb_body);
+            var hb = client.postJson(allocator, "/api/daemon/heartbeat", hb_body, token_buf) catch |err| {
                 out.printErr("heartbeat failed: {s}\n", .{@errorName(err)});
                 continue;
             };
