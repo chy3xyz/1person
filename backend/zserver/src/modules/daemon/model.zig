@@ -26,6 +26,21 @@ pub fn borrowDb() ?*zfinal.DB {
         return common_mem.borrowDb();
     }
 
+/// How old a runtime's heartbeat may get before the runtime counts as dead.
+///
+/// Mirrors upstream `service.RuntimeClaimFreshnessSeconds` (150s). It has
+/// to outlast the daemon's heartbeat interval plus the sweep interval with
+/// room to spare, so a live daemon is never declared dead — and it is the
+/// same window every task-release path uses, so a runtime that is fresh
+/// enough to claim work is never the one the sweeper marked offline.
+pub const runtime_stale_seconds = 150;
+
+/// How often the sweeper looks for runtimes that stopped heartbeating.
+///
+/// Upstream sweeps every 30s; the same cadence here keeps the "runtime went
+/// away" signal within half a minute of the heartbeat window closing.
+pub const runtime_sweep_interval_seconds = 30;
+
 /// In-memory `daemon_registry` row.
 pub const DaemonEntry = struct {
     id: []const u8,
@@ -93,6 +108,49 @@ pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
     return true;
 }
 
+/// Record a daemon heartbeat on the runtime row.
+///
+/// Liveness is decided by the age of this timestamp, not by the status
+/// column: a daemon that dies without deregistering never flips the
+/// status, so the row would claim to be online forever. Returns false in
+/// no-DB mode.
+pub fn touchRuntime(runtime_id: []const u8) bool {
+    const db = borrowDb() orelse return false;
+    defer deps.releaseBack(db);
+    db.execParams(
+        "UPDATE agent_runtime SET last_seen_at = now() WHERE id = $1::uuid",
+        &[_]SqlParam{.{ .text = runtime_id }},
+    ) catch return false;
+    return true;
+}
+
+/// Flip runtimes that stopped heartbeating to offline.
+///
+/// A runtime that is still marked online but whose heartbeat is older than
+/// the freshness window belongs to a daemon that is gone — the machine was
+/// closed, the network dropped, the process was killed. Leaving the row
+/// online makes the workspace show a machine that nobody can reach, and it
+/// lets the UI queue work that no daemon will ever pick up.
+///
+/// A runtime that never reported a heartbeat is left alone: that is a
+/// daemon from before this column was written (an installed desktop app
+/// ships its own CLI, and the server is upgraded independently), and
+/// declaring it dead would strand a machine that is working fine.
+///
+/// Returns the number of runtimes flipped. Returns 0 in no-DB mode.
+pub fn sweepStaleRuntimes() i64 {
+    const db = borrowDb() orelse return 0;
+    defer deps.releaseBack(db);
+    db.execParams(
+        "UPDATE agent_runtime SET status = 'offline', updated_at = now() " ++
+            "WHERE status = 'online' " ++
+            "AND last_seen_at IS NOT NULL " ++
+            "AND last_seen_at < now() - make_interval(secs => $1::int)",
+        &[_]SqlParam{.{ .int = runtime_stale_seconds }},
+    ) catch return 0;
+    return db.affectedRows() catch 0;
+}
+
 /// Insert a minted daemon token (SHA-256 hash of the full 1d_ token)
 /// into the daemon_token table. `owner_id` records the member who paired
 /// the machine — it is what the runtime row inherits at registration.
@@ -142,10 +200,11 @@ pub fn upsertRuntimeForDaemon(
     const db = borrowDb() orelse return false;
     defer deps.releaseBack(db);
     const sql =
-        "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, status, owner_id, visibility) " ++
-        "VALUES ($1::uuid, $2::uuid, $3, 'local', $4, 'online', $5::uuid, 'private') " ++
+        "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, status, owner_id, visibility, last_seen_at) " ++
+        "VALUES ($1::uuid, $2::uuid, $3, 'local', $4, 'online', $5::uuid, 'private', now()) " ++
         "ON CONFLICT (id) DO UPDATE SET " ++
         "status = 'online', " ++
+        "last_seen_at = now(), " ++
         "name = COALESCE(NULLIF(EXCLUDED.name, ''), agent_runtime.name), " ++
         "provider = COALESCE(NULLIF(EXCLUDED.provider, ''), agent_runtime.provider), " ++
         "owner_id = COALESCE(agent_runtime.owner_id, EXCLUDED.owner_id), " ++

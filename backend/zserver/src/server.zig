@@ -24,6 +24,7 @@ const billing_handler = @import("modules/billing/handler.zig");
 const webhook_handler = @import("modules/webhook/handler.zig");
 const contact_handler = @import("modules/contact/handler.zig");
 const daemon_handler = @import("modules/daemon/handler.zig");
+const daemon_model = @import("modules/daemon/model.zig");
 const comment_handler = @import("modules/comment/handler.zig");
 
 
@@ -181,8 +182,38 @@ pub fn run(allocator: std.mem.Allocator, environ: *std.process.Environ.Map, opts
     // after the drain budget zfinal allows (plus a small margin).
     startShutdownWatchdog(cfg.shutdown_grace_ms);
 
+    // Mark runtimes whose daemon stopped heartbeating as offline.
+    startRuntimeSweeper();
+
     log.info("server starting on port {}", .{cfg.port});
     try app.start();
+}
+
+/// Sweep runtimes whose daemon stopped heartbeating.
+///
+/// A daemon that dies without deregistering leaves its runtime row marked
+/// online forever: the workspace then shows a machine nobody can reach, and
+/// the UI queues work that no daemon will ever pick up. The daemon writes a
+/// heartbeat on every heartbeat round, so the age of that heartbeat is what
+/// decides liveness — the sweeper closes the gap the status column leaves
+/// open.
+fn startRuntimeSweeper() void {
+    const thread = std.Thread.spawn(.{}, runtimeSweeperThread, .{}) catch |err| {
+        log.warn("could not start the runtime sweeper: {}", .{err});
+        return;
+    };
+    thread.detach();
+}
+
+fn runtimeSweeperThread() void {
+    while (!zfinal.shutdown.isShuttingDown()) {
+        sleepMs(daemon_model.runtime_sweep_interval_seconds * 1000);
+        if (zfinal.shutdown.isShuttingDown()) break;
+        const flipped = daemon_model.sweepStaleRuntimes();
+        if (flipped > 0) {
+            log.info("runtime sweeper: {} stale runtime(s) marked offline", .{flipped});
+        }
+    }
 }
 
 /// Leave the process on our own if the graceful path has not finished.

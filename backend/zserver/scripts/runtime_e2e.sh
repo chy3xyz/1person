@@ -104,6 +104,30 @@ if [[ -n "${DATABASE_URL}" ]]; then
             st=$(http_status -H "${AUTH}" -H "${HWS}" "${BASE}/api/runtimes/${RID}/${ep}")
             [[ "${st}" == "200" ]] && pass "05 GET /${ep} (200)" || fail "05 GET /${ep} (${st})"
         done
+
+        # 3d. a runtime whose daemon died is marked offline by the sweeper.
+        # The daemon writes a heartbeat on every round; a runtime whose
+        # heartbeat went stale belongs to a daemon that is gone. Without
+        # the sweeper the row would claim to be online forever, and the UI
+        # would queue work that no daemon ever picks up.
+        STALE_ID=$(psql "${DATABASE_URL}" -tAc "INSERT INTO agent_runtime (workspace_id, owner_id, name, runtime_mode, provider, status, last_seen_at) VALUES ('${WS_ID}'::uuid, '${USER_ID}'::uuid, 'rt-e2e-stale', 'local', 'local', 'online', now() - interval '1 hour') RETURNING id" 2>/dev/null | head -1 || echo "")
+        if [[ -z "${STALE_ID}" ]]; then
+            warn "could not insert the stale runtime; skipping the sweeper check"
+        else
+            # The sweeper runs every 30s; give it two rounds to be sure.
+            SWEPT=""
+            for _ in $(seq 1 30); do
+                sleep 2
+                ST=$(psql "${DATABASE_URL}" -tAc "SELECT status FROM agent_runtime WHERE id = '${STALE_ID}'::uuid" 2>/dev/null | head -1)
+                if [[ "${ST}" == "offline" ]]; then SWEPT="yes"; break; fi
+            done
+            if [[ "${SWEPT}" == "yes" ]]; then
+                pass "06 a stale runtime is marked offline by the sweeper"
+            else
+                fail "06 a stale runtime is marked offline by the sweeper (status=${ST:-unknown})"
+            fi
+            psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${STALE_ID}'::uuid" >/dev/null 2>&1 || true
+        fi
     else
         warn "psql insert failed; skipping DB-mode checks"
     fi

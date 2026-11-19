@@ -313,6 +313,11 @@ pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
     defer mem_mutex.unlock(zfinal.io_instance.io);
     if (mem_daemons.?.getPtr(daemon_id)) |entry| {
         entry.last_seen_at = nowMillis();
+        // The in-memory timestamp dies with the process, so the row the
+        // workspace reads has to be stamped too: liveness is decided by
+        // the age of `agent_runtime.last_seen_at`, not by the status
+        // column (a daemon that dies never flips that column).
+        _ = model.touchRuntime(entry.runtime_id);
     }
     try ctx.renderJson(.{ .ok = true });
 }

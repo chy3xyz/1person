@@ -92,6 +92,7 @@ test {
     _ = @import("modules/daemon/handler.zig");
     _ = @import("modules/daemon/service.zig");
     _ = @import("modules/daemon/model.zig");
+    _ = @import("modules/daemon/model_test.zig");
     _ = @import("modules/daemon/routes.zig");
     _ = @import("modules/daemon/agent_task.zig");
     _ = @import("modules/dashboard/handler.zig");
