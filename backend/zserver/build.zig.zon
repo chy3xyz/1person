@@ -10,14 +10,23 @@
         //   zig fetch 'git+https://github.com/chy3xyz/<repo>?ref=<tag>#<commit>'
         // then paste .url / .hash below (avoid --save: it may write .path by mistake).
         //
-        // zfinal v0.28.3 carries the response-compression fix: v0.28.2
+        // zfinal v0.28.4 carries the shutdown fix: v0.28.3 called
+        // `Group.cancel` on the task group that `Server.start` was already
+        // awaiting, which trips `assert(!pre_cancel_status.have_awaiter)`
+        // and killed the process with "panic: reached unreachable code"
+        // whenever SIGTERM arrived while a connection was still open — a
+        // WebSocket never ends on its own, so that was the normal case.
+        // The server now interrupts the connections it serves and lets the
+        // handlers unwind.
+        //
+        // v0.28.3 carried the response-compression fix: v0.28.2
         // compressed into a fixed 16 KB buffer with `Compress.Raw` (which
         // does not compress at all) and served the truncated stream when a
         // body did not fit, so every response over roughly 16 KB reached
         // the client undecodable.
         .zfinal = .{
-            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.3#bcd040251566093a0782a26a79e5799a41b10a38",
-            .hash = "zfinal-0.28.3-6AOMdVercAA4YtdNGFj418ShPD8DhTPvyrRitGXjDh9F",
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.4#ecbe1838a3e9a758bfcecd156085b98e20478c25",
+            .hash = "zfinal-0.28.4-6AOMdUffcAAB0iH-vzLI8rHqshDfYoqKfhw591dUk11m",
         },
         // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
         .zcli = .{
