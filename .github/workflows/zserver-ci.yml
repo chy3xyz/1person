@@ -116,6 +116,14 @@ jobs:
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
             bash scripts/agent_e2e.sh
 
+      - name: E2E — runtime suite (DB mode)
+        # The liveness sweeper check needs a database (it seeds a runtime
+        # row with a stale heartbeat) and waits for a sweep tick, so this
+        # suite only runs in DB mode.
+        run: |
+          JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
+            bash scripts/runtime_e2e.sh
+
       - name: E2E — smoke (DB mode)
         run: |
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
