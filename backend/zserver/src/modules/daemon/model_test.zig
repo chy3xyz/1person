@@ -192,9 +192,18 @@ test "a heartbeat brings a runtime the sweeper marked offline back online" {
     defer allocator.free(status_after_sweep);
     try std.testing.expectEqualStrings("offline", status_after_sweep);
 
-    _ = model.heartbeatRuntime(runtime_id);
+    const outcome = model.heartbeatRuntime(allocator, runtime_id);
+    defer outcome.deinit(allocator);
 
     const status = try runtimeStatus(db, allocator, runtime_id);
     defer allocator.free(status);
     try std.testing.expectEqualStrings("online", status);
+
+    // The workspace has to hear about the revival: the clients keep
+    // showing a machine that is gone until they are told otherwise.
+    try std.testing.expect(outcome.revived_workspace_id != null);
+    try std.testing.expectEqualStrings(
+        workspace_id,
+        outcome.revived_workspace_id.?,
+    );
 }

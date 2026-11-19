@@ -226,7 +226,6 @@ if [[ -n "${DATABASE_URL}" ]]; then
                 fi
                 http_status -X DELETE -H "${AUTH}" "${BASE}/api/workspaces/${WS2_ID}" >/dev/null 2>&1 || true
             fi
-            psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
 
             # 14. The sweeper has to tell the clients. A status that
             # changed in the database but never reaches the UI leaves the
@@ -270,6 +269,49 @@ PYEOF
                     psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${WS_STALE_ID}'::uuid" >/dev/null 2>&1 || true
                 fi
             fi
+
+            # 15. A runtime that comes back has to be announced too. The
+            # heartbeat brings an offline row back online; without an
+            # event the clients keep showing the machine as gone — the
+            # same lie, in the other direction.
+            ws15=$(python3 -c "import websocket" 2>/dev/null && echo "ok" || echo "missing")
+            if [[ "${ws15}" != "ok" ]]; then
+                warn "websocket-client not installed; skipping the revival event check"
+            else
+                psql "${DATABASE_URL}" -tAc "UPDATE agent_runtime SET status = 'offline', last_seen_at = now() - interval '1 hour' WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
+                ws_out=$(python3 - <<PYEOF 2>&1 || true
+import json, threading, time, urllib.request
+import websocket
+WS = "ws://127.0.0.1:${PORT}/ws?workspace_id=${WS_ID}&token=${TOKEN}"
+hit = threading.Event()
+def on_msg(ws, msg):
+    if '"type":"daemon:status_changed"' in msg:
+        hit.set()
+def on_err(ws, e):
+    pass
+def on_close(ws, *a):
+    pass
+wsa = websocket.WebSocketApp(WS, on_message=on_msg, on_error=on_err, on_close=on_close)
+t = threading.Thread(target=wsa.run_forever, daemon=True); t.start()
+time.sleep(0.8)
+req = urllib.request.Request(
+    "http://127.0.0.1:${PORT}/api/daemon/heartbeat",
+    data=json.dumps({"runtime_id": "${DRT_ID}"}).encode(), method="POST",
+    headers={"Content-Type": "application/json", "Authorization": "Bearer ${DTOKEN}"})
+try: urllib.request.urlopen(req).read()
+except Exception: pass
+hit.wait(timeout=10)
+print("REVIVE_EVENT=" + ("HIT" if hit.is_set() else "MISS"))
+wsa.close()
+PYEOF
+)
+                if echo "${ws_out}" | grep -q "REVIVE_EVENT=HIT"; then
+                    pass "15 the heartbeat tells the workspace that a runtime came back"
+                else
+                    fail "15 the heartbeat tells the workspace that a runtime came back: ${ws_out}"
+                fi
+            fi
+            psql "${DATABASE_URL}" -tAc "DELETE FROM agent_runtime WHERE id = '${DRT_ID}'::uuid" >/dev/null 2>&1 || true
         fi
     else
         warn "psql insert failed; skipping DB-mode checks"

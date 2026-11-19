@@ -22,6 +22,7 @@ const model = @import("model.zig");
 const agent_task = @import("agent_task.zig");
 const prompt_mod = @import("prompt.zig");
 const response = @import("../../common/response.zig");
+const realtime = @import("../realtime/service.zig");
 const common_mem = @import("../../common/mem.zig");
 const common_ctx = @import("../../common/ctx.zig");
 
@@ -246,6 +247,16 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
             break :blk "";
         };
 
+        // A runtime that was marked offline and is coming back has to be
+        // announced: the clients keep showing a machine that is gone
+        // until they hear otherwise. A runtime that does not exist yet
+        // counts as coming back — the workspace has to learn about it.
+        const was_offline = blk: {
+            const status = model.runtimeStatus(allocator, req.runtime_id) orelse break :blk true;
+            defer allocator.free(status);
+            break :blk !std.mem.eql(u8, status, "online");
+        };
+
         _ = model.upsertRuntimeForDaemon(
             req.runtime_id,
             token_workspace_id,
@@ -253,6 +264,10 @@ pub fn daemonRegister(ctx: *zfinal.Context) !void {
             name,
             if (req.provider) |p| p else "",
         );
+
+        if (was_offline) {
+            publishRuntimeStatusChanged(allocator, token_workspace_id);
+        }
     }
 
     // A registering daemon brings its runtime online (DB mode). Mirrors
@@ -412,7 +427,14 @@ pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
         // workspace reads has to be stamped too: liveness is decided by
         // the age of `agent_runtime.last_seen_at`, not by the status
         // column (a daemon that dies never flips that column).
-        _ = model.heartbeatRuntime(rid);
+        const outcome = model.heartbeatRuntime(allocator, rid);
+        defer outcome.deinit(allocator);
+        // A runtime that was marked offline and is alive again has to be
+        // announced: the clients keep showing it as gone until they hear
+        // otherwise, and the clients are what the user looks at.
+        if (outcome.revived_workspace_id) |workspace_id| {
+            publishRuntimeStatusChanged(allocator, workspace_id);
+        }
     } else {
         // Nothing to stamp: the daemon sent no runtime id and this
         // process never saw it register. Answering with an error would
@@ -420,6 +442,25 @@ pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
         log.warn("daemon heartbeat: no runtime to stamp (no runtime id in the body, no registry entry)", .{});
     }
     try ctx.renderJson(.{ .ok = true });
+}
+
+/// Tell a workspace that one of its runtimes changed liveness.
+///
+/// The frontend invalidates the runtime queries on a `daemon:*` event
+/// (upstream publishes the same way after its sweeper and after a
+/// heartbeat recovery). Without the event the clients keep showing the
+/// old state until something else happens to refetch — the database
+/// would be right and the screen wrong.
+pub fn publishRuntimeStatusChanged(allocator: std.mem.Allocator, workspace_id: []const u8) void {
+    if (workspace_id.len == 0) return;
+    const text = std.fmt.allocPrint(
+        allocator,
+        "{{\"type\":\"daemon:status_changed\",\"payload\":{{\"workspace_id\":\"{s}\"}}," ++
+            "\"actor_type\":\"system\",\"actor_id\":\"\"}}",
+        .{workspace_id},
+    ) catch return;
+    defer allocator.free(text);
+    realtime.publishEvent(workspace_id, text);
 }
 
 pub fn daemonWebSocket(ctx: *zfinal.Context) !void {
@@ -1002,7 +1043,6 @@ fn publishChatReply(allocator: std.mem.Allocator, workspace_id: []const u8, sess
         .{ message_id, session_id, std.json.fmt(content, .{}) },
     ) catch return;
     defer allocator.free(payload);
-    const realtime = @import("../realtime/service.zig");
     realtime.publishChatMessage(workspace_id, session_id, payload);
 }
 

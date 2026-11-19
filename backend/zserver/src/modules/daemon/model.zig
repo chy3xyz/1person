@@ -122,6 +122,21 @@ pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
     return true;
 }
 
+/// What one heartbeat changed.
+pub const HeartbeatOutcome = struct {
+    /// The workspace whose runtime was brought back online. Null when the
+    /// row was already online (or does not exist).
+    ///
+    /// The caller has to tell that workspace: a machine that came back
+    /// stays invisible to the clients until they hear about it, and the
+    /// clients are the ones showing the runtime as gone.
+    revived_workspace_id: ?[]const u8,
+
+    pub fn deinit(self: HeartbeatOutcome, allocator: std.mem.Allocator) void {
+        if (self.revived_workspace_id) |ws| allocator.free(ws);
+    }
+};
+
 /// Record a daemon heartbeat on the runtime row.
 ///
 /// Liveness is decided by the age of this timestamp, not by the status
@@ -140,19 +155,47 @@ pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
 /// heartbeat must not churn the column (upstream keeps the row
 /// HOT-eligible for the same reason).
 ///
-/// Returns false in no-DB mode.
-pub fn heartbeatRuntime(runtime_id: []const u8) bool {
-    const db = borrowDb() orelse return false;
+/// The old status is read in the same statement as the flip: two
+/// statements would race against a heartbeat that lands in between, and
+/// the flip must never touch a row that is alive again.
+pub fn heartbeatRuntime(allocator: std.mem.Allocator, runtime_id: []const u8) HeartbeatOutcome {
+    const db = borrowDb() orelse return .{ .revived_workspace_id = null };
     defer deps.releaseBack(db);
-    db.execParams(
-        "UPDATE agent_runtime " ++
+
+    var rs = db.queryParams(
+        "WITH prev AS (" ++
+            "SELECT id, workspace_id::text AS workspace_id, status AS old_status " ++
+            "FROM agent_runtime WHERE id = $1::uuid" ++
+            ") " ++
+            "UPDATE agent_runtime rt " ++
             "SET last_seen_at = now(), " ++
             "status = 'online', " ++
-            "updated_at = CASE WHEN status <> 'online' THEN now() ELSE updated_at END " ++
-            "WHERE id = $1::uuid",
+            "updated_at = CASE WHEN prev.old_status <> 'online' THEN now() ELSE rt.updated_at END " ++
+            "FROM prev WHERE rt.id = prev.id " ++
+            "RETURNING prev.workspace_id, (prev.old_status <> 'online') AS revived",
         &[_]SqlParam{.{ .text = runtime_id }},
-    ) catch return false;
-    return true;
+    ) catch return .{ .revived_workspace_id = null };
+    defer rs.deinit();
+
+    if (rs.rows.items.len == 0) return .{ .revived_workspace_id = null };
+    const revived = (rs.rows.items[0].getBool(1) catch null) orelse false;
+    if (!revived) return .{ .revived_workspace_id = null };
+    const workspace_id = rs.rows.items[0].getText(0) orelse return .{ .revived_workspace_id = null };
+    return .{ .revived_workspace_id = allocator.dupe(u8, workspace_id) catch null };
+}
+
+/// The status of a runtime row. Null when the row does not exist.
+pub fn runtimeStatus(allocator: std.mem.Allocator, runtime_id: []const u8) ?[]const u8 {
+    const db = borrowDb() orelse return null;
+    defer deps.releaseBack(db);
+    var rs = db.queryParams(
+        "SELECT status FROM agent_runtime WHERE id = $1::uuid",
+        &[_]SqlParam{.{ .text = runtime_id }},
+    ) catch return null;
+    defer rs.deinit();
+    if (rs.rows.items.len == 0) return null;
+    const text = rs.rows.items[0].getText(0) orelse return null;
+    return allocator.dupe(u8, text) catch null;
 }
 
 /// What one sweeper round changed.

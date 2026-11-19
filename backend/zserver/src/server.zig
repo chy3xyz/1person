@@ -25,7 +25,7 @@ const webhook_handler = @import("modules/webhook/handler.zig");
 const contact_handler = @import("modules/contact/handler.zig");
 const daemon_handler = @import("modules/daemon/handler.zig");
 const daemon_model = @import("modules/daemon/model.zig");
-const realtime = @import("modules/realtime/service.zig");
+const daemon_service = @import("modules/daemon/service.zig");
 const comment_handler = @import("modules/comment/handler.zig");
 
 
@@ -223,25 +223,10 @@ fn runtimeSweeperThread() void {
             // runtime queries on a `daemon:*` event (upstream publishes
             // the same way after its sweeper).
             for (swept.workspace_ids) |workspace_id| {
-                publishRuntimeStatusChanged(allocator, workspace_id);
+                daemon_service.publishRuntimeStatusChanged(allocator, workspace_id);
             }
         }
     }
-}
-
-/// Tell a workspace that one of its runtimes went offline.
-///
-/// The event carries no actor: the sweeper is the server itself, not a
-/// member of the workspace.
-fn publishRuntimeStatusChanged(allocator: std.mem.Allocator, workspace_id: []const u8) void {
-    const text = std.fmt.allocPrint(
-        allocator,
-        "{{\"type\":\"daemon:status_changed\",\"payload\":{{\"workspace_id\":\"{s}\"}}," ++
-            "\"actor_type\":\"system\",\"actor_id\":\"\"}}",
-        .{workspace_id},
-    ) catch return;
-    defer allocator.free(text);
-    realtime.publishEvent(workspace_id, text);
 }
 
 /// Leave the process on our own if the graceful path has not finished.
