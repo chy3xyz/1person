@@ -10,6 +10,14 @@
         //   zig fetch 'git+https://github.com/chy3xyz/<repo>?ref=<tag>#<commit>'
         // then paste .url / .hash below (avoid --save: it may write .path by mistake).
         //
+        // zfinal v0.28.6 carries the Linux shutdown fix: closing the
+        // listener descriptor does not wake a thread that is already
+        // blocked in accept() on Linux, so the accept loop never returned
+        // and the server never stopped. On SIGTERM with a connection open
+        // — the daemon's WebSocket never ends on its own — the process
+        // hung until the orchestrator killed it. The shutdown now wakes
+        // the accept with a self-connect first.
+        //
         // zfinal v0.28.4 carries the shutdown fix: v0.28.3 called
         // `Group.cancel` on the task group that `Server.start` was already
         // awaiting, which trips `assert(!pre_cancel_status.have_awaiter)`
@@ -30,8 +38,8 @@
         // body did not fit, so every response over roughly 16 KB reached
         // the client undecodable.
         .zfinal = .{
-            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.5#55a93a46361f17c2f7fac571ae49dec2c088d6f9",
-            .hash = "zfinal-0.28.5-6AOMdSPpcABh3EbtcHFKIbG67QhG87gemMSq0s6K7o62",
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.6#c9cb91b912f96216fa067700e7d35bc33b47a37a",
+            .hash = "zfinal-0.28.6-6AOMdZb7cAAcsrfUcyUJ7bSgXLeN6Nf4Vjr3eSAVdFmk",
         },
         // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
         .zcli = .{
