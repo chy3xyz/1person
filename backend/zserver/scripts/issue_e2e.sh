@@ -14,6 +14,7 @@
 # Override the port with PORT=<n>.
 
 set -euo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
 
 PORT="${PORT:-18099}"
 BASE="http://127.0.0.1:${PORT}"
@@ -71,6 +72,7 @@ echo "==> starting zserver on port ${PORT}"
 SERVER_PID=$!
 
 cleanup() {
+    e2e_cleanup_user "${email:-}"
     echo "==> stopping zserver"
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
     # The server leaves on its own once its shutdown budget elapses. Never

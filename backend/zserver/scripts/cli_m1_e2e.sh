@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
 cd "$(dirname "$0")/.."
 BASE="http://127.0.0.1:18093"
 CFG="/tmp/1p-m1-config.json"
 rm -f "$CFG"
-DATABASE_URL="postgres://1person:1person@localhost:5432/1person?sslmode=disable" \
-  ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
+# Exported, not a command prefix: the EXIT trap below deletes the account
+# this run creates, and it can only find the database when the URL lives in
+# the shell. A prefix assignment would scope the URL to the server process
+# alone, leaving the account and its workspace in the database.
+export DATABASE_URL="postgres://1person:1person@localhost:5432/1person?sslmode=disable"
+ONEPERSON_DEV_VERIFICATION_CODE=000000 JWT_SECRET=test-secret \
   ./zig-out/bin/zserver server --port 18093 > /tmp/m1-server.log 2>&1 &
 SERVER_PID=$!
-trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null' EXIT
+trap 'kill $SERVER_PID 2>/dev/null; wait $SERVER_PID 2>/dev/null; e2e_cleanup_user "${EMAIL:-}"' EXIT
 for i in $(seq 1 30); do curl -sf $BASE/health > /dev/null 2>&1 && break; sleep 0.5; done
 
 EMAIL="m1-$(date +%s)@test.local"

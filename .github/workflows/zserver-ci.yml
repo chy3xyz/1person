@@ -143,3 +143,12 @@ jobs:
         run: |
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 \
             bash scripts/daemon_resilience_e2e.sh
+
+      - name: E2E — no test residue left behind
+        # Every e2e run signs up a throwaway account and creates
+        # workspaces with it. The suites used to leave those rows behind,
+        # so a shared development database slowly filled up with test
+        # workspaces. The teardown now removes them; this step is the
+        # guard that keeps a new script from reintroducing the leak.
+        run: |
+          bash scripts/check_e2e_residue.sh

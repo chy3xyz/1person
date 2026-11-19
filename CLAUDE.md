@@ -393,6 +393,36 @@ test("example", async ({ page }) => {
 });
 ```
 
+### Backend e2e scripts must clean up after themselves
+
+The shell suites under `backend/zserver/scripts/*_e2e.sh` run against the
+shared development database. Every run signs up a throwaway account
+(`<prefix>-<epoch>@<test-domain>`) and creates workspaces with it — if the
+teardown does not delete them, the database fills up with test workspaces
+and the workspace list becomes unusable.
+
+- Source the shared helper once, right after `set -euo pipefail` and **before**
+  any `cd`:
+
+  ```bash
+  source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
+  ```
+
+- Call `e2e_cleanup_user "$EMAIL" "$EMAIL2"` in the script's `cleanup()` —
+  one call, one argument per account the script created. Passing the
+  accounts as separate arguments (instead of calling the helper once per
+  account) is what keeps a two-member suite from leaving the second
+  account behind.
+- The helper needs `DATABASE_URL` in the **shell**, not as a command
+  prefix: a prefix assignment (`DATABASE_URL=... ./zserver &`) scopes the
+  URL to that process, and the teardown silently cleans nothing.
+- The helper is a no-op without `DATABASE_URL` (no-DB mode persists nothing)
+  and never fails the calling script.
+- `scripts/check_e2e_residue.sh` fails the build when any account or
+  workspace is left on a test-fixture domain. It runs as the last step of
+  the `zserver CI` workflow, so a new script that forgets the teardown is
+  caught immediately.
+
 ## Commit Rules
 
 - Use atomic commits grouped by logical intent.

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # End-to-end HTTP regression test for the content_matrix module.
 set -euo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
 PORT="${PORT:-18091}"
 BASE="http://127.0.0.1:${PORT}"
 export JWT_SECRET="${JWT_SECRET:-test-secret}"
@@ -16,7 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ( cd "${SCRIPT_DIR}/.." && zig build ) || { echo "build failed"; exit 1; }
 "${SCRIPT_DIR}/../zig-out/bin/zserver" server --port "${PORT}" >/tmp/zserver-content-matrix-e2e.log 2>&1 &
 SERVER_PID=$!
-cleanup() { kill "${SERVER_PID}" >/dev/null 2>&1 || true; wait "${SERVER_PID}" >/dev/null 2>&1 || true; }
+cleanup() { e2e_cleanup_user "${EMAIL:-}"; kill "${SERVER_PID}" >/dev/null 2>&1 || true; wait "${SERVER_PID}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 for i in $(seq 1 30); do if [[ $(http_status "${BASE}/health") == "200" ]]; then break; fi; sleep 0.5; done
 

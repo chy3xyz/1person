@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
 
 # I18n module end-to-end test — exercises all three endpoints
 # (/api/i18n/locales, /api/i18n/translations) against a running
@@ -46,6 +47,7 @@ echo "==> starting zserver on port ${PORT}"
 SERVER_PID=$!
 
 cleanup() {
+    e2e_cleanup_user "${email:-}"
     echo "==> stopping zserver"
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
     wait "${SERVER_PID}" >/dev/null 2>&1 || true

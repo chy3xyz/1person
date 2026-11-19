@@ -12,6 +12,7 @@
 # Override the port with PORT=<n>.
 
 set -euo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
 
 PORT="${PORT:-18096}"
 BASE="http://127.0.0.1:${PORT}"
@@ -47,7 +48,7 @@ echo "==> building zserver"
 echo "==> starting zserver on port ${PORT}"
 "${SCRIPT_DIR}/../zig-out/bin/zserver" server --port "${PORT}" >/tmp/zserver-inbox-e2e.log 2>&1 &
 SERVER_PID=$!
-cleanup() { echo "==> stopping zserver"; kill "${SERVER_PID}" >/dev/null 2>&1 || true; wait "${SERVER_PID}" >/dev/null 2>&1 || true; }
+cleanup() { e2e_cleanup_user "${EMAIL:-}"; echo "==> stopping zserver"; kill "${SERVER_PID}" >/dev/null 2>&1 || true; wait "${SERVER_PID}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 for i in $(seq 1 30); do

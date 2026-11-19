@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
 
 # Smoke test for zserver against a local Postgres + Redis.
 # Usage: JWT_SECRET=... DATABASE_URL=... REDIS_URL=... ./scripts/smoke_test.sh
@@ -49,6 +50,7 @@ echo "==> starting zserver on port ${PORT}"
 SERVER_PID=$!
 
 cleanup() {
+    e2e_cleanup_user "${email:-}"
     echo "==> stopping zserver"
     kill "${SERVER_PID}" >/dev/null 2>&1 || true
     # The server leaves on its own once its shutdown budget elapses. Never
