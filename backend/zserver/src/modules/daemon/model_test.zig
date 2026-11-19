@@ -155,3 +155,32 @@ test "the sweeper leaves a runtime that never reported a heartbeat alone" {
     defer allocator.free(status);
     try std.testing.expectEqualStrings("online", status);
 }
+
+test "a heartbeat brings a runtime the sweeper marked offline back online" {
+    // The sweeper and the heartbeat are two halves of one truth. A
+    // daemon that survives the freshness window — a laptop that was
+    // asleep, a network that was partitioned — has to be able to report
+    // in again. If the heartbeat only stamped the timestamp, the row
+    // would stay offline for good and the UI (which offers online
+    // runtimes only) would keep hiding a machine that is right there.
+    const db = (try testDb()) orelse return error.SkipZigTest;
+    defer deps.releaseBack(db);
+    const allocator = std.testing.allocator;
+
+    const workspace_id = try scratchWorkspace(db, allocator);
+    defer allocator.free(workspace_id);
+    defer dropWorkspace(db, workspace_id);
+    const runtime_id = try insertRuntime(db, allocator, workspace_id, "slept", .old);
+    defer allocator.free(runtime_id);
+
+    _ = model.sweepStaleRuntimes();
+    const swept = try runtimeStatus(db, allocator, runtime_id);
+    defer allocator.free(swept);
+    try std.testing.expectEqualStrings("offline", swept);
+
+    _ = model.heartbeatRuntime(runtime_id);
+
+    const status = try runtimeStatus(db, allocator, runtime_id);
+    defer allocator.free(status);
+    try std.testing.expectEqualStrings("online", status);
+}

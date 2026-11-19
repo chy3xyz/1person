@@ -112,13 +112,30 @@ pub fn setRuntimeStatus(runtime_id: []const u8, status: []const u8) bool {
 ///
 /// Liveness is decided by the age of this timestamp, not by the status
 /// column: a daemon that dies without deregistering never flips the
-/// status, so the row would claim to be online forever. Returns false in
-/// no-DB mode.
-pub fn touchRuntime(runtime_id: []const u8) bool {
+/// status, so the row would claim to be online forever.
+///
+/// The heartbeat also brings the row back online. The sweeper marks a
+/// runtime whose heartbeat went stale as offline, and a daemon that
+/// outlives that window — a laptop that was asleep, a network that was
+/// partitioned — has to be able to report in again. A heartbeat that
+/// only stamped the timestamp would leave the row offline for good, and
+/// the UI (which offers online runtimes only) would keep hiding a
+/// machine that is right there and working.
+///
+/// `updated_at` only moves when the status actually flips: a steady
+/// heartbeat must not churn the column (upstream keeps the row
+/// HOT-eligible for the same reason).
+///
+/// Returns false in no-DB mode.
+pub fn heartbeatRuntime(runtime_id: []const u8) bool {
     const db = borrowDb() orelse return false;
     defer deps.releaseBack(db);
     db.execParams(
-        "UPDATE agent_runtime SET last_seen_at = now() WHERE id = $1::uuid",
+        "UPDATE agent_runtime " ++
+            "SET last_seen_at = now(), " ++
+            "status = 'online', " ++
+            "updated_at = CASE WHEN status <> 'online' THEN now() ELSE updated_at END " ++
+            "WHERE id = $1::uuid",
         &[_]SqlParam{.{ .text = runtime_id }},
     ) catch return false;
     return true;

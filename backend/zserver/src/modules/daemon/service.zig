@@ -349,7 +349,7 @@ pub fn daemonHeartbeat(ctx: *zfinal.Context) !void {
         // workspace reads has to be stamped too: liveness is decided by
         // the age of `agent_runtime.last_seen_at`, not by the status
         // column (a daemon that dies never flips that column).
-        _ = model.touchRuntime(entry.runtime_id);
+        _ = model.heartbeatRuntime(entry.runtime_id);
     }
     try ctx.renderJson(.{ .ok = true });
 }
