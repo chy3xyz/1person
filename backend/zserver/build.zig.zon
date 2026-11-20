@@ -10,6 +10,16 @@
         //   zig fetch 'git+https://github.com/chy3xyz/<repo>?ref=<tag>#<commit>'
         // then paste .url / .hash below (avoid --save: it may write .path by mistake).
         //
+        // zfinal v0.28.10 turns the HTTP timeouts into absolute deadlines
+        // (`read_header_timeout_ms` 5s, `idle_timeout_ms` 120s) and caps the
+        // drained body at 256 KiB (`max_drain_body_bytes`). It also carries
+        // the v0.28.9 fixes for the messaging clients, which could not talk
+        // to a real broker at all: the NATS client resolved host names with
+        // `parseIp4` only (so even its own default "localhost" failed with
+        // InvalidCharacter) and its `ping()` ate the message the server sent
+        // before the PONG, and the Kafka Fetch request was laid out for API
+        // v9 instead of v7, so the broker closed the connection.
+        //
         // zfinal v0.28.6 carries the Linux shutdown fix: closing the
         // listener descriptor does not wake a thread that is already
         // blocked in accept() on Linux, so the accept loop never returned
@@ -38,8 +48,8 @@
         // body did not fit, so every response over roughly 16 KB reached
         // the client undecodable.
         .zfinal = .{
-            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.6#c9cb91b912f96216fa067700e7d35bc33b47a37a",
-            .hash = "zfinal-0.28.6-6AOMdZb7cAAcsrfUcyUJ7bSgXLeN6Nf4Vjr3eSAVdFmk",
+            .url = "git+https://github.com/chy3xyz/zfinal?ref=v0.28.10#39b248ad948d4d7a71b8a54e06ad1ea81867a66b",
+            .hash = "zfinal-0.28.10-6AOMdei4cQDI1QMGLw7v1N62TS1lqXtWqxaAUOm0k9ur",
         },
         // Tip of v0.2.0 + 2 commits (no matching tag); pin by commit.
         .zcli = .{
