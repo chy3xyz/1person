@@ -24,7 +24,13 @@ export const LOCAL_PATH_KEY = "local_path";
 //
 // Keep in sync with `Provider.fromName` in
 // `backend/zserver/src/cli/agent_exec.zig`.
-const LOCAL_DIRECTORY_PROVIDERS = new Set(["claude", "codex", "opencode"]);
+const LOCAL_DIRECTORY_PROVIDERS = new Set([
+  "claude",
+  "codex",
+  "dsh",
+  "opencode",
+  "pi",
+]);
 
 export function providerSupportsLocalDirectory(
   provider: string | undefined | null,

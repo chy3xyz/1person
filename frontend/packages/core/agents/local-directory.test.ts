@@ -81,7 +81,7 @@ describe("localPathEquals", () => {
 });
 
 describe("providerSupportsLocalDirectory", () => {
-  it.each(["claude", "codex", "opencode"])(
+  it.each(["claude", "codex", "dsh", "opencode", "pi"])(
     "accepts the %s provider, which a daemon on the user's machine runs",
     (provider) => {
       expect(providerSupportsLocalDirectory(provider)).toBe(true);
