@@ -124,36 +124,23 @@ These are configured on each user's machine, not on the server:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ONEPERSON_SERVER_URL` | `ws://localhost:8080/ws` | WebSocket URL for daemon → server connection |
-| `ONEPERSON_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
-| `ONEPERSON_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
-| `ONEPERSON_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
 | `ONEPERSON_AGENT_PROVIDER` | auto-detected | Which agent CLI to run: `opencode`, `claude`, `codex`, `dsh` or `pi` |
+
+The daemon's own intervals are command-line flags, not environment variables:
+`--claim_ms` (default `15000`) and `--heartbeat_ms` (default `30000`).
+
+Older docs also list `ONEPERSON_SERVER_URL`, `ONEPERSON_DAEMON_POLL_INTERVAL`,
+`ONEPERSON_DAEMON_HEARTBEAT_INTERVAL`, `ONEPERSON_WORKSPACES_ROOT`,
+`ONEPERSON_GC_*` and the `ONEPERSON_*_PATH` / `ONEPERSON_*_MODEL` overrides.
+**The shipped build reads none of them** — setting them changes nothing.
 
 Agent-specific overrides:
 
-| Variable | Description |
-|----------|-------------|
-| `ONEPERSON_CLAUDE_PATH` | Custom path to the `claude` binary |
-| `ONEPERSON_CLAUDE_MODEL` | Override the Claude model used |
-| `ONEPERSON_CODEX_PATH` | Custom path to the `codex` binary |
-| `ONEPERSON_CODEX_MODEL` | Override the Codex model used |
-| `ONEPERSON_COPILOT_PATH` | Custom path to the `copilot` (GitHub Copilot CLI) binary |
-| `ONEPERSON_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
-| `ONEPERSON_OPENCODE_PATH` | Custom path to the `opencode` binary |
-| `ONEPERSON_OPENCODE_MODEL` | Override the OpenCode model used |
-| `ONEPERSON_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `ONEPERSON_OPENCLAW_MODEL` | Override the OpenClaw model used |
-| `ONEPERSON_HERMES_PATH` | Custom path to the `hermes` binary |
-| `ONEPERSON_HERMES_MODEL` | Override the Hermes model used |
-| `ONEPERSON_GEMINI_PATH` | Custom path to the `gemini` binary |
-| `ONEPERSON_GEMINI_MODEL` | Override the Gemini model used |
-| `ONEPERSON_PI_PATH` | Custom path to the `pi` binary |
-| `ONEPERSON_PI_MODEL` | Override the Pi model used |
-| `ONEPERSON_DSH_PATH` | Custom path to the `dsh` binary |
-| `ONEPERSON_DSH_MODEL` | Override the DeepSeek Harness model used |
-| `ONEPERSON_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
-| `ONEPERSON_CURSOR_MODEL` | Override the Cursor Agent model used |
+None in this build. What reaches the agent CLI comes from the agent record on
+the task — the agent's `custom_args` (appended to the command line) and
+`custom_env` (merged into the child process's environment). The agent's
+`model` field reaches **OpenCode and Pi** as `--model`; Claude Code, Codex and
+DeepSeek Harness use their own default model.
 
 ## Database Setup
 

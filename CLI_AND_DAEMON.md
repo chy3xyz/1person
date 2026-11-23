@@ -175,80 +175,49 @@ yet — it has no code path for them.
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace
-2. It polls the server at a configurable interval (default: 3s) for claimed tasks
+2. It polls the server for claimed tasks every **15 seconds** (`--claim_ms`); the server also pushes a `task_available` frame over the WebSocket, so a queued task is picked up right away instead of waiting for the next poll
 3. When a task arrives, it creates an isolated workspace directory, spawns the agent CLI, and streams results back
-4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
+4. Heartbeats are sent every **30 seconds** (`--heartbeat_ms`) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
 ### Configuration
 
-> The knobs below belong to the target daemon. The shipped Zig build reads
-> only the two intervals the `1p daemon` command exposes — `--claim_ms`
-> (default 15000) and `--heartbeat_ms` (default 30000) — plus
-> `ONEPERSON_AGENT_PROVIDER`, which names the agent CLI to run.
-
-Daemon behavior is configured via flags or environment variables:
+The shipped Zig build exposes a small, honest set of knobs — this is the
+complete list:
 
 | Setting | Flag | Env Variable | Default |
 |---------|------|--------------|---------|
-| Poll interval | `--poll-interval` | `ONEPERSON_DAEMON_POLL_INTERVAL` | `3s` |
-| Heartbeat interval | `--heartbeat-interval` | `ONEPERSON_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
-| Agent timeout | `--agent-timeout` | `ONEPERSON_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
-| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `ONEPERSON_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
-| Max concurrent tasks | `--max-concurrent-tasks` | `ONEPERSON_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
-| Daemon ID | `--daemon-id` | `ONEPERSON_DAEMON_ID` | hostname |
-| Device name | `--device-name` | `ONEPERSON_DAEMON_DEVICE_NAME` | hostname |
-| Runtime name | `--runtime-name` | `ONEPERSON_AGENT_RUNTIME_NAME` | `Local Agent` |
-| Workspaces root | — | `ONEPERSON_WORKSPACES_ROOT` | `~/1person_workspaces` |
-| GC enabled | — | `ONEPERSON_GC_ENABLED` | `true` (set `false`/`0` to disable) |
-| GC scan interval | — | `ONEPERSON_GC_INTERVAL` | `1h` |
-| GC TTL (done/cancelled issues) | — | `ONEPERSON_GC_TTL` | `24h` |
-| GC orphan TTL (no `.gc_meta.json`) | — | `ONEPERSON_GC_ORPHAN_TTL` | `72h` |
-| GC artifact TTL (open issues) | — | `ONEPERSON_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
-| GC artifact patterns | — | `ONEPERSON_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
+| Runtime to service | — | `ONEPERSON_AGENT_PROVIDER` | auto-detected (opencode → claude → codex → dsh → pi) |
+| Claim poll interval | `--claim_ms` | — | `15000` (15 s) |
+| Heartbeat interval | `--heartbeat_ms` | — | `30000` (30 s) |
+| Runtime id | `--runtime_id` | — | required |
+| Workspace id | `--workspace_id` | — | — |
+| Daemon token | `--token` | — | from the config file |
+| Config file | `--path` | — | the default config path |
+
+Anything else you may have seen in older docs — `ONEPERSON_DAEMON_POLL_INTERVAL`,
+`ONEPERSON_WORKSPACES_ROOT`, `ONEPERSON_GC_*`, `ONEPERSON_*_PATH`,
+`ONEPERSON_*_MODEL` — is **not read by this build**. Setting them changes
+nothing.
 
 #### Workspace garbage collection
 
-The daemon periodically scans `ONEPERSON_WORKSPACES_ROOT` and reclaims disk space in three modes:
+There is none in this build. The daemon does not scan or delete task
+directories on its own — a workspace directory stays on disk until you remove
+it yourself.
 
-- **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `ONEPERSON_GC_TTL`, the entire task directory is removed.
-- **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `ONEPERSON_GC_ORPHAN_TTL`.
-- **Artifact-only cleanup** — when a task has been completed for at least `ONEPERSON_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `ONEPERSON_GC_ARTIFACT_PATTERNS` are removed; the rest of the workdir (source, `.git`, `output/`, `logs/`, `.gc_meta.json`) is preserved so the agent can resume the same workdir on the next task.
+#### Agent arguments and environment
 
-Patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `ONEPERSON_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, set `ONEPERSON_GC_ARTIFACT_TTL=0`.
+There are no per-agent environment overrides either. What reaches the CLI
+comes from the agent record on the task:
 
-Agent-specific overrides:
+| Source | What it does |
+|--------|--------------|
+| The agent's `custom_args` | Appended to the CLI's command line, one argument at a time, after 1Person's own flags |
+| The agent's `custom_env` | Merged into the child process's environment |
 
-| Variable | Description |
-|----------|-------------|
-| `ONEPERSON_CLAUDE_PATH` | Custom path to the `claude` binary |
-| `ONEPERSON_CLAUDE_MODEL` | Override the Claude model used |
-| `ONEPERSON_CLAUDE_ARGS` | Default extra arguments for Claude Code runs |
-| `ONEPERSON_CODEX_PATH` | Custom path to the `codex` binary |
-| `ONEPERSON_CODEX_MODEL` | Override the Codex model used |
-| `ONEPERSON_CODEX_ARGS` | Default extra arguments for Codex runs |
-| `ONEPERSON_COPILOT_PATH` | Custom path to the `copilot` binary |
-| `ONEPERSON_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
-| `ONEPERSON_OPENCODE_PATH` | Custom path to the `opencode` binary |
-| `ONEPERSON_OPENCODE_MODEL` | Override the OpenCode model used |
-| `ONEPERSON_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `ONEPERSON_OPENCLAW_MODEL` | Override the OpenClaw model used |
-| `ONEPERSON_HERMES_PATH` | Custom path to the `hermes` binary |
-| `ONEPERSON_HERMES_MODEL` | Override the Hermes model used |
-| `ONEPERSON_GEMINI_PATH` | Custom path to the `gemini` binary |
-| `ONEPERSON_GEMINI_MODEL` | Override the Gemini model used |
-| `ONEPERSON_PI_PATH` | Custom path to the `pi` binary |
-| `ONEPERSON_PI_MODEL` | Override the Pi model used |
-| `ONEPERSON_DSH_PATH` | Custom path to the `dsh` binary |
-| `ONEPERSON_DSH_MODEL` | Override the DeepSeek Harness model used |
-| `ONEPERSON_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
-| `ONEPERSON_CURSOR_MODEL` | Override the Cursor Agent model used |
-| `ONEPERSON_KIMI_PATH` | Custom path to the `kimi` binary |
-| `ONEPERSON_KIMI_MODEL` | Override the Kimi model used |
-| `ONEPERSON_KIRO_PATH` | Custom path to the `kiro-cli` binary |
-| `ONEPERSON_KIRO_MODEL` | Override the Kiro model used |
-
-`ONEPERSON_CLAUDE_ARGS` and `ONEPERSON_CODEX_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded 1Person defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
+The agent's `model` field is passed as `--model` to **OpenCode and Pi only**;
+Claude Code, Codex and DeepSeek Harness run on their own default model.
 
 ### Self-Hosted Server
 

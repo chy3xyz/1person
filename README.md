@@ -57,18 +57,17 @@ For larger teams, **Squads** add a stable routing layer: assign work to a squad 
 
 ## Supported agent runtimes
 
-1Person does not ship a model. It drives the agent CLIs installed and authenticated on your own machine — **12 built in today**:
+1Person does not ship a model. It drives the agent CLIs installed and authenticated on your own machine. The local daemon drives **five** of them today:
 
 | Provider | CLI | Provider | CLI |
 | --- | --- | --- | --- |
-| Antigravity | `agy` | Claude Code | `claude` |
-| Codex | `codex` | Copilot | `copilot` |
-| Cursor Agent | `cursor-agent` | Gemini | `gemini` |
-| Hermes | `hermes` | Kimi | `kimi` |
-| Kiro CLI | `kiro-cli` | OpenCode | `opencode` |
-| OpenClaw | `openclaw` | Pi | `pi` |
+| Claude Code | `claude` | Codex | `codex` |
+| DeepSeek Harness | `dsh` | OpenCode | `opencode` |
+| Pi | `pi` | | |
 
-See [Providers](https://www.1person.xyz/docs/providers) for what each tool supports (session resumption, MCP, skill injection, model selection), and [Install an agent runtime](https://www.1person.xyz/docs/install-agent-runtime) for setup.
+Eight more tools (Antigravity, Copilot, Cursor, Gemini, Hermes, Kimi, Kiro CLI, OpenClaw) are listed in the docs matrix but have no code path in the daemon yet — it neither detects nor runs them.
+
+See [Providers](https://www.1person.xyz/docs/providers) for the full matrix and what each capability column means today (session resumption and MCP are not wired up, skill files are not copied into the task workspace, and only OpenCode and Pi take a model selection), and [Install an agent runtime](https://www.1person.xyz/docs/install-agent-runtime) for setup.
 
 ## Quick start
 

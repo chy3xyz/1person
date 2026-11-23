@@ -57,18 +57,17 @@
 
 ## 支持的 Agent Runtime
 
-1Person 不内置模型，只驱动你本机已安装并登录的 Agent CLI——**目前已内置 12 种**：
+1Person 不内置模型，只驱动你本机已安装并登录的 Agent CLI。本地守护进程目前能驱动其中 **5 款**：
 
 | Provider | CLI | Provider | CLI |
 | --- | --- | --- | --- |
-| Antigravity | `agy` | Claude Code | `claude` |
-| Codex | `codex` | Copilot | `copilot` |
-| Cursor Agent | `cursor-agent` | Gemini | `gemini` |
-| Hermes | `hermes` | Kimi | `kimi` |
-| Kiro CLI | `kiro-cli` | OpenCode | `opencode` |
-| OpenClaw | `openclaw` | Pi | `pi` |
+| Claude Code | `claude` | Codex | `codex` |
+| DeepSeek Harness | `dsh` | OpenCode | `opencode` |
+| Pi | `pi` | | |
 
-各工具对会话恢复、MCP、技能注入、模型选择的支持情况见[Providers](https://www.1person.xyz/docs/zh/providers)；安装与登录见[安装 Agent Runtime](https://www.1person.xyz/docs/zh/install-agent-runtime)。
+另有 8 款工具（Antigravity、Copilot、Cursor、Gemini、Hermes、Kimi、Kiro CLI、OpenClaw）列在文档矩阵里，但守护进程目前还没有对应的代码路径——既不检测，也不执行。
+
+各工具的能力现状见[Providers](https://www.1person.xyz/docs/zh/providers)（会话恢复与 MCP 尚未接通，技能文件不会被复制进任务工作区，只有 OpenCode 和 Pi 支持模型选择）；安装与登录见[安装 Agent Runtime](https://www.1person.xyz/docs/zh/install-agent-runtime)。
 
 ## 快速开始
 

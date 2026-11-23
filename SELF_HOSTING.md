@@ -89,18 +89,14 @@ Each team member who wants to run AI agents locally needs to:
 brew install chy3xyz/tap/1person
 ```
 
-You also need at least one AI agent CLI installed:
+You also need at least one AI agent CLI installed — the daemon drives these five:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
-- [GitHub Copilot CLI](https://docs.github.com/en/copilot) (`copilot` on PATH)
-- [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` — installed under `~/.dsh`, not on PATH by default)
 - [OpenCode](https://github.com/anomalyco/opencode) (`opencode` on PATH)
-- [Hermes](https://github.com/NousResearch/hermes) (`hermes` on PATH)
-- Gemini (`gemini` on PATH)
-- [Pi](https://pi.dev/) (`pi` on PATH)
-- [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
-- Kimi (`kimi` on PATH)
-- Kiro CLI (`kiro-cli` on PATH)
+- [Pi](https://pi.dev/) (`pi` — launcher installed under `~/.pi/agent`, not on PATH by default)
+
+Set `ONEPERSON_AGENT_PROVIDER` to pick one explicitly; otherwise the daemon picks the first of the five it finds.
 
 ### b) One-command setup
 
