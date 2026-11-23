@@ -135,12 +135,12 @@ pub fn run(allocator: std.mem.Allocator, io: std.Io, opts: DaemonOptions) !void 
     // `provider` is the local agent CLI this machine can actually run.
     // Reporting it is what lets the server hand real work to this daemon:
     // without a provider there is nothing that could execute a task.
-    const provider = agent_exec.detectProvider(allocator, io);
+    const provider = agent_exec.detectProvider(allocator, io, opts.environ_map);
     // A private server per run keeps the run's configuration the run's
     // own; the shared background service can serve a remembered
     // project's configuration instead.
     if (provider) |p| {
-        g_use_standalone = agent_exec.supportsStandalone(allocator, io, p);
+        g_use_standalone = agent_exec.supportsStandalone(allocator, io, opts.environ_map, p);
     }
     // A daemon that found no agent CLI cannot execute anything, so it
     // advertises no capabilities — and the server then never hands it a

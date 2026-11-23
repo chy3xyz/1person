@@ -3,12 +3,18 @@
 //! The daemon owns the machine, so the daemon is the side that runs the
 //! agent: the server hands over a rendered prompt plus the agent's
 //! configuration, and the daemon drives the local CLI (opencode / claude
-//! / codex) and reports the answer back.
+//! / codex / dsh / pi) and reports the answer back.
 //!
 //! The CLI is invoked non-interactively and its output is parsed for the
 //! answer text. Each CLI reports its answer differently — opencode emits
 //! newline-delimited events, claude emits one JSON object, codex prints
-//! plain text — so each has its own extractor.
+//! plain text, dsh and pi print plain text too — so each has its own
+//! extractor.
+//!
+//! The CLI does not have to be called after the provider it stands for:
+//! dsh installs a Node CLI under its own home directory and never puts
+//! it on PATH, and pi installs its launcher under its own directory
+//! too. `resolveExecutable` looks for both.
 
 const std = @import("std");
 const out = @import("out.zig");
@@ -18,17 +24,23 @@ const zfinal = @import("zfinal");
 ///
 /// The declaration order is the preference order — the first CLI that is
 /// actually runnable wins. `opencode` comes first because it produces an
-/// answer without a paid subscription; `claude` and `codex` follow.
+/// answer without a paid subscription; `claude` and `codex` follow, then
+/// the two CLIs that need their own account: dsh (DeepSeek Harness) and
+/// pi.
 pub const Provider = enum {
     opencode,
     claude,
     codex,
+    dsh,
+    pi,
 
     pub fn name(self: Provider) []const u8 {
         return switch (self) {
             .opencode => "opencode",
             .claude => "claude",
             .codex => "codex",
+            .dsh => "dsh",
+            .pi => "pi",
         };
     }
 
@@ -37,9 +49,19 @@ pub const Provider = enum {
         if (std.mem.eql(u8, raw, "opencode")) return .opencode;
         if (std.mem.eql(u8, raw, "claude")) return .claude;
         if (std.mem.eql(u8, raw, "codex")) return .codex;
+        if (std.mem.eql(u8, raw, "dsh")) return .dsh;
+        if (std.mem.eql(u8, raw, "pi")) return .pi;
         return null;
     }
 };
+
+/// The environment variable that names the CLI the daemon should run.
+///
+/// A machine can have several of these CLIs installed, and the
+/// preference order is a product decision — not the user's. The
+/// variable is the user's way out of it.
+pub const provider_env_var = "ONEPERSON_AGENT_PROVIDER";
+
 
 /// How much of the CLI's output to keep. A runaway CLI must not be able
 /// to exhaust the daemon's memory.
@@ -212,9 +234,28 @@ pub const RunOutcome = struct {
 ///
 /// Presence on PATH is not enough — the CLI has to run — so each
 /// candidate is probed with `--version`. The first one that answers wins.
-pub fn detectProvider(allocator: std.mem.Allocator, io: std.Io) ?Provider {
-    for ([_]Provider{ .opencode, .claude, .codex }) |p| {
-        if (probe(allocator, io, p)) {
+///
+/// `ONEPERSON_AGENT_PROVIDER` names the CLI to use. Without it the
+/// preference order decides, and that order is the product's, not the
+/// user's: a machine with several of these CLIs installed would get the
+/// first runnable one rather than the one the user meant.
+pub fn detectProvider(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+) ?Provider {
+    if (forcedProvider(env)) |wanted| {
+        if (probe(allocator, io, env, wanted)) {
+            out.printOut("agent provider detected: {s} (named by {s})\n", .{ wanted.name(), provider_env_var });
+            return wanted;
+        }
+        out.printErr(
+            "agent provider {s} was named by {s}, but its CLI does not run here — falling back to detection\n",
+            .{ wanted.name(), provider_env_var },
+        );
+    }
+    for ([_]Provider{ .opencode, .claude, .codex, .dsh, .pi }) |p| {
+        if (probe(allocator, io, env, p)) {
             out.printOut("agent provider detected: {s}\n", .{p.name()});
             return p;
         }
@@ -222,8 +263,24 @@ pub fn detectProvider(allocator: std.mem.Allocator, io: std.Io) ?Provider {
     return null;
 }
 
-fn probe(allocator: std.mem.Allocator, io: std.Io, p: Provider) bool {
-    const argv = [_][]const u8{ p.name(), "--version" };
+/// The provider the environment asks for, if it names one we know.
+fn forcedProvider(env: ?*const std.process.Environ.Map) ?Provider {
+    const env_map = env orelse return null;
+    const raw = env_map.get(provider_env_var) orelse return null;
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    return Provider.fromName(trimmed);
+}
+
+fn probe(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+    p: Provider,
+) bool {
+    const exe = resolveExecutable(allocator, io, env, p) catch return false;
+    defer allocator.free(exe);
+    const argv = [_][]const u8{ exe, "--version" };
     const result = std.process.run(allocator, io, .{
         .argv = &argv,
         .stdout_limit = .limited(64 * 1024),
@@ -233,6 +290,129 @@ fn probe(allocator: std.mem.Allocator, io: std.Io, p: Provider) bool {
     defer allocator.free(result.stderr);
     return result.term.success();
 }
+
+/// The command that runs this provider's CLI.
+///
+/// The provider's name is what the server and the user see; the
+/// executable does not have to be called that. dsh installs a Node CLI
+/// under its own home directory (`$DSH_HOME`, `~/.dsh` by default) and
+/// never puts it on PATH, and pi installs its launcher under
+/// `$PI_CODING_AGENT_DIR` (`~/.pi/agent` by default) — so the bare name
+/// finds neither of them unless the user linked them by hand.
+///
+/// The caller owns the returned string.
+pub fn resolveExecutable(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+    p: Provider,
+) ![]const u8 {
+    // The name on PATH. The OS resolves it when the child is spawned,
+    // and a CLI the user linked by hand is found here.
+    if (try findOnPath(allocator, io, env, p.name())) |full| return full;
+
+    switch (p) {
+        .dsh => if (try findDsh(allocator, io, env)) |full| return full,
+        .pi => if (try findPi(allocator, io, env)) |full| return full,
+        else => {},
+    }
+
+    // Nothing found: the bare name is still the best guess. The OS
+    // resolves it against PATH when the child is spawned, and reporting
+    // "no CLI" for a CLI that is there would be worse.
+    return allocator.dupe(u8, p.name());
+}
+
+/// The first executable file named `name` on PATH.
+fn findOnPath(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+    name: []const u8,
+) !?[]const u8 {
+    const env_map = env orelse return null;
+    const path = env_map.get("PATH") orelse return null;
+    var it = std.mem.splitScalar(u8, path, ':');
+    while (it.next()) |dir| {
+        if (dir.len == 0) continue;
+        const full = try std.fs.path.join(allocator, &.{ dir, name });
+        if (isExecutableFile(io, full)) return full;
+        allocator.free(full);
+    }
+    return null;
+}
+
+/// The dsh CLI under the user's own dsh home.
+///
+/// dsh keeps its profiles under `$DSH_HOME` (`~/.dsh` by default) and
+/// installs the CLI into the profiles' shared `node_modules`. A profile
+/// may carry a newer copy of its own, so the profiles are searched too.
+fn findDsh(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+) !?[]const u8 {
+    const env_map = env orelse return null;
+    const home = env_map.get("DSH_HOME") orelse blk: {
+        const user_home = env_map.get("HOME") orelse return null;
+        break :blk try std.fs.path.join(allocator, &.{ user_home, ".dsh" });
+    };
+    defer allocator.free(home);
+
+    const profiles = try std.fs.path.join(allocator, &.{ home, "profiles" });
+    defer allocator.free(profiles);
+
+    const shared = try std.fs.path.join(allocator, &.{
+        profiles, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js",
+    });
+    defer allocator.free(shared);
+    if (isExecutableFile(io, shared)) return try allocator.dupe(u8, shared);
+
+    var dir = std.Io.Dir.cwd().openDir(io, profiles, .{ .iterate = true }) catch return null;
+    defer dir.close(io);
+    var it = dir.iterate();
+    while (it.next(io) catch null) |entry| {
+        if (entry.name.len == 0 or entry.name[0] == '.') continue;
+        const candidate = try std.fs.path.join(allocator, &.{
+            profiles, entry.name, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js",
+        });
+        defer allocator.free(candidate);
+        if (isExecutableFile(io, candidate)) return try allocator.dupe(u8, candidate);
+    }
+    return null;
+}
+
+/// The pi launcher under the user's own pi directory.
+fn findPi(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+) !?[]const u8 {
+    const env_map = env orelse return null;
+    const dir = env_map.get("PI_CODING_AGENT_DIR") orelse blk: {
+        const user_home = env_map.get("HOME") orelse return null;
+        break :blk try std.fs.path.join(allocator, &.{ user_home, ".pi", "agent" });
+    };
+    defer allocator.free(dir);
+
+    const launcher = try std.fs.path.join(allocator, &.{ dir, "bin", "pi" });
+    defer allocator.free(launcher);
+    if (isExecutableFile(io, launcher)) return try allocator.dupe(u8, launcher);
+    return null;
+}
+
+/// Whether the path is a file that can be executed.
+///
+/// A directory counts as executable too, so the kind is checked as well:
+/// a directory that happens to share a CLI's name would otherwise be
+/// picked up and the CLI would never run.
+fn isExecutableFile(io: std.Io, path: []const u8) bool {
+    const stat = std.Io.Dir.cwd().statFile(io, path, .{}) catch return false;
+    if (stat.kind != .file) return false;
+    std.Io.Dir.cwd().access(io, path, .{ .execute = true }) catch return false;
+    return true;
+}
+
 
 /// Whether the installed CLI can run against a private server.
 ///
@@ -246,8 +426,15 @@ fn probe(allocator: std.mem.Allocator, io: std.Io, p: Provider) bool {
 ///
 /// The flag is optional in the CLI, so it is probed rather than assumed:
 /// an older opencode does not know it and would fail on the flag.
-pub fn supportsStandalone(allocator: std.mem.Allocator, io: std.Io, p: Provider) bool {
-    const argv = [_][]const u8{ p.name(), "run", "--help" };
+pub fn supportsStandalone(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+    p: Provider,
+) bool {
+    const exe = resolveExecutable(allocator, io, env, p) catch return false;
+    defer allocator.free(exe);
+    const argv = [_][]const u8{ exe, "run", "--help" };
     const result = std.process.run(allocator, io, .{
         .argv = &argv,
         .stdout_limit = .limited(256 * 1024),
@@ -374,12 +561,18 @@ pub fn cleanupOpenCodeWorkspace(io: std.Io, allocator: std.mem.Allocator, backup
 
 /// Build the command line for one agent run.
 ///
+/// `exe` is the command that runs the CLI — see `resolveExecutable`.
 /// The caller owns the returned list.
-fn buildArgv(allocator: std.mem.Allocator, provider: Provider, req: RunRequest) !std.ArrayList([]const u8) {
+fn buildArgv(
+    allocator: std.mem.Allocator,
+    exe: []const u8,
+    provider: Provider,
+    req: RunRequest,
+) !std.ArrayList([]const u8) {
     var argv: std.ArrayList([]const u8) = .empty;
     errdefer argv.deinit(allocator);
 
-    try argv.append(allocator, provider.name());
+    try argv.append(allocator, exe);
     switch (provider) {
         .opencode => {
             try argv.append(allocator, "run");
@@ -432,6 +625,59 @@ fn buildArgv(allocator: std.mem.Allocator, provider: Provider, req: RunRequest) 
             for (req.custom_args) |a| try argv.append(allocator, a);
             try argv.append(allocator, req.prompt);
         },
+        .dsh => {
+            // The headless profile answers one task and exits: the
+            // answer goes to stdout, the diagnostics to stderr.
+            try argv.append(allocator, "--profile");
+            try argv.append(allocator, "headless");
+            // A task that only answers must not be able to change
+            // anything. A task that edits code stays inside the
+            // directory it was given: dsh's sandbox roots at the working
+            // directory, so the agent has nowhere else to write.
+            try argv.append(allocator, "--permission-mode");
+            try argv.append(allocator, if (req.can_edit) "workspace-write" else "read-only");
+            // Nobody can answer an approval prompt in a non-interactive
+            // run — the presets ask by default, so the policy has to say
+            // "never" or the task waits for a user who is not there.
+            try argv.append(allocator, "--approval-policy");
+            try argv.append(allocator, "never");
+            for (req.custom_args) |a| try argv.append(allocator, a);
+            // `--` so a task that starts with a dash is read as the task
+            // and not as a flag.
+            try argv.append(allocator, "--");
+            try argv.append(allocator, req.prompt);
+        },
+        .pi => {
+            // `-p` is pi's non-interactive mode: the prompt is processed
+            // and the process exits.
+            try argv.append(allocator, "-p");
+            try argv.append(allocator, "--mode");
+            try argv.append(allocator, "text");
+            // No session file: the daemon runs one task after another,
+            // and a session per task would pile up in the user's own
+            // directory.
+            try argv.append(allocator, "--no-session");
+            // A task that only answers gets no tools: it has nothing to
+            // act on, and a tool-enabled agent pointed at an empty
+            // directory only wanders. A task that edits code works in
+            // the private worktree the platform prepared, so the files
+            // in it are the user's own and are trusted.
+            if (req.can_edit) {
+                try argv.append(allocator, "--approve");
+            } else {
+                try argv.append(allocator, "--no-tools");
+                try argv.append(allocator, "--no-approve");
+            }
+            if (req.model.len > 0) {
+                try argv.append(allocator, "--model");
+                try argv.append(allocator, req.model);
+            }
+            for (req.custom_args) |a| try argv.append(allocator, a);
+            // `--` so a prompt that starts with a dash is read as the
+            // prompt and not as a flag.
+            try argv.append(allocator, "--");
+            try argv.append(allocator, req.prompt);
+        },
     }
     return argv;
 }
@@ -480,7 +726,18 @@ pub fn runAgent(
         profile_backup = backup;
     }
 
-    var argv = try buildArgv(allocator, provider, req);
+    // The command that runs the CLI. It is not always the provider's
+    // name: dsh and pi install themselves outside PATH.
+    const exe = resolveExecutable(allocator, io, req.base_env, provider) catch |err| {
+        return RunOutcome{
+            .output = "",
+            .exit_code = null,
+            .failure = try std.fmt.allocPrint(allocator, "the daemon could not find the {s} CLI ({s})", .{ provider.name(), @errorName(err) }),
+        };
+    };
+    defer allocator.free(exe);
+
+    var argv = try buildArgv(allocator, exe, provider, req);
     defer argv.deinit(allocator);
 
     // The child gets the daemon's environment plus the agent's overrides.
@@ -564,7 +821,12 @@ fn describeFailure(
         .claude => {
             if (try claudeErrorMessage(allocator, stdout)) |msg| return msg;
         },
-        .codex => {},
+        .pi => {
+            if (try piErrorMessage(allocator, stderr)) |msg| return msg;
+        },
+        // dsh explains itself on stderr ("dsh: MISSING_CREDENTIAL: ..."),
+        // so the generic fallback below already carries the reason.
+        .codex, .dsh => {},
     }
     if (firstLine(stderr).len > 0) return allocator.dupe(u8, firstLine(stderr));
     if (firstLine(stdout).len > 0) return allocator.dupe(u8, firstLine(stdout));
@@ -613,6 +875,26 @@ fn claudeErrorMessage(allocator: std.mem.Allocator, stdout: []const u8) !?[]cons
     return null;
 }
 
+/// Pull the message out of pi's error line.
+///
+/// pi reports a refused request as `<code>: {"message": "...", "type":
+/// "..."}` on stderr. The JSON carries the sentence a user can act on;
+/// the bare status code does not.
+fn piErrorMessage(allocator: std.mem.Allocator, stderr: []const u8) !?[]const u8 {
+    const line = firstLine(stderr);
+    if (line.len == 0) return null;
+    const brace = std.mem.indexOfScalar(u8, line, '{') orelse return null;
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, line[brace..], .{}) catch return null;
+    defer parsed.deinit();
+    const root = parsed.value;
+    if (root != .object) return null;
+    const message = root.object.get("message") orelse return null;
+    if (message != .string) return null;
+    const trimmed = std.mem.trim(u8, message.string, " \t\r\n");
+    if (trimmed.len == 0) return null;
+    return try allocator.dupe(u8, trimmed);
+}
+
 /// Build the child environment: the daemon's own, plus the agent's
 /// overrides, plus a `PWD` that agrees with the child's directory.
 ///
@@ -649,7 +931,12 @@ fn extractAnswer(allocator: std.mem.Allocator, provider: Provider, stdout: []con
     return switch (provider) {
         .opencode => extractOpenCodeText(allocator, stdout),
         .claude => extractClaudeResult(allocator, stdout),
+        // These three print the answer as plain text: codex on stdout,
+        // dsh through its headless profile, pi in text mode. dsh puts
+        // its diagnostics on stderr, so stdout carries the answer alone.
         .codex => allocator.dupe(u8, std.mem.trim(u8, stdout, " \t\r\n")),
+        .dsh => allocator.dupe(u8, std.mem.trim(u8, stdout, " \t\r\n")),
+        .pi => allocator.dupe(u8, std.mem.trim(u8, stdout, " \t\r\n")),
     };
 }
 
@@ -725,8 +1012,251 @@ test "provider names round-trip" {
     try testing.expectEqual(Provider.opencode, Provider.fromName("opencode").?);
     try testing.expectEqual(Provider.claude, Provider.fromName("claude").?);
     try testing.expectEqual(Provider.codex, Provider.fromName("codex").?);
+    try testing.expectEqual(Provider.dsh, Provider.fromName("dsh").?);
+    try testing.expectEqual(Provider.pi, Provider.fromName("pi").?);
     try testing.expect(Provider.fromName("auto") == null);
     try testing.expect(Provider.fromName("") == null);
+}
+
+test "the environment can name the provider to run" {
+    var env = std.process.Environ.Map.init(testing.allocator);
+    defer env.deinit();
+
+    try testing.expect(forcedProvider(&env) == null);
+
+    try env.put("ONEPERSON_AGENT_PROVIDER", "pi");
+    try testing.expectEqual(Provider.pi, forcedProvider(&env).?);
+
+    // A name nobody knows is not a provider: the daemon falls back to
+    // detection rather than refusing to run at all.
+    try env.put("ONEPERSON_AGENT_PROVIDER", "nope");
+    try testing.expect(forcedProvider(&env) == null);
+
+    // Whitespace around the name is noise from a copy-paste.
+    try env.put("ONEPERSON_AGENT_PROVIDER", " dsh\n");
+    try testing.expectEqual(Provider.dsh, forcedProvider(&env).?);
+}
+
+test "dsh answers one task through the headless profile" {
+    var argv = try buildArgv(testing.allocator, "dsh", .dsh, .{ .prompt = "做一件事" });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--profile headless ") != null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "-- 做一件事 ") != null);
+}
+
+test "dsh never asks for approval in a non-interactive run" {
+    // The permission presets ask by default, and nobody is there to
+    // answer: the run would wait until the task timed out.
+    var argv = try buildArgv(testing.allocator, "dsh", .dsh, .{ .prompt = "做一件事" });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--approval-policy never ") != null);
+}
+
+test "dsh keeps an editing task inside its own directory" {
+    var argv = try buildArgv(testing.allocator, "dsh", .dsh, .{
+        .prompt = "做一件事",
+        .can_edit = true,
+    });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    // The sandbox roots at the working directory, so the agent has
+    // nowhere else to write.
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--permission-mode workspace-write ") != null);
+}
+
+test "a task that only answers gets no write access" {
+    var argv = try buildArgv(testing.allocator, "dsh", .dsh, .{ .prompt = "做一件事" });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--permission-mode read-only ") != null);
+}
+
+test "pi runs non-interactively and leaves no session behind" {
+    var argv = try buildArgv(testing.allocator, "pi", .pi, .{ .prompt = "做一件事" });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "-p ") != null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--mode text ") != null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--no-session ") != null);
+    try testing.expect(std.mem.indexOf(u8, joined.items, "-- 做一件事 ") != null);
+}
+
+test "a task that only answers gives pi no tools" {
+    var argv = try buildArgv(testing.allocator, "pi", .pi, .{ .prompt = "做一件事" });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--no-tools ") != null);
+}
+
+test "an editing task keeps pi's tools" {
+    var argv = try buildArgv(testing.allocator, "pi", .pi, .{
+        .prompt = "做一件事",
+        .can_edit = true,
+    });
+    defer argv.deinit(testing.allocator);
+
+    var joined: std.ArrayList(u8) = .empty;
+    defer joined.deinit(testing.allocator);
+    for (argv.items) |a| {
+        try joined.appendSlice(testing.allocator, a);
+        try joined.append(testing.allocator, ' ');
+    }
+
+    try testing.expect(std.mem.indexOf(u8, joined.items, "--no-tools") == null);
+}
+
+test "dsh and pi answer with the text on stdout" {
+    const dsh_answer = try extractAnswer(testing.allocator, .dsh, "最终答案\n");
+    defer testing.allocator.free(dsh_answer);
+    try testing.expectEqualStrings("最终答案", dsh_answer);
+
+    const pi_answer = try extractAnswer(testing.allocator, .pi, "最终答案\n");
+    defer testing.allocator.free(pi_answer);
+    try testing.expectEqualStrings("最终答案", pi_answer);
+}
+
+test "pi's error line becomes a readable reason" {
+    // The shape pi prints on stderr when the request is refused.
+    const stderr = "403: {\"message\":\"Your current subscription does not have access to Kimi Code right now.\",\"type\":\"permission_denied_error\"}\n";
+    const reason = try describeFailure(testing.allocator, .pi, "", stderr);
+    defer testing.allocator.free(reason);
+    try testing.expectEqualStrings(
+        "Your current subscription does not have access to Kimi Code right now.",
+        reason,
+    );
+}
+
+test "dsh's own message is the reason" {
+    // dsh explains itself on stderr and says nothing on stdout.
+    const stderr = "dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route \"deepseek-official\"\n";
+    const reason = try describeFailure(testing.allocator, .dsh, "", stderr);
+    defer testing.allocator.free(reason);
+    try testing.expectEqualStrings(
+        "dsh: MISSING_CREDENTIAL: llm-deepseek: no API key for provider route \"deepseek-official\"",
+        reason,
+    );
+}
+
+test "the dsh CLI is found in the user's own dsh home" {
+    // dsh installs itself under its own home directory and never puts
+    // it on PATH — a daemon that only looked at PATH would never find
+    // it.
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, ".dsh/profiles/node_modules/@deepseek-ai/dsh/lib");
+    const cli = ".dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js";
+    var file = try tmp.dir.createFile(io, cli, .{});
+    file.close(io);
+    try tmp.dir.setFilePermissions(io, cli, @enumFromInt(0o755), .{});
+
+    const home = try std.fs.path.join(testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer testing.allocator.free(home);
+
+    var env = std.process.Environ.Map.init(testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", home);
+    // An empty PATH: the CLI is nowhere on it.
+    try env.put("PATH", "");
+
+    const exe = try resolveExecutable(testing.allocator, io, &env, .dsh);
+    defer testing.allocator.free(exe);
+    try testing.expect(std.mem.endsWith(u8, exe, ".dsh/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js"));
+}
+
+test "the pi launcher is found in the user's own pi directory" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, ".pi/agent/bin");
+    const cli = ".pi/agent/bin/pi";
+    var file = try tmp.dir.createFile(io, cli, .{});
+    file.close(io);
+    try tmp.dir.setFilePermissions(io, cli, @enumFromInt(0o755), .{});
+
+    const home = try std.fs.path.join(testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer testing.allocator.free(home);
+
+    var env = std.process.Environ.Map.init(testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", home);
+    try env.put("PATH", "");
+
+    const exe = try resolveExecutable(testing.allocator, io, &env, .pi);
+    defer testing.allocator.free(exe);
+    try testing.expect(std.mem.endsWith(u8, exe, ".pi/agent/bin/pi"));
+}
+
+test "a file that cannot be executed is not a CLI" {
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.createDirPath(io, ".pi/agent/bin");
+    const cli = ".pi/agent/bin/pi";
+    var file = try tmp.dir.createFile(io, cli, .{});
+    file.close(io);
+    // No execute bit: the file is there, but it cannot be run.
+
+    const home = try std.fs.path.join(testing.allocator, &.{ ".zig-cache", "tmp", &tmp.sub_path });
+    defer testing.allocator.free(home);
+
+    var env = std.process.Environ.Map.init(testing.allocator);
+    defer env.deinit();
+    try env.put("HOME", home);
+    try env.put("PATH", "");
+
+    // Nothing found: the bare name is still the answer, because the OS
+    // resolves it against PATH when the child is spawned.
+    const exe = try resolveExecutable(testing.allocator, io, &env, .pi);
+    defer testing.allocator.free(exe);
+    try testing.expectEqualStrings("pi", exe);
 }
 
 test "opencode output: the last text part wins" {
@@ -773,7 +1303,7 @@ test "opencode runs the 1Person profile, not opencode's plan agent" {
     // opencode's `plan` agent refuses to produce a result until the
     // user switches it to another mode, so a task that asks for an
     // answer comes back with "switch me to build mode" instead.
-    var argv = try buildArgv(testing.allocator, .opencode, .{
+    var argv = try buildArgv(testing.allocator, "opencode", .opencode, .{
         .prompt = "做一件事",
         .model = "opencode/some-model",
     });
@@ -796,7 +1326,7 @@ test "opencode runs against a private server when the CLI can do that" {
     // and serves THAT project's configuration to a run that lands in a
     // directory it already knows — so the profile written next to the
     // task is ignored and the run dies with "agent not found".
-    var argv = try buildArgv(testing.allocator, .opencode, .{
+    var argv = try buildArgv(testing.allocator, "opencode", .opencode, .{
         .prompt = "做一件事",
         .use_standalone = true,
     });
@@ -814,7 +1344,7 @@ test "opencode runs against a private server when the CLI can do that" {
 }
 
 test "opencode without a private server still uses the 1Person profile" {
-    var argv = try buildArgv(testing.allocator, .opencode, .{ .prompt = "做一件事" });
+    var argv = try buildArgv(testing.allocator, "opencode", .opencode, .{ .prompt = "做一件事" });
     defer argv.deinit(testing.allocator);
 
     var joined: std.ArrayList(u8) = .empty;
