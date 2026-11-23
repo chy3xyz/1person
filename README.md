@@ -98,7 +98,7 @@ irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 |
 1person setup          # Configure, authenticate, and start the daemon
 ```
 
-The daemon runs in the background and keeps your machine connected to 1Person. It automatically detects the agent CLIs available on `PATH` (`agy`, `claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`).
+The daemon runs in the background and keeps your machine connected to 1Person. It detects the agent CLI this machine can run (`opencode`, `claude`, `codex`, `dsh`, `pi`) and registers the runtime under it. Set `ONEPERSON_AGENT_PROVIDER` to pick a specific one.
 
 ### 3. Connect a runtime, create an agent, assign work
 

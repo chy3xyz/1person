@@ -128,6 +128,7 @@ These are configured on each user's machine, not on the server:
 | `ONEPERSON_APP_URL` | `http://localhost:3000` | Frontend URL for CLI login flow |
 | `ONEPERSON_DAEMON_POLL_INTERVAL` | `3s` | How often the daemon polls for tasks |
 | `ONEPERSON_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat frequency |
+| `ONEPERSON_AGENT_PROVIDER` | auto-detected | Which agent CLI to run: `opencode`, `claude`, `codex`, `dsh` or `pi` |
 
 Agent-specific overrides:
 
@@ -149,6 +150,8 @@ Agent-specific overrides:
 | `ONEPERSON_GEMINI_MODEL` | Override the Gemini model used |
 | `ONEPERSON_PI_PATH` | Custom path to the `pi` binary |
 | `ONEPERSON_PI_MODEL` | Override the Pi model used |
+| `ONEPERSON_DSH_PATH` | Custom path to the `dsh` binary |
+| `ONEPERSON_DSH_MODEL` | Override the DeepSeek Harness model used |
 | `ONEPERSON_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `ONEPERSON_CURSOR_MODEL` | Override the Cursor Agent model used |
 

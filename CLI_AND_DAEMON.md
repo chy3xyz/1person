@@ -142,26 +142,35 @@ Logs go to stdout. Redirect them when running detached:
 
 ### Supported Agents
 
-The daemon cannot spawn agent CLIs yet — that work is tracked as M4 in
-`backend/docs/zig-daemon-plan.md`. The table below is the target set of
-runtimes to detect.
+The daemon spawns the agent CLI itself, so only the CLIs below can run a
+task. It detects them at start-up and registers the runtime under the one
+it found.
 
 | CLI | Command | Description |
 |-----|---------|-------------|
+| [OpenCode](https://opencode.ai) | `opencode` | Open-source coding agent; answers without a paid subscription |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
-| [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
-| OpenCode | `opencode` | Open-source coding agent |
-| OpenClaw | `openclaw` | Open-source coding agent |
-| Hermes | `hermes` | Nous Research coding agent |
-| Gemini | `gemini` | Google's coding agent |
+| [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek's agent harness, driven through its headless profile |
 | [Pi](https://pi.dev/) | `pi` | Pi coding agent |
-| [Cursor Agent](https://cursor.com/) | `cursor-agent` | Cursor's headless coding agent |
-| Kimi | `kimi` | Moonshot coding agent |
-| Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
 
-Each of these will be registered as an available runtime once detection
-lands.
+The first CLI in that order that actually runs wins — and that order is
+the product's, not the user's. `ONEPERSON_AGENT_PROVIDER` names the one to
+use instead:
+
+```bash
+ONEPERSON_AGENT_PROVIDER=pi 1p daemon
+```
+
+Two of these do not put themselves on `PATH`: `dsh` installs a Node CLI
+under its own home directory (`$DSH_HOME`, `~/.dsh` by default) and `pi`
+installs its launcher under `$PI_CODING_AGENT_DIR` (`~/.pi/agent` by
+default). The daemon looks in those places too, so a plain install works
+without a symlink.
+
+The other CLIs the product lists (Copilot, OpenClaw, Hermes, Gemini,
+Cursor Agent, Kimi, Kiro CLI, Antigravity) are not run by this daemon
+yet — it has no code path for them.
 
 ### How It Works
 
@@ -175,7 +184,8 @@ lands.
 
 > The knobs below belong to the target daemon. The shipped Zig build reads
 > only the two intervals the `1p daemon` command exposes — `--claim_ms`
-> (default 15000) and `--heartbeat_ms` (default 30000).
+> (default 15000) and `--heartbeat_ms` (default 30000) — plus
+> `ONEPERSON_AGENT_PROVIDER`, which names the agent CLI to run.
 
 Daemon behavior is configured via flags or environment variables:
 
@@ -229,6 +239,8 @@ Agent-specific overrides:
 | `ONEPERSON_GEMINI_MODEL` | Override the Gemini model used |
 | `ONEPERSON_PI_PATH` | Custom path to the `pi` binary |
 | `ONEPERSON_PI_MODEL` | Override the Pi model used |
+| `ONEPERSON_DSH_PATH` | Custom path to the `dsh` binary |
+| `ONEPERSON_DSH_MODEL` | Override the DeepSeek Harness model used |
 | `ONEPERSON_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
 | `ONEPERSON_CURSOR_MODEL` | Override the Cursor Agent model used |
 | `ONEPERSON_KIMI_PATH` | Custom path to the `kimi` binary |

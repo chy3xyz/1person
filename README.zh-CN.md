@@ -98,7 +98,7 @@ irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 |
 1person setup          # 一条命令完成配置、认证、启动 daemon
 ```
 
-daemon 在后台运行，保持你的机器与 1Person 的连接，并自动检测 `PATH` 中可用的 Agent CLI（`agy`、`claude`、`codex`、`copilot`、`openclaw`、`opencode`、`hermes`、`gemini`、`pi`、`cursor-agent`、`kimi`、`kiro-cli`）。
+daemon 在后台运行，保持你的机器与 1Person 的连接。它会探测本机能跑的 Agent CLI（`opencode`、`claude`、`codex`、`dsh`、`pi`）并以该 CLI 的名字注册运行时。用 `ONEPERSON_AGENT_PROVIDER` 可以指定用哪一个。
 
 ### 3. 连接 Runtime、创建 Agent、分配任务
 
