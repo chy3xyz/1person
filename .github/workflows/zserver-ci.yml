@@ -85,6 +85,16 @@ jobs:
       - name: Unit tests
         run: zig build test
 
+      - name: Database-mode rules
+        # The e2e scripts and the server must agree on what an unset and
+        # an empty DATABASE_URL mean: unset is the server's default
+        # database, empty is no-DB mode. The scripts used to read the
+        # variable with `${DATABASE_URL:-}`, which cannot tell the two
+        # apart — the teardown skipped the cleanup while the server had
+        # written to the default database, and the smoke test demanded a
+        # 503 from a connected server.
+        run: bash scripts/check_db_mode.sh
+
       - name: E2E — issue suite, no-DB mode
         run: |
           JWT_SECRET=test-secret ONEPERSON_DEV_VERIFICATION_CODE=000000 DATABASE_URL="" \
