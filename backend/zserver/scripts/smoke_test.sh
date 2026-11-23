@@ -98,7 +98,11 @@ if e2e_database_enabled; then
         pass "GET /readyz (200)"
     else
         fail "GET /readyz (expected 200, got ${ready_status}): $(http_body "${BASE}/readyz")"
-        echo "      hint: apply migrations first: zig-out/bin/zserver migrate --db_url \"$(e2e_database_url)\""
+        # Point at the script that resolves the database the same way the
+        # server does, instead of printing the connection string: it can
+        # carry a password, and this output ends up in terminal scrollback
+        # and in CI logs.
+        echo "      hint: apply the migrations first: ./scripts/db-migrate.sh"
     fi
 elif [[ "${ready_status}" == "503" ]]; then
     echo "SKIP: /readyz (DATABASE_URL is empty; server correctly reports not_ready)"
