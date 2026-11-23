@@ -86,6 +86,12 @@ pub fn load(parent_allocator: std.mem.Allocator, environ: *std.process.Environ.M
     const app_env_raw = try getEnvOwnedDefault(allocator, environ, "APP_ENV", "development");
     const app_env = try allocator.dupe(u8, std.mem.trim(u8, app_env_raw, &std.ascii.whitespace));
 
+    // An unset DATABASE_URL falls back to the built-in default database,
+    // while an empty one means "run without a database" (see
+    // src/server.zig). The two are different on purpose, so the scripts
+    // in backend/zserver/scripts resolve DATABASE_URL the same way —
+    // through scripts/lib/e2e_db.sh — and must not collapse them into
+    // one.
     const db_url = blk: {
         if (opts.db_url) |u| break :blk try allocator.dupe(u8, u);
         break :blk getEnvOwned(allocator, environ, "DATABASE_URL") catch |err| switch (err) {

@@ -18,6 +18,7 @@
 
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_db.sh"
 
 PORT="${PORT:-18093}"
 BASE="http://127.0.0.1:${PORT}"
@@ -107,13 +108,15 @@ WS_ID=$(jget "${ws_body}" id)
 HWS="X-Workspace-Id: ${WS_ID}"
 
 # ─── Seed DB data when running against PostgreSQL ──────────────────
-# The zserver auto-connects to a local postgres instance via its
-# hardcoded default URL, so we seed unconditionally and fall back
-# to a fake assignee_id only when psql is unavailable.
+# Seed the database the server actually uses. This script pins
+# DATABASE_URL to the empty string when the caller did not set one, and
+# that pin is the server's no-DB mode — so there is nothing to seed.
+# The old hardcoded default used to put rows in a database this server
+# never looks at, and left them behind after the run.
 AGENT_RUNTIME_ID="e2e00000-0000-0000-0000-000000000001"
 AGENT_ID="e2e00000-0000-0000-0000-000000000002"
-PG_CONN="${DATABASE_URL:-postgres://1person:1person@localhost:5432/1person?sslmode=disable}"
-if psql "${PG_CONN}" -c "SELECT 1" >/dev/null 2>&1; then
+PG_CONN="$(e2e_database_url)"
+if [[ -n "${PG_CONN}" ]] && psql "${PG_CONN}" -c "SELECT 1" >/dev/null 2>&1; then
     psql "${PG_CONN}" -c "INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider, daemon_id, status, visibility) VALUES ('${AGENT_RUNTIME_ID}'::uuid, '${WS_ID}'::uuid, 'e2e-runtime', 'local', 'e2e', 'e2e-daemon', 'online', 'private') ON CONFLICT (id) DO UPDATE SET workspace_id = EXCLUDED.workspace_id" >/dev/null 2>&1 || true
     psql "${PG_CONN}" -c "INSERT INTO agent (id, workspace_id, name, runtime_id, runtime_mode, visibility, status, description, instructions) VALUES ('${AGENT_ID}'::uuid, '${WS_ID}'::uuid, 'e2e-agent', '${AGENT_RUNTIME_ID}'::uuid, 'local', 'workspace', 'idle', '', '') ON CONFLICT (id) DO UPDATE SET workspace_id = EXCLUDED.workspace_id" >/dev/null 2>&1 || true
     ASSIGNEE_ID="${AGENT_ID}"

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_cleanup.sh"
+source "$(cd "$(dirname "$0")" && pwd)/lib/e2e_db.sh"
 
 # Smoke test for zserver against a local Postgres + Redis.
 # Usage: JWT_SECRET=... DATABASE_URL=... REDIS_URL=... ./scripts/smoke_test.sh
@@ -85,18 +86,24 @@ fi
 # Readiness includes the migration check. When a database is configured this
 # must be a hard 200 -- accepting 503 here would let a broken or un-migrated
 # schema pass the smoke test silently.
+#
+# Which mode the server is in depends on how DATABASE_URL was set: unset
+# means the built-in default database, the empty string means no database
+# at all. `e2e_database_enabled` resolves that the same way
+# `src/config.zig` does -- testing `-n "${DATABASE_URL:-}"` here used to
+# demand a 503 from a server that was connected to the default database.
 ready_status=$(http_status "${BASE}/readyz")
-if [[ -n "${DATABASE_URL:-}" ]]; then
+if e2e_database_enabled; then
     if [[ "${ready_status}" == "200" ]]; then
         pass "GET /readyz (200)"
     else
         fail "GET /readyz (expected 200, got ${ready_status}): $(http_body "${BASE}/readyz")"
-        echo "      hint: apply migrations first: zig-out/bin/zserver migrate --db_url \"\${DATABASE_URL}\""
+        echo "      hint: apply migrations first: zig-out/bin/zserver migrate --db_url \"$(e2e_database_url)\""
     fi
 elif [[ "${ready_status}" == "503" ]]; then
-    echo "SKIP: /readyz (no DATABASE_URL; server correctly reports not_ready)"
+    echo "SKIP: /readyz (DATABASE_URL is empty; server correctly reports not_ready)"
 else
-    fail "GET /readyz (no DATABASE_URL, expected 503, got ${ready_status})"
+    fail "GET /readyz (DATABASE_URL is empty, expected 503, got ${ready_status})"
 fi
 
 # Public config

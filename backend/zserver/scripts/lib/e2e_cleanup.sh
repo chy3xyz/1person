@@ -13,14 +13,27 @@
 # the rows that would otherwise block the account delete, then the account
 # itself.
 #
-# It is a no-op without DATABASE_URL — in no-DB mode nothing was persisted
-# in the first place — and it never fails the calling script: a cleanup
-# problem must not turn a passing run into a failing one.
+# It removes the rows from the database the server actually used, and it
+# never fails the calling script: a cleanup problem must not turn a
+# passing run into a failing one.
+#
+# Which database that is depends on how DATABASE_URL was set: unset means
+# the server's built-in default database, the empty string means it ran
+# without a database at all (and then nothing was persisted). The
+# helpers in `e2e_db.sh` resolve that the same way `src/config.zig`
+# does — a plain `-n "${DATABASE_URL:-}"` test cannot tell the two apart
+# and used to skip the cleanup while the server had written to the
+# default database.
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/e2e_db.sh"
 
 # The account's workspaces. Their children (issues, comments, agents, …)
 # cascade from here.
 e2e_cleanup_workspaces() {
-    psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -v e2e_email="${1:-}" -q <<'SQL' >/dev/null 2>&1 || true
+    local db_url
+    db_url="$(e2e_database_url)"
+    [[ -n "${db_url}" ]] || return 0
+    psql "${db_url}" -v ON_ERROR_STOP=1 -v e2e_email="${1:-}" -q <<'SQL' >/dev/null 2>&1 || true
 DELETE FROM workspace
  WHERE id IN (
     SELECT w.id
@@ -35,7 +48,10 @@ SQL
 # Rows that reference the account directly and are declared NO ACTION, so
 # they have to go before the account does.
 e2e_cleanup_account_refs() {
-    psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -v e2e_email="${1:-}" -q <<'SQL' >/dev/null 2>&1 || true
+    local db_url
+    db_url="$(e2e_database_url)"
+    [[ -n "${db_url}" ]] || return 0
+    psql "${db_url}" -v ON_ERROR_STOP=1 -v e2e_email="${1:-}" -q <<'SQL' >/dev/null 2>&1 || true
 DELETE FROM workspace_invitation WHERE invitee_user_id IN (SELECT id FROM "user" WHERE email = :'e2e_email')
                                     OR inviter_id     IN (SELECT id FROM "user" WHERE email = :'e2e_email');
 DELETE FROM agent_runtime        WHERE owner_id       IN (SELECT id FROM "user" WHERE email = :'e2e_email');
@@ -48,7 +64,10 @@ SQL
 
 # The account itself. Everything else cascades from here.
 e2e_cleanup_account() {
-    psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -v e2e_email="${1:-}" -q <<'SQL' >/dev/null 2>&1 || true
+    local db_url
+    db_url="$(e2e_database_url)"
+    [[ -n "${db_url}" ]] || return 0
+    psql "${db_url}" -v ON_ERROR_STOP=1 -v e2e_email="${1:-}" -q <<'SQL' >/dev/null 2>&1 || true
 DELETE FROM "user" WHERE email = :'e2e_email';
 SQL
 }
@@ -63,7 +82,12 @@ SQL
 # the first one and silently skips the second account.
 e2e_cleanup_user() {
     local email
-    [[ -n "${DATABASE_URL:-}" ]] || return 0
+    local db_url
+    # Resolve the database the way the server does: an unset DATABASE_URL
+    # is the built-in default database, an empty one means the server ran
+    # without a database and nothing was persisted.
+    db_url="$(e2e_database_url)"
+    [[ -n "${db_url}" ]] || return 0
     command -v psql >/dev/null 2>&1 || return 0
     for email in "$@"; do
         # An address is what a lookup can match; anything else (an empty

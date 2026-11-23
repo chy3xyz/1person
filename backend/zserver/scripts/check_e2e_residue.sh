@@ -10,11 +10,17 @@
 # Usage:
 #   DATABASE_URL=postgres://... ./scripts/check_e2e_residue.sh
 #
-# Without DATABASE_URL there is nothing persisted to check.
+# The check runs against the database the server would use: an unset
+# DATABASE_URL means the built-in default database (the server connected
+# to it), the empty string means the server ran without a database and
+# there is nothing to check.
 set -uo pipefail
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-    echo "check-e2e-residue: no DATABASE_URL — nothing persisted, nothing to check"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/e2e_db.sh"
+
+db_url="$(e2e_database_url)"
+if [[ -z "${db_url}" ]]; then
+    echo "check-e2e-residue: DATABASE_URL is empty — the server ran without a database, nothing persisted"
     exit 0
 fi
 command -v psql >/dev/null 2>&1 || { echo "check-e2e-residue: psql not available"; exit 0; }
@@ -27,14 +33,14 @@ email LIKE '%@example.com'
    OR email LIKE '%@test.local'
 SQL
 
-LEFTOVER_WORKSPACES=$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "
+LEFTOVER_WORKSPACES=$(psql "${db_url}" -v ON_ERROR_STOP=1 -tAc "
     SELECT count(*)
       FROM workspace w
       JOIN \"member\" m ON m.workspace_id = w.id AND m.role = 'owner'
       JOIN \"user\" u ON u.id = m.user_id
      WHERE ${DOMAIN_FILTER};" 2>/dev/null || echo "?")
 
-LEFTOVER_USERS=$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "
+LEFTOVER_USERS=$(psql "${db_url}" -v ON_ERROR_STOP=1 -tAc "
     SELECT count(*) FROM \"user\" u WHERE ${DOMAIN_FILTER};" 2>/dev/null || echo "?")
 
 if [[ "${LEFTOVER_WORKSPACES}" == "0" && "${LEFTOVER_USERS}" == "0" ]]; then
@@ -47,12 +53,12 @@ fi
 # that names the real problem instead of counting "?".
 if [[ "${LEFTOVER_WORKSPACES}" == "?" || "${LEFTOVER_USERS}" == "?" ]]; then
     echo "check-e2e-residue: FAILED — could not query the database, so residue could not be ruled out" >&2
-    psql "${DATABASE_URL}" -c "SELECT 1" >&2 || true
+    psql "${db_url}" -c "SELECT 1" >&2 || true
     exit 1
 fi
 
 echo "check-e2e-residue: FAILED — the e2e suites left ${LEFTOVER_WORKSPACES} workspace(s) and ${LEFTOVER_USERS} account(s) behind" >&2
-psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "
+psql "${db_url}" -v ON_ERROR_STOP=1 -tAc "
     SELECT w.slug || '  (' || u.email || ')'
       FROM workspace w
       JOIN \"member\" m ON m.workspace_id = w.id AND m.role = 'owner'

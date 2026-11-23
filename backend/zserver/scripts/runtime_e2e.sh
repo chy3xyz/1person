@@ -318,7 +318,7 @@ PYEOF
         warn "psql insert failed; skipping DB-mode checks"
     fi
 else
-    warn "DATABASE_URL not set — skipping DB-mode checks (no-DB mode only)"
+    warn "DATABASE_URL is empty — skipping DB-mode checks (no-DB mode only)"
 fi
 
 # ─── summary ──────────────────────────────────────────────────────────
