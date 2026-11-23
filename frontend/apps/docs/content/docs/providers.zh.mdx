@@ -1,11 +1,11 @@
 ---
 title: AI 编程工具对照
-description: 1Person 支持 12 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+description: 1Person 支持 13 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-1Person 内置支持 **12 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 1Person 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+1Person 内置支持 **13 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 1Person 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
 
 创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
 
@@ -18,6 +18,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | **Codex** | OpenAI | ⚠️ 代码存在但不可达 | ✅ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
 | **Cursor** | Anysphere | ⚠️ 代码存在但不可用 | ✅ | `.cursor/skills/` | 动态发现 |
+| **DeepSeek Harness** | DeepSeek | ❌（CLI 能用 `--session-id` 续跑，daemon 每次都新起）| ❌ | ❌ | 静态（profile 自带的默认模型）|
 | **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | 静态 |
 | **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` （fallback）| 动态发现 |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 动态发现 |
@@ -72,6 +73,10 @@ SST 出品，开源。动态发现可用模型和模型 variant（扫 CLI 的配
 
 开源项目，CLI agent 编排器。MCP 配置通过 1Person 的单次任务配置 wrapper 写入。**模型绑定在智能体层**（`openclaw agents add --model`）——不能在单次任务里覆盖。配置严格受控：用户不能传 `--model` 或 `--system-prompt`，由智能体注册时的配置决定。
 
+### DeepSeek Harness
+
+DeepSeek 出品，基于 DeepSeek Harness。本地 daemon 通过它的 **headless profile** 驱动：进一个任务，答案打到 stdout，进程退出。每个任务都从零开始——CLI 本身支持用 `--session-id` 续跑会话，但 daemon 没有用上——MCP 配置也还没给它接上。这个 CLI 装在自己的家目录（`~/.dsh`）下而不是 `PATH` 上，所以 daemon 是去那里找它的。
+
 ### Pi
 
 Inflection AI 出品，极简主义。**会话恢复机制特殊**——session ID 是磁盘上的文件路径（`~/.pi/...`），而不是字符串 ID。其他工具里，resume id 是 CLI 返回的字符串；Pi 里，resume id 就是会话文件本身。
@@ -84,13 +89,13 @@ Inflection AI 出品，极简主义。**会话恢复机制特殊**——session 
 |---|---|---|
 | ✅ 真用 | Antigravity、Claude Code、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi | 传 resume id，会从上次上下文接着继续 |
 | ⚠️ 代码存在但不可达 | Codex、Cursor | 代码里有 resume 路径但实际走不到（Codex 静默回落、Cursor session id 不回传）—— **当作不支持** |
-| ❌ 无 | Gemini | CLI 无 resume 机制 |
+| ❌ 无 | DeepSeek Harness、Gemini | CLI 无 resume 机制，或 daemon 没有接上 |
 
 **对你的决策**：如果工作流需要智能体在多次任务之间保持上下文（失败重试、手动重跑、对话式迭代），只选 ✅ 那一行的工具。
 
 ## MCP 配置：按工具不同
 
-**12 款工具里有 8 款实际消费 `mcp_config`：Claude Code、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw**。其他 4 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
+**13 款工具里有 8 款实际消费 `mcp_config`：Claude Code、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw**。其他 5 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
 
 各工具的接入方式不同：Claude Code 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 1Person 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
 
