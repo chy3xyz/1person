@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: 1Person drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
+description: 1Person drives whichever AI coding tools you have on your machine. This page shows you how to install the tools the daemon can run, and the eight that are on the lineup but not yet drivable.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in 1Person is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in 1Person is the daemon on your machine paired with one AI coding tool the daemon found. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned your machine and didn't find any of the five tools it knows how to drive. Install one of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -21,7 +21,7 @@ The 1Person server never sees your API keys or the tools themselves. Everything 
 Two prerequisites apply to **every** tool below:
 
 1. **The 1Person daemon must be running.** Either run `1person daemon start` after installing the [1Person CLI](/cli), or use the [1Person desktop app](/desktop-app), which launches the daemon automatically. Without a running daemon there is nothing to detect tools.
-2. **The tool's binary must be reachable on `PATH`.** The daemon shells out to each tool by name (see the **Daemon looks for** column in each section). If `which <name>` doesn't find it in your terminal, the daemon won't find it either. After installing, open a fresh terminal (or restart the daemon) so the new `PATH` entry is picked up.
+2. **The tool must be reachable.** The daemon shells out to each tool by name (see the **Daemon looks for** column in each section), and `PATH` is the usual place. Two of them — DeepSeek Harness and Pi — install themselves under their own home directory instead, and the daemon looks there as well, so no symlink is needed. If `which <name>` doesn't find it in your terminal, the daemon won't find it either. After installing, open a fresh terminal (or restart the daemon) so the new `PATH` entry is picked up.
 
 After installing a tool, restart the daemon:
 
@@ -29,26 +29,35 @@ After installing a tool, restart the daemon:
 1person daemon restart
 ```
 
-Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
+Or, in the desktop app, just relaunch the app. The daemon re-scans on every start.
 
-## The 12 supported tools
+## The five tools the daemon can drive
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
+Listed roughly from most to least common. Pick whichever one you already have credentials for — you don't need all of them.
+
+### OpenCode (SST)
+
+Open-source CLI agent, and the daemon's default choice: it answers without a paid subscription. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. The daemon passes the agent's model as `--model`; it resumes no session and passes no MCP configuration through.
+
+| | |
+|---|---|
+| Daemon looks for | `opencode` |
+| Install | Follow the official guide at [opencode.ai](https://opencode.ai/) or the GitHub repo at [github.com/sst/opencode](https://github.com/sst/opencode). The typical route is the install script or the npm package. |
+| Authentication | Configure your model provider(s) per OpenCode's docs (Anthropic, OpenAI, etc.). |
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it consumes the `mcp_config` field on agents (see the [matrix](/providers#mcp-configuration-provider-specific-support)).
+Driven in the plain non-interactive form: one prompt in, the answer out. The CLI itself supports session resumption, MCP configuration and fine-tuning flags like `--max-turns`, but the daemon hands it none of them today.
 
 | | |
 |---|---|
 | Daemon looks for | `claude` |
 | Install | Follow the official guide at [claude.com/claude-code](https://www.claude.com/claude-code). The standard route is the npm package `@anthropic-ai/claude-code` (Node.js 18+ required). |
 | Authentication | Run `claude` once and follow the in-CLI login flow, or set `ANTHROPIC_API_KEY`. |
-| Notes | First-choice recommendation for new users. |
 
 ### Codex (OpenAI)
 
-JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written into the per-task `$CODEX_HOME/config.toml`. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
+JSON-RPC 2.0 transport with finer-grained approval gates. The daemon runs it through `codex exec` with a read-only sandbox, so a task that only answers never touches the disk. The CLI's own default model is used.
 
 | | |
 |---|---|
@@ -56,13 +65,37 @@ JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written 
 | Install | Follow the official guide at [github.com/openai/codex](https://github.com/openai/codex). The standard route is the npm package `@openai/codex`. |
 | Authentication | `codex login` (browser-based) or `OPENAI_API_KEY`. |
 
-### Cursor (Anysphere)
+### DeepSeek Harness (DeepSeek)
 
-The CLI counterpart to the Cursor editor. **Session resumption is broken** — Cursor's CLI doesn't return a session id, so the value you pass on resume is always invalid.
+An agent harness built on plugins. The daemon drives its **headless profile**: one task in, the answer on stdout, the process exits. The CLI installs itself under `$DSH_HOME` (`~/.dsh` by default) rather than on `PATH`, and the daemon looks there too.
 
 | | |
 |---|---|
-| Daemon looks for | `cursor-agent` |
+| Daemon looks for | `dsh` — on `PATH`, or `$DSH_HOME/profiles/node_modules/@deepseek-ai/dsh/lib/bin.js` |
+| Install | See the DeepSeek Harness repository at [github.com/deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). |
+| Authentication | Needs a DeepSeek API key (`DEEPSEEK_API_KEY`), configured through the harness's own credentials service. |
+
+### Pi (Inflection AI)
+
+Minimalist. The daemon drives it through its non-interactive mode (`pi -p`): the prompt is processed, the answer comes back on stdout, the process exits. The CLI installs its launcher under `$PI_CODING_AGENT_DIR` (`~/.pi/agent` by default) rather than on `PATH`, and the daemon looks there too.
+
+| | |
+|---|---|
+| Daemon looks for | `pi` — on `PATH`, or `$PI_CODING_AGENT_DIR/bin/pi` |
+| Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
+| Authentication | Per the vendor's docs. |
+
+## Tools on the lineup, not yet drivable
+
+These eight are part of 1Person's tool lineup, but the daemon has no code path for them: it neither detects them nor runs them, so installing one changes nothing until that lands. The install and authentication notes are here so the page stays the single place to look when the support arrives.
+
+### Cursor (Anysphere)
+
+The CLI counterpart to the Cursor editor.
+
+| | |
+|---|---|
+| Daemon looks for | `cursor-agent` — not supported yet |
 | Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
 | Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
 
@@ -72,102 +105,82 @@ Model routing goes through your GitHub account entitlement — the tool doesn't 
 
 | | |
 |---|---|
-| Daemon looks for | `copilot` |
+| Daemon looks for | `copilot` — not supported yet |
 | Install | See GitHub's CLI docs at [github.com/github/copilot-cli](https://github.com/github/copilot-cli). |
 | Authentication | Browser-based GitHub login through the CLI. |
 | Notes | Requires an active GitHub Copilot subscription on the signed-in account. |
 
 ### Gemini (Google)
 
-Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable for one-shot tasks.
+Supports the Gemini 2.5 and 3 series.
 
 | | |
 |---|---|
-| Daemon looks for | `gemini` |
+| Daemon looks for | `gemini` — not supported yet |
 | Install | Follow the official guide at [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli). The standard route is the npm package `@google/gemini-cli`. |
 | Authentication | `gemini` will prompt for a Google account login, or set `GEMINI_API_KEY`. |
 
-### OpenCode (SST)
-
-Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. Consumes the agent's `mcp_config` field through `OPENCODE_CONFIG_CONTENT`.
-
-| | |
-|---|---|
-| Daemon looks for | `opencode` |
-| Install | Follow the official guide at [opencode.ai](https://opencode.ai/) or the GitHub repo at [github.com/sst/opencode](https://github.com/sst/opencode). The typical route is the install script or the npm package. |
-| Authentication | Configure your model provider(s) per OpenCode's docs (Anthropic, OpenAI, etc.). |
-
 ### Kiro CLI (Amazon)
 
-ACP-over-stdio transport. Session resumption works through ACP `session/load`; MCP config is passed through ACP `mcpServers`; skills are copied into `.kiro/skills/`.
+ACP-over-stdio transport.
 
 | | |
 |---|---|
-| Daemon looks for | `kiro-cli` |
+| Daemon looks for | `kiro-cli` — not supported yet |
 | Install | See the Kiro docs at [kiro.dev](https://kiro.dev/). The binary name is `kiro-cli`, not `kiro`. |
 | Authentication | AWS-account-based; follow Kiro's own onboarding. |
 
 ### Kimi (Moonshot)
 
-ACP-protocol agent, primarily aimed at the Chinese market. MCP config is passed through ACP `mcpServers`; skills live under `.kimi/skills/` (native discovery).
+ACP-protocol agent, primarily aimed at the Chinese market.
 
 | | |
 |---|---|
-| Daemon looks for | `kimi` |
+| Daemon looks for | `kimi` — not supported yet |
 | Install | Follow the official guide at [github.com/MoonshotAI/kimi-cli](https://github.com/MoonshotAI/kimi-cli). |
 | Authentication | Moonshot API key, configured per the vendor's docs. |
 
 ### Hermes (Nous Research)
 
-ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
+ACP-protocol agent (shares the transport with Kimi).
 
 | | |
 |---|---|
-| Daemon looks for | `hermes` |
+| Daemon looks for | `hermes` — not supported yet |
 | Install | See Nous Research's repository at [github.com/NousResearch](https://github.com/NousResearch) for the latest CLI distribution. |
 | Authentication | Per the vendor's docs. |
 
 ### OpenClaw
 
-Open-source CLI agent orchestrator. MCP config is materialized through 1Person's per-task config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task, and you can't pass `--model` or `--system-prompt` from 1Person.
+Open-source CLI agent orchestrator. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task.
 
 | | |
 |---|---|
-| Daemon looks for | `openclaw` |
+| Daemon looks for | `openclaw` — not supported yet |
 | Install | See the project at [github.com/openclaw-org/openclaw](https://github.com/openclaw-org/openclaw) (community-maintained). |
 | Authentication | Configure the underlying model provider per OpenClaw's docs. |
 
-### Pi (Inflection AI)
-
-Minimalist. **Session resumption is unusual** — the resume id is the path to a session file on disk, not a string id.
-
-| | |
-|---|---|
-| Daemon looks for | `pi` |
-| Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
-| Authentication | Per the vendor's docs. |
-
 ### Antigravity (Google)
 
-Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and runs Gemini-backed models. Session resumption works through `--conversation <id>`, captured by the daemon from the CLI log file. Model selection is managed inside the Antigravity CLI itself — 1Person disables the per-agent model picker for this provider. Skills are written to `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)).
+Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and runs Gemini-backed models.
 
 | | |
 |---|---|
-| Daemon looks for | `agy` |
+| Daemon looks for | `agy` — not supported yet |
 | Install | Follow the official guide at [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview). The CLI ships pre-built — run `agy install` once to wire up PATH and shell aliases. |
 | Authentication | Run `agy` once interactively and complete the Google account login, or sign in via the Antigravity desktop app — the CLI reuses the keyring entry the GUI writes. |
-| Notes | The CLI emits plain assistant text on stdout, not a structured event stream; intermediate "I will run X" lines and the final reply are both relayed to 1Person as text. |
 
 ## After installing
 
-1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`, `which agy`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
-2. **Restart the daemon.** `1person daemon restart`, or relaunch the desktop app. The daemon only scans `PATH` at startup.
-3. **Check the Runtimes page.** In the 1Person UI, the **Runtimes** page should now list one row per `(workspace × tool)` combination. If the row says "offline", see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
+1. **Confirm the binary is reachable.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which opencode`, `which dsh`, `which pi`). If it prints a path, the daemon will find it — and for `dsh` and `pi` it finds them even without a `PATH` entry. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
+2. **Restart the daemon.** `1person daemon restart`, or relaunch the desktop app. The daemon only scans at startup.
+3. **Check the Runtimes page.** In the 1Person UI, the **Runtimes** page should now list the runtime for the tool the daemon picked. If the row says "offline", see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
 4. **Go back to onboarding.** The "Connect a runtime" step polls and will pick up the new runtime within a few seconds — no need to refresh.
 
 ## Troubleshooting
 
 - **`which` finds the binary but the daemon doesn't.** The daemon was started with an older `PATH`. Restart it.
+- **The wrong tool was picked.** The daemon takes the first one it can run, in a fixed order. Set `ONEPERSON_AGENT_PROVIDER` to name the one you want and restart the daemon.
 - **The binary exists but launching fails.** Run the tool's own `--version` or `--help` once from the terminal — most failures here are missing auth, expired tokens, or a Node.js / runtime mismatch.
 - **The Runtimes page shows the row, but tasks fail immediately.** Check `1person daemon logs -f` while triggering a task. The daemon surfaces the tool's own error output.
 

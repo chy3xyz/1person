@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 이 페이지는 1Person Cloud를 처음부터 끝까지 안내합니다 — **가입 → [CLI](/cli) 설치 → [데몬](/daemon-runtimes) 시작 → [에이전트](/agents) 생성 → 첫 [작업](/tasks) 할당**. 약 5분이 걸립니다.
 
-전제 조건은 하나뿐입니다: 로컬에 [AI 코딩 도구](/providers)([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi) 중 하나)를 이미 최소 하나는 설치해 두어야 합니다. 데몬은 시작할 때 이들을 자동으로 감지하며, 하나도 없으면 시작을 거부합니다.
+전제 조건은 하나뿐입니다: 로컬에 [AI 코딩 도구](/providers)([OpenCode](/providers#opencode), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [DeepSeek Harness](/providers#deepseek-harness), [Pi](/providers#pi) 중 하나)를 이미 최소 하나는 설치해 두어야 합니다. 데몬은 시작할 때 이들을 자동으로 감지합니다. 하나도 없으면 데몬은 여전히 시작하지만 `agent_tasks` 능력 없이 등록되므로 서버가 작업을 넘겨주지 않습니다 — 에이전트를 만들기 전에 하나는 설치하세요.
 
 ## 1. 계정 만들기
 
@@ -54,7 +54,7 @@ irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 |
 1. CLI가 1Person Cloud에 연결하도록 구성합니다
 2. 로그인을 위해 브라우저를 엽니다(웹과 동일한 이메일 인증 코드 / Google OAuth)
 3. 생성된 PAT를 `~/.config/1person/config.json`에 저장합니다
-4. **데몬을 자동으로 시작합니다** — 3초마다 작업을 폴링하고 15초마다 하트비트를 전송하기 시작합니다
+4. **데몬을 자동으로 시작합니다** — 15초마다 작업을 폴링하고 30초마다 하트비트를 전송하기 시작합니다
 
 <Callout type="info">
 **데스크톱 앱을 사용 중이신가요?** 데스크톱 앱은 실행 시 **데몬을 자동으로 시작합니다** — `1person setup`을 직접 실행할 필요가 없습니다. [데스크톱 앱](/desktop-app)을 참고하세요.
@@ -103,7 +103,7 @@ irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 |
 
 **다음으로 데몬에서 일어나는 일**:
 
-1. 3초 이내에 작업을 가져갑니다(상태가 `queued`에서 `dispatched`로 바뀝니다)
+1. 거의 즉시 작업을 가져옵니다 — 서버가 WebSocket으로 푸시하고 폴링은 15초마다 돌아갑니다(상태가 `queued`에서 `dispatched`로 바뀝니다)
 2. 일치하는 AI 코딩 도구를 호출하여 작업을 시작합니다(상태가 `running`이 됩니다)
 3. AI가 로컬에서 작업합니다 — 코드 디렉터리를 읽고, 명령을 실행하고, 파일을 편집할 수 있습니다
 4. 완료되면 결과를 1Person로 다시 보고합니다(자동 재시도 동작 여부에 따라 상태가 `completed` 또는 `failed`가 됩니다)
@@ -114,6 +114,6 @@ irm https://raw.githubusercontent.com/chy3xyz/1person/main/scripts/install.ps1 |
 
 - [데몬과 런타임](/daemon-runtimes) — 데몬이 어떻게 동작하는지와 런타임의 의미
 - [작업](/tasks) — 작업 생명주기와 재시도 규칙
-- [AI 코딩 도구 비교](/providers) — 12개 도구 간의 기능 차이
+- [AI 코딩 도구 비교](/providers) — 13개 도구 간의 기능 차이
 - [데스크톱 앱](/desktop-app) — 데몬을 직접 실행하고 싶지 않은 경우
 - [자체 호스팅 빠른 시작](/self-host-quickstart) — 자체 백엔드 실행하기

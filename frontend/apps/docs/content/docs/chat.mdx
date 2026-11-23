@@ -27,12 +27,12 @@ Agents run in a **fully sandboxed** mode inside a conversation.
 **Can do:**
 
 - Answer the questions in your current message
-- Use its configured [skills](/skills) and MCP
 - Read and write files in its own working directory
 - Call `1person` CLI commands that do not need issue context (for example, querying basic workspace info)
 
 **Cannot do:**
 
+- **Use its configured [skills](/skills) or MCP servers** — the daemon does not copy skill files into the working directory, and no tool consumes an agent's `mcp_config` today (see the [**Providers Matrix**](/providers#mcp-configuration-accepted-not-passed-through))
 - **See any issue** — the prompt the agent receives has no issue IDs, and commands like `1person issue list` return empty
 - **Change any issue** — without issue context, API calls are blocked by permission checks
 - **See other conversations** — conversations are fully isolated
@@ -40,11 +40,9 @@ Agents run in a **fully sandboxed** mode inside a conversation.
 
 ## How multi-turn context is preserved
 
-Chat maintains multi-turn context via **provider session resumption** — the agent establishes a provider session on its first reply (for example, a Claude session), and the session ID is stored. On the next message, the task dispatch passes that ID back so the agent **resumes from where it left off** without re-reading history every time.
+Chat maintains multi-turn context by **rendering the conversation into the prompt**. Before the task goes out, the server writes the earlier turns into it as a `Conversation` section, so the agent reads the history instead of re-deriving it. Nothing is resumed on the CLI side: the daemon never hands a session id to the AI coding tool, so the tool itself starts from a clean context every time — see the [**Providers Matrix**](/providers#session-resumption-not-wired-up-yet).
 
-If **one turn fails**, 1Person looks up the previous task that had established a session ID (whether that task succeeded or failed) and tries to resume — a single failure in the middle does not drop the memory of the whole conversation.
-
-Note: not every provider actually implements session resumption — see the [**Providers Matrix**](/providers) for support status.
+If **one turn fails**, the next message still carries the earlier turns: the context lives in 1Person's conversation record, not in a provider session, so a failure in the middle does not drop the memory of the whole conversation.
 
 ## Archive a conversation
 

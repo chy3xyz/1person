@@ -1,111 +1,113 @@
 ---
 title: AI コーディングツール対応表
-description: 1Person は 13 個の AI コーディングツールをサポートしています。すべて同じインターフェースを実装していますが、機能の詳細は大きく異なります。
+description: 1Person が挙げる AI コーディングツールは 13 個。いまローカル daemon が動かせるのはそのうち 5 個です。このページが正確な対応表です。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-1Person は **13 個の AI コーディングツール**を標準でサポートしています。これらはすべて同じインターフェース（キューへの投入、ディスパッチ、実行、結果の返却）を実装しているため、同じ 1Person ボードからどれでも動かすことができます。**しかし機能の詳細は大きく異なります**: セッション再開が実際に動作するか、MCP をサポートするか、スキルファイルがどこに置かれるか、モデルをどう選択するか。このページがその完全な対応表です。
+1Person は **13 個の AI コーディングツール**をサポートしています。いずれも同じインターフェース（キューへの投入、ディスパッチ、実行、結果の返却）を実装しているため、同じ 1Person ボードからどれでも動かすことができます。**しかし機能の詳細は大きく異なります**: セッション再開が実際に動作するか、MCP がサポートされるか、スキルファイルがどこに置かれるか、モデルをどう選択するか。このページが完全な対応表です。
+
+<Callout type="warning">
+ローカル daemon が動かせるのは、現時点でこのうち **5 個**です: **OpenCode、Claude Code、Codex、DeepSeek Harness、Pi**。残りの 8 個にはコードパスがありません — 検出も実行もせず、そのツールのために登録されたランタイムはタスクを実行できません。以下の各行がどちらに当たるかを示し、機能の列は CLI が原理上できるかどうかではなく、daemon が実際に何をするかを記しています。
+</Callout>
 
 エージェントを作成するときにツールを選ぶ際のガイダンスは、[エージェントの作成と構成](/agents-create)を参照してください。
 
 ## 機能対応マトリクス
 
-| ツール | ベンダー | セッション再開 | MCP | スキル注入パス | モデル選択 |
+| ツール | ローカル daemon | セッション再開 | MCP | スキル注入 | モデル選択 |
 |---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | 動的探索（`agy models`） |
-| **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | 静的 + flag |
-| **Codex** | OpenAI | ⚠️ コードは存在するが到達不可 | ✅ | `$CODEX_HOME/skills/` | 静的 |
-| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静的（アカウントの権限で決定） |
-| **Cursor** | Anysphere | ⚠️ コードは存在するが使用不可 | ✅ | `.cursor/skills/` | 動的探索 |
-| **DeepSeek Harness** | DeepSeek | ❌（CLI は `--session-id` で再開できますが、daemon は毎回新規に開始します） | ❌ | ❌ | 静的（プロファイル既定のモデル） |
-| **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | 静的 |
-| **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/`（フォールバック） | 動的探索 |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 動的探索 |
-| **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 動的探索 |
-| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 動的探索 + variant |
-| **OpenClaw** | オープンソース | ✅ | ✅ | `.agent_context/skills/`（フォールバック） | エージェントにバインドされ、タスクごとに切り替え不可 |
-| **Pi** | Inflection AI | ✅（セッションがファイルパス） | ❌ | `.pi/skills/` | 動的探索 |
+| **Antigravity** | ❌ コードパスなし | — | — | — | — |
+| **Claude Code** | ✅ | ❌ | ❌ | ❌ | 固定 — CLI 自身のデフォルトモデル |
+| **Codex** | ✅ | ❌ | ❌ | ❌ | 固定 — CLI 自身のデフォルトモデル |
+| **Copilot** | ❌ コードパスなし | — | — | — | — |
+| **Cursor** | ❌ コードパスなし | — | — | — | — |
+| **DeepSeek Harness** | ✅ | ❌ | ❌ | ❌ | 固定 — プロファイル既定のモデル |
+| **Gemini** | ❌ コードパスなし | — | — | — | — |
+| **Hermes** | ❌ コードパスなし | — | — | — | — |
+| **Kimi** | ❌ コードパスなし | — | — | — | — |
+| **Kiro CLI** | ❌ コードパスなし | — | — | — | — |
+| **OpenCode** | ✅ | ❌ | ❌ | ❌ | エージェントのモデルを `--model` で渡す |
+| **OpenClaw** | ❌ コードパスなし | — | — | — | — |
+| **Pi** | ✅ | ❌ | ❌ | ❌ | エージェントのモデルを `--model` で渡す |
 
 ## 各ツールの用途
 
 ### Antigravity
 
-Google が提供します。CLI バイナリ名は `agy` です。Google の Antigravity サービスと連携し、Gemini ベースのデフォルトモデルが付属しています。**セッション再開が動作します** — `--conversation <id>` を通じて行われ、stdout が構造化されたイベントストリームではなくプレーンテキストであるため、デーモンが CLI のログファイルから conversation UUID をキャプチャします。**モデル選択が動作します** — `--model` flag（agy 1.0.6 で追加）を通じて行われ、デーモンが `agy models` でカタログを列挙し、選択された値をそのまま渡します。これらは `provider/model` slug ではなく `Claude Opus 4.6 (Thinking)` のような人間が読める表示名である点に注意してください。また agy は認識できない値を渡すと黙って空実行するため、手入力ではなく検出されたリストから選ぶことをおすすめします。スキルは `.agents/skills/` に配置されます（CLI が Gemini CLI のワークスペーススキルレイアウトをそのまま継承します — [Antigravity 移行ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
+Google が提供します。CLI バイナリ名は `agy` です。Google の Antigravity サービスと連携し、Gemini ベースのデフォルトモデルが付属しています。CLI は会話を再開でき（`--conversation <id>`）、モデルカタログも列挙できます（`agy models`）。**ローカル daemon には agy のコードパスがありません** — 検出も実行もしないので、いま 1Person からその機能に到達することはできません。
 
 ### Claude Code
 
-Anthropic が提供します。**新規ユーザーにとって第一の選択肢**であり、最も完成度の高い機能セットを備えています: セッション再開が実際に動作し、MCP 構成を読み取り、`--max-turns` や `--append-system-prompt` のような細かな調整 flag をサポートします。Anthropic API キーが必要です。
+Anthropic が提供します。CLI はセッション再開、MCP 構成の読み取り、`--max-turns` や `--append-system-prompt` のような細かな調整フラグに対応しており、Anthropic API キーが必要です。**ローカル daemon はこれを動かします** — ただの非対話形式で、プロンプトを 1 つ渡して答えを受け取ります。daemon はセッション id を渡さず、MCP 構成も引き継ぎません。
 
 ### Codex
 
-OpenAI が提供します。JSON-RPC 2.0 を使用し、ステートフルな能力がより強く、よりきめ細かい承認メカニズム（`exec_command` および `patch_apply` に対する手動承認）を備えています。MCP 構成はタスクごとの `$CODEX_HOME/config.toml` に書き込まれます。**セッション再開のコードは存在しますが、現在は到達できません** — 再開が必要なら、Claude Code または ACP 系のいずれかを選んでください。
+OpenAI が提供します。JSON-RPC 2.0 を使い、ステートフルな能力がより強く、よりきめ細かい承認メカニズム（`exec_command` と `patch_apply` に対する手動承認）を備えています。**ローカル daemon はこれを動かします** — 読み取り専用サンドボックス付きの `codex exec` として実行するので、答えるだけのタスクはディスクに触れません。モデルには CLI 自身のデフォルトが使われます。
 
 ### Copilot
 
-GitHub が提供します。モデルルーティングは GitHub アカウントの権限を経由します — ツールが直接モデルを選択するのではなく、GitHub がどのモデルを提供するかを決定します。`.github/skills/` にスキルを置くのは GitHub CLI のネイティブな探索メカニズムです。
+GitHub が提供します。モデルルーティングは GitHub アカウントのエンタイトルメントを経由します — ツールが自分でモデルを選ぶのではなく、GitHub がどのモデルを与えるかを決めます。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### Cursor
 
-Anysphere が提供し、Cursor エディターに対応する CLI です。**セッション再開のコードは存在しますが、実際には動作しません** — Cursor CLI のイベントストリームがセッション ID を返さないため、渡す再開値は常に無効です。再開が必要なら、別のものを選んでください。MCP 構成はタスクワークスペースの `.cursor/mcp.json` に書き込まれ、Cursor のプロジェクト approval ファイルはタスクごとの `CURSOR_DATA_DIR` 配下に置かれるため、管理対象 MCP server はユーザーのグローバル Cursor approvals に依存しません。
+Anysphere が提供し、Cursor エディターに対応する CLI です。CLI はヘッドレスで実行でき、`.cursor/mcp.json` から MCP 構成を読み取ります。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### Gemini
 
-Google が提供し、Gemini 2.5 および 3 シリーズをサポートします。**セッション再開も MCP もサポートしません** — 長いコンテキストの記憶が不要なワンショットタスクに適しています。
+Google が提供し、Gemini 2.5 および 3 シリーズに対応しています。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### Hermes
 
-Nous Research が提供します。ACP プロトコルを使用します（Kimi とトランスポート層を共有します）。セッション再開が動作し、MCP 構成は ACP `mcpServers` として渡されます。しかし**スキル注入パスは専用のものではなく汎用のフォールバック**（`.agent_context/skills/`）です — Hermes CLI 自体がこのパスを読み取らない場合、スキルが適用されないことがあります。テストで確認してください。
+Nous Research が提供します。ACP プロトコルを使用します（Kimi とトランスポートを共有）。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### Kimi
 
-Moonshot が提供し、中国市場を対象としています。Hermes と ACP プロトコルを共有し、MCP 構成も ACP `mcpServers` として渡されますが、スキルパス `.kimi/skills/` は Kimi CLI のネイティブな探索メカニズムであり、Hermes のフォールバックとは異なります。
+Moonshot が提供し、中国市場を対象としています。Hermes と ACP プロトコルを共有します。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### Kiro CLI
 
-Amazon が提供します。`kiro-cli acp` を通じて stdio 上で ACP を使用します。セッション再開は ACP `session/load` で動作し、MCP 構成は ACP `mcpServers` として渡され、モデル選択は `session/set_model` で動作し、スキルはプロジェクトレベルのネイティブ探索のために `.kiro/skills/` にコピーされます。
+Amazon が提供します。`kiro-cli acp` を通じて stdio 上で ACP を使用します。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### OpenCode
 
-SST が提供するオープンソースです。利用可能なモデルと model variant を動的に探索します（CLI の構成ファイルをスキャン）。セッション再開が動作し、エージェントの `mcp_config` フィールドを消費します。1Person は `OPENCODE_CONFIG_CONTENT` 環境変数でインライン注入するため、エージェントの MCP server はタスク workdir の `opencode.json`（エージェントまたはユーザーが所有するファイル）を書き換えずに OpenCode に届きます。モデルが variant を公開している場合、1Person はそれをエージェントの thinking selector として表示し、選択値を `opencode run --variant` で OpenCode に渡します。**自分のモデルカタログをカスタマイズしたい、いじるのが好きなユーザーに適しています。**
+SST が提供するオープンソースです。自身の構成ファイルから利用可能なモデルと model variant を動的に発見します — 自分のモデルカタログを持ち込みたい人に最適です。**ローカル daemon はこれを動かします** — しかも既定の選択肢で、有償のサブスクリプションなしで答えられます。daemon は自分のエージェントプロファイルをタスクの作業ディレクトリに書き出し（答えるだけのタスクにはツールが一切渡されません）、エージェントのモデルを `--model` として渡し、CLI はプライベートサーバーに対して実行して、タスクの隣にあるプロファイルが適用されるようにしています。セッションの再開は行わず、MCP 構成も引き継ぎません。
 
 ### OpenClaw
 
-オープンソースプロジェクトであり、CLI エージェントオーケストレーターです。MCP 構成は 1Person のタスクごとの config wrapper 経由で書き込まれます。**モデルはエージェント層にバインドされます**（`openclaw agents add --model`） — タスクごとに上書きできません。構成は厳格に制御されます: ユーザーは `--model` や `--system-prompt` を渡せず、エージェント登録時の構成が決定します。
+オープンソースプロジェクトで、CLI エージェントのオーケストレーターです。構成は厳格に制御されています: ユーザーは `--model` や `--system-prompt` を渡せず、エージェント登録時の構成が決定します。**ローカル daemon には現在このツールのコードパスがありません。**
 
 ### DeepSeek Harness
 
-DeepSeek 提供、DeepSeek Harness が土台です。ローカル daemon は **headless プロファイル**経由で動かします: タスクを 1 つ渡すと答えが stdout に出てプロセスが終了します。タスクは毎回ゼロから始まり、CLI 自体は `--session-id` でセッションを再開できますが daemon はそれを使いません。MCP 設定の 전달もまだありません。この CLI は `PATH` ではなく自分のホームディレクトリ（`~/.dsh`）に入るので、daemon はそちらを見ます。
+DeepSeek が提供し、DeepSeek Harness が土台です。**ローカル daemon はこれを動かします** — headless プロファイル経由で、タスクを 1 つ渡すと答えが stdout に出てプロセスが終了します。タスクは毎回ゼロから始まります — CLI 自体は `--session-id` でセッションを再開できますが、daemon はそれを使いません — モデルにはプロファイル既定のものが使われます。この CLI は `PATH` ではなく自分のホームディレクトリ（`~/.dsh`）にインストールされるので、daemon はそちらを見ます。
 
 ### Pi
 
-Inflection AI が提供し、ミニマルです。**セッション再開の方式が独特です** — セッション ID が文字列 ID ではなく、ディスク上のファイルパス（`~/.pi/...`）です。他のツールでは再開 id は CLI が返す文字列ですが、Pi では再開 id はセッションファイルそのものです。
+Inflection AI が提供し、ミニマルです。**ローカル daemon はこれを動かします** — 非対話モード（`pi -p`）経由で、プロンプトが処理され、答えが stdout に戻ってプロセスが終了します。daemon はセッションファイルを書かないので、タスクは毎回ゼロから始まります。この CLI はランチャーを `PATH` ではなく `~/.pi/agent` にインストールするので、daemon はそちらも探します。
 
-## セッション再開: 実際にサポートするツール
+## セッション再開: まだ配線されていません
 
-セッション再開のメカニズムは[タスク](/tasks#can-a-task-continue-from-the-previous-context)で扱います。以下はツールごとの**正確な現在の状態**です。
+セッション再開の仕組みは[タスク](/tasks#タスクが以前のコンテキストから続行できるか)で扱います。以下は**正確な現在の状態**です。
 
 | 状態 | ツール | 意味 |
 |---|---|---|
-| ✅ 実際に動作 | Antigravity, Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | 再開 id を渡すと以前のコンテキストから続行します |
-| ⚠️ コードは存在するが到達不可 | Codex, Cursor | コードに再開パスがありますが、実際には到達しません（Codex は静かにフォールバックし、Cursor はセッション id を返しません） — **未サポートとみなしてください** |
-| ❌ なし | DeepSeek Harness, Gemini | CLI に再開メカニズムがない、または daemon が接続していない |
+| ❌ 未実装 | 13 個すべて | daemon は CLI にセッション id を渡さないため、すべてのタスクはクリーンなコンテキストから始まります |
 
-**意思決定のために**: ワークフローでエージェントがタスク間でコンテキストを保持する必要がある場合（失敗時のリトライ、手動の再実行、対話的な反復）、✅ の行にあるツールだけを選んでください。
+**判断のために**: タスクをまたいでエージェントにコンテキストを保持させたいワークフロー（失敗時のリトライ、手動での再実行、対話的な反復）は、いまのところどの CLI からも得られません。[チャット](/chat)は別の方法でコンテキストを保持します — サーバーが会話履歴をプロンプトに埋め込むので、エージェントはセッションを再開するのではなく履歴を読みます。
 
-## MCP 構成: ツールごとの対応
+## MCP 構成: 受け付けられるが、渡されない
 
-**13 個のツールのうち、`mcp_config` を実際に消費するのは 8 個です: Claude Code、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw**。残りの 5 個はこのフィールドを受け取りますが、**無視します** — エラーも警告もなく、構成はただ効果を発揮しません。
+**ローカル daemon で `mcp_config` を消費するツールはありません。** このフィールドはエージェントに保存され、タスクと一緒に daemon まで届きますが、daemon はそれをどの CLI にも渡しません — 設定した MCP サーバーは、どのツールでも効果を持たず、エラーも警告も出ません。
 
-接続方式はツールごとに異なります: Claude Code は `--mcp-config` と `--strict-mcp-config` で受け取り、Codex は daemon 管理の `mcp_servers` ブロックをタスクごとの `$CODEX_HOME/config.toml` に書き込み、Cursor は `.cursor/mcp.json` とタスクごとの `CURSOR_DATA_DIR` 配下のプロジェクト approval を書き込みます。Hermes、Kimi、Kiro CLI は ACP `mcpServers` で受け取ります。OpenCode は `OPENCODE_CONFIG_CONTENT` 環境変数でインライン構成を受け取り、OpenClaw は 1Person のタスクごとの config wrapper 経由で `mcp.servers` を受け取ります。OpenCode の経路はプロジェクトの `opencode.json` を書き換えません。
+これを機能させるには、ツールごとに固有の経路が要ります（Claude Code は `--mcp-config` と `--strict-mcp-config`、Codex は `$CODEX_HOME/config.toml` の `mcp_servers` ブロック、ACP 系は `mcpServers`）。いま、どれも配線されていません。
 
 <Callout type="warning">
-エージェント構成で `mcp_config` を設定しても、MCP 列に ✅ がないツールを選んだ場合、MCP サーバーはそのエージェントに**何の効果**も及ぼしません。MCP 連携はツールごとに実装されています。
+今日エージェントに `mcp_config` を設定しても、MCP サーバーは**エージェントに届きません**。警告は出ません — 構成は CLI に向かう途中でそのまま捨てられます。
 </Callout>
 
 ## スキルファイルが置かれる場所
 
-各ツールは**それぞれ独自の**スキル探索パスを使用します。タスクが実行される前に、1Person デーモンがワークスペースのスキルファイルを対応するパスにコピーします。
+各ツールは**それぞれの**スキル探索パスを使います。次の表は各 CLI がスキルを読み込む場所 — ツール自身が文書化しているパスです。
 
 | ツール | パス | ネイティブ探索か |
 |---|---|---|
@@ -122,13 +124,13 @@ Inflection AI が提供し、ミニマルです。**セッション再開の方�
 | Hermes | `.agent_context/skills/` | ⚠️ 汎用フォールバック |
 | OpenClaw | `.agent_context/skills/` | ⚠️ 汎用フォールバック |
 
-フォールバックパスを使うツールが実際にこのディレクトリを読み取るかどうかは、そのツール自体のドキュメントによって異なり、保証されません。Gemini / Hermes / OpenClaw でスキルが適用されない場合は、まずこの点を確認してください。
+**daemon はスキルファイルをタスクのワークスペースにコピーしていません。** ローカルのスキルディレクトリをスキャンして、サーバーにプレースホルダーの一覧を返すだけなので、UI 上ではアタッチ済みに見えるスキルが、CLI に実際に渡されるとは限りません。
 
 スキルの作成と使用については、[スキル](/skills)を参照してください。
 
 ## 次へ
 
 - [エージェントの作成と構成](/agents-create) — エージェントに使うツールを選ぶ
-- [タスク](/tasks) — タスクのライフサイクルとセッション再開のメカニズム
+- [タスク](/tasks) — タスクのライフサイクルとセッション再開の仕組み
 - [デーモンとランタイム](/daemon-runtimes) — ツールが実行される場所と 1Person への接続方法
-- [エージェントランタイムのインストール](/install-agent-runtime) — サポートされる 13 個のツールそれぞれのインストールと認証
+- [エージェントランタイムのインストール](/install-agent-runtime) — 13 個のツールそれぞれのインストールと認証

@@ -12,8 +12,8 @@ import { ArchitectureDiagram } from "@/components/architecture-diagram";
 <ArchitectureDiagram />
 
 - **1Person 서버** — 여러분이 보는 워크스페이스, 이슈 목록, 댓글 스레드는 모두 이곳의 데이터베이스에 저장됩니다. 또한 여러분과 동료 사이의 실시간 업데이트를 푸시하는 WebSocket 허브이기도 합니다. 에이전트 작업은 **실행하지 않습니다.**
-- **데몬** — 1Person CLI의 일부로, 여러분 자신의 기기에서 실행됩니다. 시작 시 로컬에 설치된 AI 코딩 도구를 감지하고, 서버에 등록한 다음, 3초마다 작업을 폴링하고 15초마다 하트비트를 전송하기 시작합니다.
-- **AI 코딩 도구** — 다음 열두 가지 중 하나(또는 여러 개를 병렬로): [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). 데몬이 작업을 가져온 뒤에는 이러한 도구를 사용해 실제 작업을 수행합니다.
+- **데몬** — 1Person CLI의 일부로, 여러분 자신의 기기에서 실행됩니다. 시작 시 로컬에 설치된 AI 코딩 도구를 감지하고, 서버에 등록한 다음, 15초마다 작업을 폴링하고 30초마다 하트비트를 전송하기 시작합니다.
+- **AI 코딩 도구** — 데몬이 지원하는 다섯 개 중 하나를 구동합니다: [OpenCode](/providers#opencode), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [DeepSeek Harness](/providers#deepseek-harness), [Pi](/providers#pi). 이 컴퓨터에서 구동할 수 있는 첫 번째 도구를 고릅니다. 데몬이 작업을 가져온 뒤에는 그 도구를 사용해 실제 작업을 수행합니다.
 
 도구 체인이 로컬에 유지되므로 **여러분의 API 키, 코드 디렉터리, 인증된 도구**는 오직 여러분의 기기에서만 사용됩니다. 1Person 서버는 그중 어떤 것도 보지 못합니다. 이는 자체 호스팅을 하든 Cloud를 사용하든 동일하게 적용됩니다.
 
@@ -23,7 +23,7 @@ import { ArchitectureDiagram } from "@/components/architecture-diagram";
 
 1. 여러분이 웹 UI에서 할당을 클릭합니다. 브라우저가 1Person 서버로 HTTP 요청을 보냅니다.
 2. 서버가 해당 이슈의 담당자를 에이전트로 설정하고, 동시에 작업 대기열에 상태 `queued`인 실행 작업을 생성합니다.
-3. 여러분의 기기에 있는 데몬이 다음 폴링(3초 이내) 때 작업을 가져옵니다. 작업 상태가 `dispatched`로 바뀝니다.
+3. 여러분의 기기에 있는 데몬이 거의 즉시 작업을 가져옵니다 — 서버가 WebSocket으로 `task_available` 프레임을 푸시하고, 폴링은 15초마다 돌아갑니다. 작업 상태가 `dispatched`로 바뀝니다.
 4. 데몬이 로컬에 격리된 작업 디렉터리를 생성하고 해당 AI 코딩 도구를 호출합니다. 작업 상태가 `running`으로 바뀝니다.
 5. AI가 로컬에서 코드를 작성하고, 테스트를 실행하고, 댓글을 서버로 다시 게시합니다.
 6. 실행이 종료됩니다. 데몬이 결과(성공 / 실패)를 서버에 보고하고, 작업 상태가 `completed` 또는 `failed`로 바뀝니다. 여러분은 웹 UI에서 진행 상황 업데이트를 실시간으로(WebSocket을 통해) 확인합니다.

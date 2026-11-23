@@ -21,17 +21,17 @@ The form has only two required fields: **name** (unique within the workspace) an
 
 ## Pick an AI coding tool
 
-Each runtime is backed by a specific AI coding tool. 1Person supports 12 of them. The most common choices:
+Each runtime is backed by a specific AI coding tool. The local daemon drives five of them today. The most common choices:
 
 | Tool | Good for |
 |---|---|
-| **Claude Code** | Anthropic's official tool, most complete feature set; **best first pick** |
+| **OpenCode** | Open-source, answers without a paid subscription; **the default** |
+| **Claude Code** | Anthropic's official tool |
 | **Codex** | OpenAI, the mainstream alternative |
-| **Cursor** | Users in the Cursor editor ecosystem |
-| **Copilot** | Teams leveraging their GitHub account entitlements |
-| **Gemini** | Users in the Google ecosystem |
+| **DeepSeek Harness** | DeepSeek's agent harness |
+| **Pi** | Minimalist coding agent |
 
-The other seven (Antigravity, Hermes, Kimi, Kiro CLI, OpenCode, Pi, OpenClaw), along with each tool's full capability matrix (session resume, MCP, skill injection path, model selection), are covered in [AI coding tools comparison](/providers).
+The other eight (Antigravity, Copilot, Cursor, Gemini, Hermes, Kimi, Kiro CLI, OpenClaw) are on the lineup but the daemon has no code path for them yet, along with each tool's full capability matrix (session resume, MCP, skill injection path, model selection), which is covered in [AI coding tools comparison](/providers).
 
 ## Writing system instructions
 
@@ -48,7 +48,7 @@ When left blank (the default), the agent uses the native behavior of its underly
 
 ## Picking a model
 
-Most AI coding tools support model selection (for example, Claude Code lets you pick between Sonnet and Opus). Leave it blank and the tool's own default is used; pick one explicitly and that's what runs. Each tool's supported models are listed in [AI coding tools comparison](/providers).
+**Only OpenCode and Pi take a model selection.** The daemon passes the agent's model to those two as `--model`; Claude Code, Codex and DeepSeek Harness run on their own default no matter what you pick here. Leave it blank and the tool's own default is used. Each tool's model support is listed in [AI coding tools comparison](/providers).
 
 Changing the model **only applies to new tasks**. Already-dispatched tasks continue with the model that was locked in at dispatch time.
 
@@ -77,10 +77,10 @@ System-critical variables cannot be overridden: `PATH`, `HOME`, `USER`, `SHELL`,
 ["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
 ```
 
-The final command comes out as:
+The final command comes out as (`--model` is added only for OpenCode and Pi):
 
 ```bash
-claude --model <model> --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
+claude --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
 ```
 
 Arguments are passed as-is, not through a shell (no injection risk), but whether a given flag is recognized is up to the AI coding tool itself — tools differ substantially here.
@@ -123,5 +123,5 @@ Archived agents can't be assigned new tasks.
 ## Next steps
 
 - [Skills](/skills) — attach knowledge packs to an agent
-- [AI coding tools comparison](/providers) — full capability matrix across all 12 tools
+- [AI coding tools comparison](/providers) — full capability matrix across the 13 listed tools
 - [Assigning issues to agents](/assigning-issues) — put your new agent to work

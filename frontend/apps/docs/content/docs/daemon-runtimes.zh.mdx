@@ -21,9 +21,9 @@ import { Mermaid } from "@/components/mermaid";
 启动后它会做四件事：
 
 1. 读取你登录时保存的凭证
-2. 探测本机 `PATH` 上已安装的 AI 编程工具（内置支持 12 款：[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)）
-3. 向服务器注册自己，以及每款检测到的工具对应的运行时
-4. 持续**每 3 秒轮询一次**是否有任务要领，**每 15 秒发一次心跳**
+2. 探测本机真正跑得起来的 AI 编程工具——内置 5 款：[OpenCode](/providers#opencode)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[DeepSeek Harness](/providers#deepseek-harness)、[Pi](/providers#pi)——取第一个能通过版本探测的。想指定别的，用 `ONEPERSON_AGENT_PROVIDER` 点名
+3. 向服务器注册自己，以及它探测到的那款工具对应的运行时
+4. 持续**每 15 秒轮询一次**是否有任务要领，**每 30 秒发一次心跳**。有任务入队时，服务器还会通过 WebSocket 推一帧 `task_available`，所以新任务不用等下一次轮询就会被领走
 
 常用命令：
 
@@ -68,9 +68,9 @@ graph TD
 
 | 事件 | 阈值 |
 |---|---|
-| 守护进程心跳频率 | 每 **15 秒** |
-| 标记为失联 | 超过 **45 秒** 没心跳（漏了 3 次）|
-| 自动删除 | 失联且无关联智能体超过 **7 天** |
+| 守护进程心跳频率 | 每 **30 秒** |
+| 标记为失联 | 超过 **150 秒** 没心跳——扫描每 30 秒跑一次，所以落在这个窗口内 |
+| 自动删除 | 不会自动删除。失联的运行时一直留在列表里，直到你自己删掉；删除时它名下已归档的智能体也会一并清掉 |
 
 失联不是永久的——守护进程只要再次发出心跳就立刻回到在线，运行时记录也会保留。重启守护进程不会丢运行时。
 
@@ -108,4 +108,4 @@ graph TD
 ## 下一步
 
 - [执行任务](/tasks) —— 守护进程领到任务后，它的完整生命周期
-- [Providers Matrix](/providers) —— 12 款 AI 编程工具的能力差异对照
+- [Providers Matrix](/providers) —— 13 款 AI 编程工具的能力差异对照

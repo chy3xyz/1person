@@ -21,9 +21,9 @@ import { Mermaid } from "@/components/mermaid";
 시작 시 데몬은 네 가지 일을 합니다.
 
 1. 로그인할 때 저장된 인증 정보를 읽습니다
-2. `PATH`에 설치된 AI 코딩 도구를 감지합니다(내장 12종: [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi))
-3. 감지된 각 도구에 대한 런타임과 함께 자신을 서버에 등록합니다
-4. **3초마다** 가져올 작업이 있는지 폴링하고, **15초마다 하트비트를 전송**합니다
+2. 이 컴퓨터에서 실제로 구동할 수 있는 AI 코딩 도구를 감지합니다 — 내장은 다섯 개입니다: [OpenCode](/providers#opencode), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [DeepSeek Harness](/providers#deepseek-harness), [Pi](/providers#pi) — 그리고 버전 확인에 응답하는 첫 번째 도구를 고릅니다. 원하는 도구를 직접 지정하려면 `ONEPERSON_AGENT_PROVIDER`를 설정하세요
+3. 감지한 도구의 런타임과 함께 자신을 서버에 등록합니다
+4. **15초마다** 가져올 작업이 있는지 폴링하고, **30초마다 하트비트를 전송**합니다. 작업이 큐에 들어오면 서버가 WebSocket으로 `task_available` 프레임을 푸시하므로, 다음 폴링을 기다리지 않고 새 작업을 가져갑니다
 
 자주 쓰는 명령:
 
@@ -68,14 +68,14 @@ graph TD
 
 | 이벤트 | 임곗값 |
 |---|---|
-| 데몬 하트비트 빈도 | **15초**마다 |
-| 누락으로 표시 | **45초** 동안 하트비트 없음(3회 누락) |
-| 자동 삭제 | 연결된 에이전트 없이 **7일** 넘게 누락 상태 |
+| 데몬 하트비트 빈도 | **30초**마다 |
+| 누락으로 표시 | **150초** 동안 하트비트 없음 — 스위퍼가 30초마다 확인하므로 이 창 안에 발생합니다 |
+| 자동 삭제 | 자동으로 삭제되지 않습니다. 누락된 런타임은 직접 지울 때까지 목록에 남고, 지우면 그 아래에 아카이브된 에이전트도 함께 제거됩니다 |
 
 누락은 영구적이지 않습니다. 데몬이 다시 하트비트를 보내는 즉시 온라인으로 돌아오며, 런타임 레코드도 보존됩니다. 데몬을 재시작해도 런타임은 사라지지 않습니다.
 
 <Callout type="warning">
-**누락된 런타임에서 실행 중이던 작업은 실패로 표시됩니다**(실패 사유 `runtime_offline`). 재시도 가능한 출처(이슈, 채팅)에 대해서는 1Person가 자동으로 다시 대기열에 넣습니다. 오토파일럿이 트리거한 작업은 자동으로 재시도되지 않습니다. [작업 → 어떤 실패가 자동 재시도되는지](/tasks#which-failures-retry-automatically-which-dont)를 참고하세요.
+**누락된 런타임에서 실행 중이던 작업은 실패로 표시됩니다**(실패 사유 `runtime_offline`). 재시도 가능한 출처(이슈, 채팅)에 대해서는 1Person가 자동으로 다시 대기열에 넣습니다. 오토파일럿이 트리거한 작업은 자동으로 재시도되지 않습니다. [작업 → 어떤 실패가 자동으로 재시도되고 어떤 실패는 그렇지 않은지](/tasks#어떤-실패가-자동으로-재시도되고-어떤-실패는-그렇지-않은지)를 참고하세요.
 </Callout>
 
 ## 동시에 실행할 수 있는 작업 수
@@ -108,4 +108,4 @@ graph TD
 ## 다음
 
 - [작업](/tasks) — 데몬이 작업을 가져온 뒤의 전체 생애 주기
-- [제공자 대조표](/providers) — 12종 AI 코딩 도구의 기능 차이
+- [제공자 대조표](/providers) — 나열된 13개 AI 코딩 도구 간의 기능 차이

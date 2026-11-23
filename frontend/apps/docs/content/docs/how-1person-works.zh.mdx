@@ -12,8 +12,8 @@ import { ArchitectureDiagram } from "@/components/architecture-diagram";
 <ArchitectureDiagram />
 
 - **1Person 服务器**——你看到的工作区、issue 列表、评论线都存在它的数据库里。它同时是 WebSocket hub，把你和同事之间的实时更新推送过去。它**不**执行任何智能体任务。
-- **守护进程**（daemon）——1Person CLI 的一部分，跑在你自己的机器上。启动后它探测本地装了哪些 AI 编程工具，注册到 server，开始每 3 秒领一次任务、每 15 秒发一次心跳。
-- **AI 编程工具**——[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Gemini](/providers#gemini)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi) 12 款之一（或多款并存）。守护进程领到任务后，用这些工具真正去写代码。
+- **守护进程**（daemon）——1Person CLI 的一部分，跑在你自己的机器上。启动后它探测本地装了哪些 AI 编程工具，注册到 server，开始每 15 秒领一次任务、每 30 秒发一次心跳。
+- **AI 编程工具**——守护进程驱动它支持的那 5 款之一：[OpenCode](/providers#opencode)、[Claude Code](/providers#claude-code)、[Codex](/providers#codex)、[DeepSeek Harness](/providers#deepseek-harness)、[Pi](/providers#pi)。它取本机跑得起来的第一个。守护进程领到任务后，就用那款工具真正去干活。
 
 工具链在本地的结果：**你的 API 密钥、代码目录、已授权的工具**都只在本地使用；1Person 服务器一个都看不到。自部署还是用 Cloud 都不改变这一点。
 
@@ -23,7 +23,7 @@ import { ArchitectureDiagram } from "@/components/architecture-diagram";
 
 1. 你在 Web 上点击分配。浏览器发 HTTP 请求到 1Person 服务器。
 2. 服务器把这条 issue 的 assignee 改成那个智能体，**同时**在任务队列里创建一条执行任务，状态 `queued`。
-3. 你机器上的守护进程下一次轮询（3 秒内）把这条任务领走。任务状态变 `dispatched`。
+3. 你机器上的守护进程几乎立刻就把这条任务领走——服务器会通过 WebSocket 推一帧 `task_available`，兜底的轮询每 15 秒跑一次。任务状态变 `dispatched`。
 4. 守护进程在本地创建隔离工作目录、调用对应 AI 编程工具开始执行。任务状态变 `running`。
 5. AI 在本地写代码、跑测试、发评论回服务器。
 6. 执行结束。守护进程把结果（成功 / 失败）汇报给服务器，任务状态变 `completed` 或 `failed`。你在 Web 上看到进度实时更新（WebSocket 推送）。

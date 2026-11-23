@@ -21,9 +21,9 @@ The daemon is part of the 1Person CLI. Once you've installed the [1Person CLI](/
 On startup it does four things:
 
 1. Reads the credentials saved when you logged in
-2. Detects AI coding tools installed on your `PATH` (12 built-in: [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi))
-3. Registers itself with the server, along with a runtime for each detected tool
-4. Keeps **polling every 3 seconds** for tasks to pick up, and **sends a heartbeat every 15 seconds**
+2. Detects the AI coding tool this machine can actually run — five are built in: [OpenCode](/providers#opencode), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [DeepSeek Harness](/providers#deepseek-harness), [Pi](/providers#pi) — and takes the first one that answers a version probe. Set `ONEPERSON_AGENT_PROVIDER` to name the one you want instead
+3. Registers itself with the server, along with the runtime for the tool it detected
+4. Keeps **polling every 15 seconds** for tasks to pick up, and **sends a heartbeat every 30 seconds**. The server also pushes a `task_available` frame over the WebSocket when work is queued, so a new task is picked up right away instead of waiting for the next poll
 
 Common commands:
 
@@ -68,9 +68,9 @@ Key points:
 
 | Event | Threshold |
 |---|---|
-| Daemon heartbeat frequency | Every **15 seconds** |
-| Marked as missing | No heartbeat for **45 seconds** (3 missed beats) |
-| Auto-deleted | Missing with no associated agents for over **7 days** |
+| Daemon heartbeat frequency | Every **30 seconds** |
+| Marked as missing | No heartbeat for **150 seconds** — the sweeper checks every 30 seconds, so it happens within that window |
+| Auto-deleted | Never automatically. A missing runtime stays in the list until you delete it yourself, and deleting it also removes the agents archived under it |
 
 Missing is not permanent — as soon as the daemon sends another heartbeat it returns to online, and the runtime record is preserved. Restarting the daemon does not lose runtimes.
 
@@ -108,4 +108,4 @@ More scenarios in [Troubleshooting](/troubleshooting).
 ## Next
 
 - [Tasks](/tasks) — the full lifecycle of a task once the daemon picks it up
-- [Providers Matrix](/providers) — capability differences across the 12 AI coding tools
+- [Providers Matrix](/providers) — capability differences across the 13 listed AI coding tools

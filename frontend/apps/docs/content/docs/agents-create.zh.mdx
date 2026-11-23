@@ -21,17 +21,17 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 选一款 AI 编程工具
 
-运行时背后是一款具体的 AI 编程工具。1Person 支持 12 款，最常用的几款：
+运行时背后是一款具体的 AI 编程工具。本地守护进程目前能驱动其中 5 款。最常用的几款：
 
 | 工具 | 适合 |
 |---|---|
-| **Claude Code** | Anthropic 官方，功能最完整；**新手首选** |
+| **OpenCode** | 开源，不用付费订阅也能出答案；**默认选择** |
+| **Claude Code** | Anthropic 官方工具 |
 | **Codex** | OpenAI，主流替代 |
-| **Cursor** | Cursor 编辑器生态用户 |
-| **Copilot** | 用 GitHub 账号权益的团队 |
-| **Gemini** | Google 生态用户 |
+| **DeepSeek Harness** | DeepSeek 的 agent harness |
+| **Pi** | 极简的编程 agent |
 
-另外 7 款（Antigravity、Hermes、Kimi、Kiro CLI、OpenCode、Pi、OpenClaw）以及每款工具的完整能力差别（会话恢复、MCP、skill 注入路径、模型选择）见 [AI 编程工具对照](/providers)。
+另外 8 款（Antigravity、Copilot、Cursor、Gemini、Hermes、Kimi、Kiro CLI、OpenClaw）在名单上，但守护进程还没有它们的代码路径；每款工具的完整能力差别（会话恢复、MCP、skill 注入路径、模型选择）见 [AI 编程工具对照](/providers)。
 
 ## 写系统指令
 
@@ -48,7 +48,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 选模型
 
-大多数 AI 编程工具支持选模型（例如 Claude Code 能在 Sonnet / Opus 里选）。留空 → 用工具自己的默认；明确选了 → 用选的。每款工具支持的模型见 [AI 编程工具对照](/providers)。
+**只有 OpenCode 和 Pi 接受模型选择。** 守护进程会把智能体的模型以 `--model` 传给这两款；Claude Code、Codex 和 DeepSeek Harness 一律用各自的默认模型，在这里选了什么都不会传过去。留空 → 用工具自己的默认。各工具的模型支持情况见 [AI 编程工具对照](/providers)。
 
 改模型**只对新任务生效**。已经派发出去的任务继续用派发时固化下来的模型。
 
@@ -77,10 +77,10 @@ ANTHROPIC_BASE_URL = https://my-proxy.example.com
 ["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
 ```
 
-拼完会是：
+拼完会是（`--model` 只有 OpenCode 和 Pi 才会带上）：
 
 ```bash
-claude --model <model> --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
+claude --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
 ```
 
 参数按原样传，不走 shell 解析（没有注入风险），但传什么 flag 能不能被识别看 AI 编程工具本身——不同工具差异很大。
@@ -123,5 +123,5 @@ claude --model <model> --max-turns 100 --append-system-prompt "always respond in
 ## 下一步
 
 - [Skills](/skills) —— 给智能体挂专业知识包
-- [AI 编程工具对照](/providers) —— 12 款工具的完整能力差别
+- [AI 编程工具对照](/providers) —— 13 款工具的完整能力差别
 - [把 issue 分配给智能体](/assigning-issues) —— 创建完之后怎么用起来

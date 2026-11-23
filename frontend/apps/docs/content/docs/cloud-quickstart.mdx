@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 This page walks you end-to-end through 1Person Cloud — **sign up → install the [CLI](/cli) → start the [daemon](/daemon-runtimes) → create an [agent](/agents) → assign your first [task](/tasks)**. Takes about 5 minutes.
 
-One prerequisite: you already have at least one [AI coding tool](/providers) installed locally ([Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), or [Pi](/providers#pi)). The daemon auto-detects them on startup and refuses to start if none are present.
+One prerequisite: you already have at least one [AI coding tool](/providers) installed locally ([OpenCode](/providers#opencode), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [DeepSeek Harness](/providers#deepseek-harness), or [Pi](/providers#pi)). The daemon auto-detects them on startup. With none of them installed it still starts, but it registers without the `agent_tasks` capability, so the server never hands it work — install one before creating an agent.
 
 ## 1. Create an account
 
@@ -54,7 +54,7 @@ A single command handles login and starts the daemon:
 1. Configure the CLI to connect to 1Person Cloud
 2. Open your browser for login (same email verification code / Google OAuth as the web)
 3. Store the generated PAT in `~/.config/1person/config.json`
-4. **Start the daemon automatically** — it begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds
+4. **Start the daemon automatically** — it begins polling for tasks every 15 seconds and sending heartbeats every 30 seconds
 
 <Callout type="info">
 **Using the desktop app?** The desktop app **starts the daemon automatically** on launch — no need to run `1person setup` by hand. See [Desktop app](/desktop-app).
@@ -103,7 +103,7 @@ Assign the issue to the agent you just created — click its avatar in the web U
 
 **What happens next from the daemon**:
 
-1. It picks up the task within 3 seconds (status goes from `queued` to `dispatched`)
+1. It picks up the task almost immediately — the server pushes it over the WebSocket, and the polling fallback runs every 15 seconds (status goes from `queued` to `dispatched`)
 2. It invokes the matching AI coding tool to start work (status becomes `running`)
 3. The AI works locally — it may read your code directory, run commands, edit files
 4. When done, it reports the result back to 1Person (status becomes `completed` or `failed`, depending on whether auto-retry kicks in)
@@ -114,6 +114,6 @@ The web UI updates in **real time** (via WebSocket) — no refresh needed.
 
 - [Daemon and runtimes](/daemon-runtimes) — how the daemon operates and what runtimes mean
 - [Tasks](/tasks) — task lifecycle and retry rules
-- [AI coding tools compared](/providers) — capability differences across the 12 tools
+- [AI coding tools compared](/providers) — capability differences across the 13 listed tools
 - [Desktop app](/desktop-app) — if you'd rather not run the daemon yourself
 - [Self-host quickstart](/self-host-quickstart) — run your own backend

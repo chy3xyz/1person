@@ -31,13 +31,13 @@ Skill 是给 [智能体](/agents) 的**专业知识包**——一个 `SKILL.md` 
 
 Skill 导入后需要**挂载到具体的智能体**才会生效。一个智能体能挂多个 Skill，一个 Skill 也能挂到多个智能体。
 
-挂上之后，智能体下次开工时会自动拿到挂着的 Skill——不同 AI 编程工具有各自的 Skill 发现路径（Claude Code 是 `.claude/skills/`、Cursor 是 `.cursor/skills/`、Antigravity 是 `.agents/skills/` 等），1Person 会自动放到对的位置。**但有 3 款工具（Gemini / Hermes / OpenClaw）当前走的是通用 fallback 路径 `.agent_context/skills/`——这些工具能否真的从这里读到 skill，取决于工具本身是否支持**。完整路径对照和原生发现 vs fallback 的区分见 [AI 编程工具对照 → skill 文件该放哪儿](/providers#skill-文件该放哪儿)。
+挂上之后，智能体下次开工时本该拿到挂着的 Skill——不同 AI 编程工具有各自的 Skill 发现路径（Claude Code 是 `.claude/skills/`、Cursor 是 `.cursor/skills/`、Antigravity 是 `.agents/skills/` 等）。**守护进程目前不会把 skill 文件复制进任务工作区**：它只扫描本机的 skill 目录，然后回一份占位列表给服务器——所以在界面上看着像是挂上了的 skill，不一定会真的交到 CLI 手里。各工具读 skill 的路径见 [AI 编程工具对照 → skill 文件该放哪儿](/providers#skill-文件该放哪儿)。
 
 修改 Skill 的内容后，**只有之后新创建的任务会拿到新版本**——正在跑的任务继续用旧版 Skill。
 
 ## 第三方 Skill 的安全
 
-从 GitHub 或 ClawHub 导入的 Skill 可能包含脚本和可执行内容。1Person 本身**不做签名验证、不做代码审查、不做沙盒隔离**——Skill 里的内容原封不动交给对应的 AI 编程工具，工具怎么用这些文件（是否当脚本执行）由工具本身决定。
+从 GitHub 或 ClawHub 导入的 Skill 可能包含脚本和可执行内容。1Person 本身**不做签名验证、不做代码审查、不做沙盒隔离**——等 skill 真正送到 CLI 那天，内容会原封不动交给对应的 AI 编程工具，工具怎么用这些文件（是否当脚本执行）由工具本身决定。
 
 <Callout type="warning">
 **导入第三方 Skill 前，审查 `SKILL.md` 和它附带的所有文件。**
@@ -54,7 +54,7 @@ Skill 导入后需要**挂载到具体的智能体**才会生效。一个智能�
 - **Skill** = 结构化的**知识包**（静态内容 + 指令）。智能体读 Skill 来学"遇到 X 类问题该怎么想、怎么做"。
 - **MCP**（Model Context Protocol）= **工具通道**。智能体通过 MCP 连外部服务（数据库、文件系统、第三方 API）并**调用**它们。
 
-两者可以同时用。目前 1Person 的 MCP 支持是**按工具实现**的：Claude Code、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw 会消费 `mcp_config`；其他工具会接收到这个字段但不会实际用。MCP 的专题会在后续版本展开。
+两者可以同时用。目前 1Person **没有任何一款工具消费 `mcp_config`**：这个字段会随任务传到守护进程，但守护进程不会把它交给 CLI，所以你的 MCP server 到不了智能体。MCP 的专题会在后续版本展开。
 
 ---
 
@@ -64,4 +64,4 @@ Skill 导入后需要**挂载到具体的智能体**才会生效。一个智能�
 
 - [守护进程与运行时](/daemon-runtimes) —— 智能体到底跑在哪、怎么判断在线 / 离线
 - [执行任务](/tasks) —— 一次"智能体工作"的完整生命周期
-- [AI 编程工具对照](/providers) —— 12 款工具的完整对比（含每款的 Skill 注入路径）
+- [AI 编程工具对照](/providers) —— 13 款工具的完整对比（含每款的 Skill 注入路径）

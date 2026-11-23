@@ -1,111 +1,113 @@
 ---
 title: AI coding tools matrix
-description: 1Person supports 13 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+description: 1Person lists 13 AI coding tools; the local daemon drives five of them today. This page is the exact matrix.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-1Person ships with built-in support for **13 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same 1Person board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+1Person supports **13 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same 1Person board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+
+<Callout type="warning">
+The local daemon drives **five** of these today: **OpenCode, Claude Code, Codex, DeepSeek Harness and Pi**. It has no code path for the other eight — it does not detect them, and a runtime registered for one of them cannot execute a task. Every row below says which is which, and the capability columns say what the daemon actually does, not what the CLI could do in principle.
+</Callout>
 
 For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
 
 ## Capability matrix
 
-| Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
+| Tool | Local daemon | Session resumption | MCP | Skill injection | Model selection |
 |---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Dynamic discovery (`agy models`) |
-| **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
-| **Codex** | OpenAI | ⚠️ Code exists but unreachable | ✅ | `$CODEX_HOME/skills/` | Static |
-| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
-| **Cursor** | Anysphere | ⚠️ Code exists but unusable | ✅ | `.cursor/skills/` | Dynamic discovery |
-| **DeepSeek Harness** | DeepSeek | ❌ (the CLI resumes by `--session-id`, the daemon starts fresh) | ❌ | ❌ | Static (the profile's own default model) |
-| **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | Static |
-| **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` (fallback) | Dynamic discovery |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | Dynamic discovery |
-| **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | Dynamic discovery |
-| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | Dynamic discovery + variants |
-| **OpenClaw** | Open source | ✅ | ✅ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
-| **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
+| **Antigravity** | ❌ no code path | — | — | — | — |
+| **Claude Code** | ✅ | ❌ | ❌ | ❌ | Static — the CLI's own default |
+| **Codex** | ✅ | ❌ | ❌ | ❌ | Static — the CLI's own default |
+| **Copilot** | ❌ no code path | — | — | — | — |
+| **Cursor** | ❌ no code path | — | — | — | — |
+| **DeepSeek Harness** | ✅ | ❌ | ❌ | ❌ | Static — the profile's own default model |
+| **Gemini** | ❌ no code path | — | — | — | — |
+| **Hermes** | ❌ no code path | — | — | — | — |
+| **Kimi** | ❌ no code path | — | — | — | — |
+| **Kiro CLI** | ❌ no code path | — | — | — | — |
+| **OpenCode** | ✅ | ❌ | ❌ | ❌ | The agent's model, passed as `--model` |
+| **OpenClaw** | ❌ no code path | — | — | — | — |
+| **Pi** | ✅ | ❌ | ❌ | ❌ | The agent's model, passed as `--model` |
 
 ## What each tool is for
 
 ### Antigravity
 
-From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. **Model selection works** via the `--model` flag (added in agy 1.0.6): the daemon enumerates the catalog with `agy models` and ships the chosen value verbatim. Note these are human display strings such as `Claude Opus 4.6 (Thinking)`, not `provider/model` slugs — and agy silently no-ops on a value it doesn't recognise, so prefer picking from the discovered list over typing a custom one. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
+From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. The CLI can resume a conversation (`--conversation <id>`) and can list its model catalog (`agy models`). **The local daemon has no code path for agy** — it neither detects nor runs it, so none of that is reachable from 1Person today.
 
 ### Claude Code
 
-From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it reads MCP configuration, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
+From Anthropic. The CLI supports session resumption, reads MCP configuration, and takes fine-tuning flags like `--max-turns` and `--append-system-prompt`; it needs an Anthropic API key. **The local daemon drives it**, in the plain non-interactive form: one prompt in, the answer out. The daemon hands it no session id and passes no MCP configuration through.
 
 ### Codex
 
-From OpenAI. Uses JSON-RPC 2.0, has stronger statefulness, and a finer-grained approve mechanism (manual approval for `exec_command` and `patch_apply`). MCP config is materialized into the per-task `$CODEX_HOME/config.toml`. **Session resumption code exists but is currently unreachable** — if you need resume, pick Claude Code or one of the ACP family.
+From OpenAI. Uses JSON-RPC 2.0, has stronger statefulness, and a finer-grained approve mechanism (manual approval for `exec_command` and `patch_apply`). **The local daemon drives it** through `codex exec` with a read-only sandbox, so a task that only answers never touches the disk. The CLI's own default model is used.
 
 ### Copilot
 
-From GitHub. Model routing goes through your GitHub account entitlement — the tool doesn't select a model itself; GitHub decides which model you get. Placing skills in `.github/skills/` is GitHub CLI's native discovery mechanism.
+From GitHub. Model routing goes through your GitHub account entitlement — the tool doesn't select a model itself; GitHub decides which model you get. **The local daemon has no code path for it** today.
 
 ### Cursor
 
-From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption code exists but doesn't actually work** — the Cursor CLI event stream doesn't return a session ID, so any resume value you pass is always invalid. If you need resume, pick something else. MCP config is materialized into the task workspace's `.cursor/mcp.json`, with Cursor's project approval file written under a per-task `CURSOR_DATA_DIR` so managed MCP servers do not depend on the user's global Cursor approvals.
+From Anysphere, the CLI counterpart to the Cursor editor. The CLI can be driven headlessly and reads MCP configuration from `.cursor/mcp.json`. **The local daemon has no code path for it** today.
 
 ### Gemini
 
-From Google, supports the Gemini 2.5 and 3 series. **No session resumption and no MCP** — suitable for one-shot tasks that don't need long context memory.
+From Google, supports the Gemini 2.5 and 3 series. **The local daemon has no code path for it** today.
 
 ### Hermes
 
-From Nous Research. Uses the ACP protocol (shares a transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. But the **skill injection path is the generic fallback** (`.agent_context/skills/`), not a dedicated one — if the Hermes CLI itself doesn't read this path, skills may not take effect. Verify by testing.
+From Nous Research. Uses the ACP protocol (shares a transport with Kimi). **The local daemon has no code path for it** today.
 
 ### Kimi
 
-From Moonshot, aimed at the Chinese market. Shares the ACP protocol with Hermes, including MCP config through ACP `mcpServers`, but the skill path `.kimi/skills/` is Kimi CLI's native discovery mechanism — different from Hermes's fallback.
+From Moonshot, aimed at the Chinese market. Shares the ACP protocol with Hermes. **The local daemon has no code path for it** today.
 
 ### Kiro CLI
 
-From Amazon. Uses ACP over stdio via `kiro-cli acp`. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection works through `session/set_model`, and skills are copied into `.kiro/skills/` for native project-level discovery.
+From Amazon. Uses ACP over stdio via `kiro-cli acp`. **The local daemon has no code path for it** today.
 
 ### OpenCode
 
-From SST, open source. Dynamically discovers available models and model variants (scans the CLI's configuration file). Session resumption works, and it consumes the agent's `mcp_config` field — 1Person injects it inline through the `OPENCODE_CONFIG_CONTENT` environment variable, so the agent's MCP servers reach OpenCode without writing anything into the task workdir's `opencode.json` (the agent or the user keep ownership of that file). When a model exposes variants, 1Person shows them as the agent thinking selector and passes the selected value through `opencode run --variant`. **Suitable for tinkerers who want to customize their model catalog.**
+From SST, open source. Dynamically discovers available models and model variants from its own configuration file — a good fit for users who want to bring their own model catalog. **The local daemon drives it**, and it is the default choice: it answers without a paid subscription. The daemon writes its own agent profile into the task's working directory (a task that only answers gets no tools at all), passes the agent's model as `--model`, and runs the CLI against a private server so the profile next to the task is the one that applies. It resumes no session and passes no MCP configuration through.
 
 ### OpenClaw
 
-Open-source project, a CLI agent orchestrator. MCP config is materialized through 1Person's per-task OpenClaw config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task. Configuration is strictly controlled: users can't pass `--model` or `--system-prompt`; the agent-registration config decides.
+Open-source project, a CLI agent orchestrator. Configuration is strictly controlled: users can't pass `--model` or `--system-prompt`; the agent-registration config decides. **The local daemon has no code path for it** today.
 
 ### DeepSeek Harness
 
-From DeepSeek, built on the DeepSeek Harness. The local daemon drives it through its **headless profile**: one task in, the answer on stdout, the process exits. Every task starts fresh — the CLI can resume a session with `--session-id`, but the daemon does not use that — and MCP config is not materialised for it yet. The CLI installs itself under its own home directory (`~/.dsh`) rather than on `PATH`, so the daemon looks there for it.
+From DeepSeek, built on the DeepSeek Harness. **The local daemon drives it** through its headless profile: one task in, the answer on stdout, the process exits. Every task starts fresh — the CLI can resume a session with `--session-id`, but the daemon does not use that — and the profile's own default model is used. The CLI installs itself under its own home directory (`~/.dsh`) rather than on `PATH`, so the daemon looks there for it.
 
 ### Pi
 
-From Inflection AI, minimalist. **Session resumption is unusual** — the session ID is a file path on disk (`~/.pi/...`) rather than a string ID. In other tools, the resume id is a string returned by the CLI; in Pi, the resume id is the session file itself.
+From Inflection AI, minimalist. **The local daemon drives it** through its non-interactive mode (`pi -p`): the prompt is processed, the answer comes back on stdout, the process exits. The daemon writes no session file, so every task starts fresh. The CLI installs its launcher under `~/.pi/agent` rather than on `PATH`; the daemon looks there too.
 
-## Session resumption: who really supports it
+## Session resumption: not wired up yet
 
-The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). Here's the **exact current state** per tool:
+The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). Here's the **exact current state**:
 
 | Status | Tools | Meaning |
 |---|---|---|
-| ✅ Really works | Antigravity, Claude Code, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi | Pass the resume id and it continues from the previous context |
-| ⚠️ Code exists but unreachable | Codex, Cursor | Resume paths exist in the code but aren't actually reached (Codex silently falls back; Cursor doesn't return session id) — **treat as unsupported** |
-| ❌ None | DeepSeek Harness, Gemini | The CLI has no resume mechanism, or the daemon does not wire one up |
+| ❌ Not implemented | All 13 | The daemon never hands a session id to the CLI, so every task starts from a clean context |
 
-**For your decision**: if your workflow needs agents to preserve context across tasks (failure retries, manual reruns, conversational iteration), pick only from the ✅ row.
+**For your decision**: a workflow that needs the agent to keep context across tasks (failure retries, manual reruns, conversational iteration) does not get that from the CLI today, on any tool. [Chat](/chat) keeps its context a different way — the server renders the conversation into the prompt, so the agent reads the history instead of resuming a session.
 
-## MCP configuration: provider-specific support
+## MCP configuration: accepted, not passed through
 
-**Of the 13 tools, eight consume `mcp_config`: Claude Code, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw**. The other five accept the field but **ignore it** — no error, no warning, the config just has no effect.
+**No tool consumes `mcp_config` in the local daemon.** The field is stored on the agent and travels to the daemon with the task, but the daemon does not hand it to any CLI — so the servers you configure have no effect, on every tool, with no error and no warning.
 
-The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through 1Person's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
+Each tool would need its own path for this to work (Claude Code takes `--mcp-config` with `--strict-mcp-config`, Codex wants a `mcp_servers` block in `$CODEX_HOME/config.toml`, the ACP family takes `mcpServers`), and none of those paths are wired up yet.
 
 <Callout type="warning">
-If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have **no effect** on that agent. MCP integration is provider-specific.
+If you configure `mcp_config` on an agent today, your MCP servers **do not reach the agent**. Nothing warns you about it — the configuration is simply dropped on the way to the CLI.
 </Callout>
 
 ## Where skill files go
 
-Each tool uses **its own** skill discovery path. Before a task runs, the 1Person daemon copies the workspace's skill files into the corresponding path:
+Each tool uses **its own** skill discovery path. The table below is where each CLI reads skills from — the paths the tools themselves document:
 
 | Tool | Path | Native discovery? |
 |---|---|---|
@@ -122,7 +124,7 @@ Each tool uses **its own** skill discovery path. Before a task runs, the 1Person
 | Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
 
-Whether a fallback-path tool actually reads this directory depends on the tool's own documentation — no guarantees. If your skills aren't taking effect for Gemini / Hermes / OpenClaw, check this first.
+**The daemon does not copy skill files into the task workspace yet.** It scans the local skills directory and reports a placeholder list back to the server, so a skill that looks attached in the UI is not necessarily handed to the CLI.
 
 For creating and using skills, see [Skills](/skills).
 
@@ -131,4 +133,4 @@ For creating and using skills, see [Skills](/skills).
 - [Creating and configuring agents](/agents-create) — pick a tool for your agent
 - [Tasks](/tasks) — task lifecycle and session-resumption mechanics
 - [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to 1Person
-- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 13 supported tools
+- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 13 listed tools
